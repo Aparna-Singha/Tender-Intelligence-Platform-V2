@@ -29,6 +29,8 @@ import {
   isChecklistGenerationJob,
   type ChecklistGenerationJob,
 } from "./checklist-generation-processor.js";
+import { GeminiGateway } from "./ai-provider.js";
+import { isRagJob, RagProcessor, type RagJob } from "./rag-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -80,6 +82,12 @@ async function bootstrap(): Promise<void> {
   const checklistGenerationProcessor = new ChecklistGenerationProcessor(
     database,
   );
+  const gemini = new GeminiGateway(
+    environment.GEMINI_API_KEY,
+    environment.GEMINI_CHAT_MODEL,
+    environment.GEMINI_EMBEDDING_MODEL,
+  );
+  const ragProcessor = new RagProcessor(database, gemini, gemini);
   const documentWorker = new Worker<
     | DocumentJob
     | TenderDocumentJob
@@ -87,6 +95,7 @@ async function bootstrap(): Promise<void> {
     | RiskAnalysisJob
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
+    | RagJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -132,6 +141,13 @@ async function bootstrap(): Promise<void> {
           checklistGenerationProcessor.process(data, signal),
         );
       }
+      if (job.name === "index-tender-rag" || job.name === "answer-tender-rag") {
+        if (!isRagJob(job.data)) throw new Error("Invalid RAG job");
+        const data = job.data;
+        return runWithTimeout(environment.RAG_JOB_TIMEOUT_MS, (signal) =>
+          ragProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -160,6 +176,11 @@ async function bootstrap(): Promise<void> {
         job.data.assessmentRunId,
         error.name,
       );
+    if (
+      (job?.name === "index-tender-rag" || job?.name === "answer-tender-rag") &&
+      isRagJob(job.data)
+    )
+      void ragProcessor.fail(job.data, error);
     if (
       job?.name === "generate-missing-action-checklist" &&
       isChecklistGenerationJob(job.data)
@@ -249,7 +270,8 @@ function isTenderDocumentJob(
     | ExtractionJob
     | RiskAnalysisJob
     | EvidenceAssessmentJob
-    | ChecklistGenerationJob,
+    | ChecklistGenerationJob
+    | RagJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
@@ -261,7 +283,8 @@ function isCompanyDocumentJob(
     | ExtractionJob
     | RiskAnalysisJob
     | EvidenceAssessmentJob
-    | ChecklistGenerationJob,
+    | ChecklistGenerationJob
+    | RagJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
@@ -273,7 +296,8 @@ function isExtractionJob(
     | ExtractionJob
     | RiskAnalysisJob
     | EvidenceAssessmentJob
-    | ChecklistGenerationJob,
+    | ChecklistGenerationJob
+    | RagJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
@@ -285,7 +309,8 @@ function isRiskAnalysisJob(
     | ExtractionJob
     | RiskAnalysisJob
     | EvidenceAssessmentJob
-    | ChecklistGenerationJob,
+    | ChecklistGenerationJob
+    | RagJob,
 ): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }

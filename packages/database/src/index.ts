@@ -13,7 +13,8 @@ export {
   Role,
   VerificationStatus,
 } from "@prisma/client";
-export type { Prisma, PrismaClient, RiskAnalysisRun } from "@prisma/client";
+export { Prisma } from "@prisma/client";
+export type { PrismaClient, RiskAnalysisRun } from "@prisma/client";
 
 export function createPrismaClient(databaseUrl: string): PrismaClient {
   const adapter = new PrismaPg({

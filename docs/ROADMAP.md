@@ -110,6 +110,17 @@ The measurable exit conditions are in
 
 ## Later candidates
 
+## Phase 9: Tenant-isolated cited tender chatbot
+
+Status: implemented on the Phase 9 feature branch.
+
+- immutable structure-aware indexes over authorised current sources;
+- PostgreSQL FTS and pgvector with hard pre-ranking tenant scope;
+- provider-neutral Gemini gateway with no fake fallback;
+- fresh retrieval, verified citations, refusal, and human-review states;
+- operational tender chatbot with explicit source modes;
+- drafting, readiness, export, scraping, and submission remain deferred.
+
 Later work is deliberately uncommitted and requires discovery and ADRs. Candidates
 may include stronger collaboration workflows, additional document formats,
 additional LLM providers, improved extraction and evaluation, configurable review

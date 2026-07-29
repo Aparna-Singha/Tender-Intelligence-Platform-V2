@@ -218,3 +218,17 @@ Machine proposal fields are immutable and separate from human workflow fields.
 Resolution checks current Phase 7 provenance, so a document upload alone cannot
 prove compliance. See [Checklist Policy](CHECKLIST_POLICY.md) and
 [ADR 0011](adr/0011-immutable-source-grounded-checklists.md).
+
+## Phase 9 tenant-scoped cited RAG
+
+Immutable source-fingerprinted indexes derive from current Phase 5 blocks and valid
+citations. PostgreSQL filters organisation, tender, version, index, and authorised
+source classes before full-text and pgvector ranking, then applies versioned
+reciprocal-rank fusion.
+
+Opaque worker jobs reload authoritative scope. Gemini is the first
+environment-configured adapter behind provider-neutral embedding and answer ports.
+Retrieved text is inert data; structured output and application-issued citation
+handles are verified before completion. PostgreSQL owns indexes, conversations,
+messages, retrieval hits, citations, and feedback; Redis remains transport. See
+[ADR 0012](adr/0012-tenant-isolated-hybrid-rag.md).

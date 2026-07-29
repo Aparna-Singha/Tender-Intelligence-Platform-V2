@@ -288,3 +288,17 @@ scope and same-tenant assignment; exposes an accessible operational web checklis
 and passes contracts, domain, API, worker, migration, security, formatting, lint,
 strict type-check, test, and production build gates. Phase 9 RAG, drafting, final
 readiness, export, scraping, submission, and external reminders remain absent.
+
+## Phase 9: Tenant-isolated cited tender chatbot
+
+Phase 9 requires immutable current-source indexes; exact chunk provenance;
+PostgreSQL FTS and pgvector; hard organisation, tender, version, index, and source
+filters before ranking; explicit company-evidence permission; fresh retrieval per
+question; provider-neutral gateways; verified citation handles; visible refusal,
+review, invalidation, and provider failure; prompt-injection resistance; tenant and
+tender isolation; an operational chatbot; and passing quality and security gates.
+
+Release evaluation requires at least 95% citation resolution, 90% claim entailment,
+95% unanswerable refusal, and 100% cross-tenant and cross-tender isolation. Results
+may be claimed only when provider-backed infrastructure tests run. Drafting,
+readiness, export, scraping, submission, and autonomous bidding remain absent.

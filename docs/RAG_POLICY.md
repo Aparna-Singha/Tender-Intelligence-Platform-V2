@@ -108,3 +108,25 @@ Phase 7 does not implement retrieval or a chatbot. Its reviewed, versioned compa
 facts and exact citations are designed as possible future Phase 9 inputs, but Phase
 9 must independently re-authorise the organisation and consume only current,
 approved evidence. Assessment state alone is not retrieval evidence.
+
+## Phase 9 implementation contract
+
+Phase 9 uses `structure-aware-v1`, `hybrid-rrf-v1`, and
+`cited-human-controlled-v1`. The default is `TENDER_ONLY`. Company evidence
+requires an explicit source mode and `RAG_COMPANY_EVIDENCE_USE`.
+
+PostgreSQL applies organisation, tender, tender-version, active-index, and
+source-class predicates before ranking. Full-text and 768-dimensional cosine ranks
+are fused using versioned reciprocal-rank fusion. Limits are 2,000 question
+characters, 4,000 chunk characters, about 1,000 chunk tokens, 16 embeddings per
+batch, 40 candidates, 8 context passages, and 1,200 answer tokens.
+
+Every follow-up performs fresh retrieval; conversation history is not evidence.
+The provider receives application-issued handles only. Unknown handles or
+unsupported material claims fail closed.
+
+Gemini is the first adapter behind provider-neutral ports. Missing configuration,
+timeout, invalid schema, or invented citations create no fallback answer.
+Production remains blocked until provider retention, training use, residency,
+subprocessors, and deletion terms are approved. There is no internet retrieval,
+tool use, legal advice, drafting, readiness, export, scraping, or submission.

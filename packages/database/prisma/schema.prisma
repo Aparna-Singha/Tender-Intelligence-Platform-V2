@@ -105,6 +105,8 @@ enum AuditEventType {
   CHECKLIST_SOURCE_OPENED
   CHECKLIST_REASSESSMENT_REQUESTED
   CHECKLIST_ACTION_DENIED
+  RAG_INDEX_STARTED
+  RAG_CONVERSATION_CREATED
 }
 
 enum RiskAnalysisGate {
@@ -554,6 +556,71 @@ enum ChecklistHistoryAction {
   SUPERSEDE
   INVALIDATE
   ADD_RESOLUTION_NOTE
+}
+
+enum RagSourceMode {
+  TENDER_ONLY
+  TENDER_AND_APPROVED_COMPANY_EVIDENCE
+  TENDER_AND_DERIVED_WORKFLOW_RECORDS
+  FULL_AUTHORISED_TENDER_CONTEXT
+}
+
+enum RagIndexRunStatus {
+  QUEUED
+  CHUNKING
+  EMBEDDING
+  INDEXING
+  VALIDATING
+  COMPLETE
+  FAILED
+  CANCELLED
+  INVALIDATED
+}
+
+enum RagSourceClass {
+  TENDER_PRIMARY
+  TENDER_ANNEXURE
+  TENDER_CORRIGENDUM
+  TENDER_BOQ
+  TENDER_CLARIFICATION
+  STRUCTURED_REQUIREMENT
+  STRUCTURED_FIELD
+  COMPANY_EVIDENCE
+  COMPANY_PROFILE
+  ELIGIBILITY_ASSESSMENT
+  CHECKLIST_ITEM
+  RISK_FINDING
+  TENDER_METADATA
+  SYSTEM_POLICY
+}
+
+enum RagConversationStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum RagMessageRole {
+  USER
+  ASSISTANT
+}
+
+enum RagAnswerRunStatus {
+  QUEUED
+  RETRIEVING
+  GENERATING
+  VERIFYING_CITATIONS
+  COMPLETE
+  INSUFFICIENT_EVIDENCE
+  HUMAN_REVIEW_REQUIRED
+  FAILED
+  CANCELLED
+  INVALIDATED
+}
+
+enum RagFeedbackRating {
+  HELPFUL
+  NOT_HELPFUL
 }
 
 model User {
@@ -2121,4 +2188,225 @@ model ChecklistItemHistory {
   @@unique([checklistItemId, eventVersion])
   @@index([organisationId, checklistItemId, createdAt])
   @@map("checklist_item_history")
+}
+
+model RagIndexRun {
+  id                       String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String            @map("organisation_id") @db.Uuid
+  tenderId                 String            @map("tender_id") @db.Uuid
+  tenderVersionId          String            @map("tender_version_id") @db.Uuid
+  extractionRunId          String            @map("extraction_run_id") @db.Uuid
+  sourceMode               RagSourceMode     @map("source_mode")
+  status                   RagIndexRunStatus @default(QUEUED)
+  sourceFingerprint        String            @map("source_fingerprint") @db.Char(64)
+  chunkPolicyVersion       String            @map("chunk_policy_version") @db.VarChar(80)
+  retrievalPolicyVersion   String            @map("retrieval_policy_version") @db.VarChar(80)
+  embeddingProvider        String            @map("embedding_provider") @db.VarChar(80)
+  embeddingModel           String            @map("embedding_model") @db.VarChar(160)
+  embeddingDimensions      Int               @map("embedding_dimensions")
+  idempotencyKey           String            @unique @map("idempotency_key") @db.VarChar(255)
+  requestedByUserId        String            @map("requested_by_user_id") @db.Uuid
+  chunkCount               Int               @default(0) @map("chunk_count")
+  progressPercentage       Int               @default(0) @map("progress_percentage")
+  currentStage             String            @default("Queued") @map("current_stage") @db.VarChar(120)
+  failureCode              String?           @map("failure_code") @db.VarChar(80)
+  startedAt                DateTime?          @map("started_at") @db.Timestamptz(3)
+  completedAt              DateTime?          @map("completed_at") @db.Timestamptz(3)
+  activatedAt              DateTime?          @map("activated_at") @db.Timestamptz(3)
+  invalidatedAt            DateTime?          @map("invalidated_at") @db.Timestamptz(3)
+  invalidationReason       String?            @map("invalidation_reason") @db.VarChar(240)
+  cancellationRequestedAt  DateTime?          @map("cancellation_requested_at") @db.Timestamptz(3)
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  chunks                   RagChunk[]
+  conversations            RagConversation[]
+  answerRuns               RagAnswerRun[]
+
+  @@unique([organisationId, tenderId, sourceMode, sourceFingerprint])
+  @@index([organisationId, tenderId, sourceMode, status, createdAt])
+  @@map("rag_index_runs")
+}
+
+model RagChunk {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String         @map("organisation_id") @db.Uuid
+  tenderId              String         @map("tender_id") @db.Uuid
+  tenderVersionId       String         @map("tender_version_id") @db.Uuid
+  extractionRunId       String         @map("extraction_run_id") @db.Uuid
+  indexRunId            String         @map("index_run_id") @db.Uuid
+  sourceClass           RagSourceClass @map("source_class")
+  sourceRecordId        String         @map("source_record_id") @db.Uuid
+  sourceDocumentId      String?        @map("source_document_id") @db.Uuid
+  extractionCitationId  String?        @map("extraction_citation_id") @db.Uuid
+  sourceVersion         String         @map("source_version") @db.VarChar(160)
+  documentName          String         @map("document_name") @db.VarChar(255)
+  pageNumber            Int?           @map("page_number")
+  clauseLabel           String?        @map("clause_label") @db.VarChar(240)
+  sourceCoordinates     Json           @map("source_coordinates")
+  content               String         @db.Text
+  contentChecksum       String         @map("content_checksum") @db.Char(64)
+  tokenCount            Int            @map("token_count")
+  sequence              Int
+  searchVector          Unsupported("tsvector")? @map("search_vector")
+  embedding             Unsupported("vector(768)")?
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  indexRun              RagIndexRun    @relation(fields: [indexRunId], references: [id], onDelete: Cascade)
+  retrievalHits         RagRetrievalHit[]
+  citations             RagAnswerCitation[]
+
+  @@unique([indexRunId, sourceClass, sourceRecordId, sequence])
+  @@index([organisationId, tenderId, indexRunId, sourceClass])
+  @@map("rag_chunks")
+}
+
+model RagConversation {
+  id                 String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String                @map("organisation_id") @db.Uuid
+  tenderId           String                @map("tender_id") @db.Uuid
+  tenderVersionId    String                @map("tender_version_id") @db.Uuid
+  indexRunId         String                @map("index_run_id") @db.Uuid
+  sourceMode         RagSourceMode         @map("source_mode")
+  title              String                @db.VarChar(160)
+  status             RagConversationStatus @default(ACTIVE)
+  createdByUserId    String                @map("created_by_user_id") @db.Uuid
+  archivedAt         DateTime?             @map("archived_at") @db.Timestamptz(3)
+  deletedAt          DateTime?             @map("deleted_at") @db.Timestamptz(3)
+  createdAt          DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  indexRun           RagIndexRun           @relation(fields: [indexRunId], references: [id], onDelete: Restrict)
+  messages           RagMessage[]
+  answerRuns         RagAnswerRun[]
+
+  @@index([organisationId, tenderId, status, updatedAt])
+  @@map("rag_conversations")
+}
+
+model RagMessage {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String         @map("organisation_id") @db.Uuid
+  tenderId           String         @map("tender_id") @db.Uuid
+  conversationId     String         @map("conversation_id") @db.Uuid
+  sequence           Int
+  role               RagMessageRole
+  content            String         @db.Text
+  createdByUserId    String?        @map("created_by_user_id") @db.Uuid
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  conversation       RagConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  questionAnswerRun  RagAnswerRun? @relation("RagQuestionMessage")
+  completedAnswerRun RagAnswerRun? @relation("RagAnswerMessage")
+
+  @@unique([conversationId, sequence])
+  @@index([organisationId, tenderId, conversationId, createdAt])
+  @@map("rag_messages")
+}
+
+model RagAnswerRun {
+  id                       String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String             @map("organisation_id") @db.Uuid
+  tenderId                 String             @map("tender_id") @db.Uuid
+  tenderVersionId          String             @map("tender_version_id") @db.Uuid
+  conversationId           String             @map("conversation_id") @db.Uuid
+  questionMessageId        String             @unique @map("question_message_id") @db.Uuid
+  answerMessageId          String?            @unique @map("answer_message_id") @db.Uuid
+  indexRunId               String             @map("index_run_id") @db.Uuid
+  sourceMode               RagSourceMode      @map("source_mode")
+  status                   RagAnswerRunStatus @default(QUEUED)
+  retrievalPolicyVersion   String             @map("retrieval_policy_version") @db.VarChar(80)
+  answerPolicyVersion      String             @map("answer_policy_version") @db.VarChar(80)
+  provider                 String             @db.VarChar(80)
+  model                    String             @db.VarChar(160)
+  idempotencyKey           String             @unique @map("idempotency_key") @db.VarChar(255)
+  progressPercentage       Int                @default(0) @map("progress_percentage")
+  currentStage             String             @default("Queued") @map("current_stage") @db.VarChar(120)
+  failureCode              String?            @map("failure_code") @db.VarChar(80)
+  retrievalLatencyMs       Int?               @map("retrieval_latency_ms")
+  generationLatencyMs      Int?               @map("generation_latency_ms")
+  totalLatencyMs           Int?               @map("total_latency_ms")
+  startedAt                DateTime?           @map("started_at") @db.Timestamptz(3)
+  completedAt              DateTime?           @map("completed_at") @db.Timestamptz(3)
+  invalidatedAt            DateTime?           @map("invalidated_at") @db.Timestamptz(3)
+  invalidationReason       String?             @map("invalidation_reason") @db.VarChar(240)
+  cancellationRequestedAt  DateTime?           @map("cancellation_requested_at") @db.Timestamptz(3)
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  conversation             RagConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  questionMessage          RagMessage          @relation("RagQuestionMessage", fields: [questionMessageId], references: [id], onDelete: Restrict)
+  answerMessage            RagMessage?         @relation("RagAnswerMessage", fields: [answerMessageId], references: [id], onDelete: SetNull)
+  indexRun                 RagIndexRun          @relation(fields: [indexRunId], references: [id], onDelete: Restrict)
+  retrievalRun             RagRetrievalRun?
+  citations                RagAnswerCitation[]
+  feedback                 RagFeedback[]
+
+  @@index([organisationId, tenderId, conversationId, status, createdAt])
+  @@map("rag_answer_runs")
+}
+
+model RagRetrievalRun {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String         @map("organisation_id") @db.Uuid
+  tenderId           String         @map("tender_id") @db.Uuid
+  answerRunId        String         @unique @map("answer_run_id") @db.Uuid
+  sourceMode         RagSourceMode  @map("source_mode")
+  queryChecksum      String         @map("query_checksum") @db.Char(64)
+  candidateLimit     Int            @map("candidate_limit")
+  resultLimit        Int            @map("result_limit")
+  fusionPolicyVersion String        @map("fusion_policy_version") @db.VarChar(80)
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  answerRun          RagAnswerRun   @relation(fields: [answerRunId], references: [id], onDelete: Cascade)
+  hits               RagRetrievalHit[]
+
+  @@index([organisationId, tenderId, createdAt])
+  @@map("rag_retrieval_runs")
+}
+
+model RagRetrievalHit {
+  id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  retrievalRunId     String          @map("retrieval_run_id") @db.Uuid
+  chunkId            String          @map("chunk_id") @db.Uuid
+  rank               Int
+  lexicalRank        Int?            @map("lexical_rank")
+  vectorRank         Int?            @map("vector_rank")
+  fusedScore         Float           @map("fused_score")
+  createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  retrievalRun       RagRetrievalRun @relation(fields: [retrievalRunId], references: [id], onDelete: Cascade)
+  chunk              RagChunk        @relation(fields: [chunkId], references: [id], onDelete: Restrict)
+
+  @@unique([retrievalRunId, chunkId])
+  @@unique([retrievalRunId, rank])
+  @@map("rag_retrieval_hits")
+}
+
+model RagAnswerCitation {
+  id                 String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  answerRunId        String       @map("answer_run_id") @db.Uuid
+  chunkId            String       @map("chunk_id") @db.Uuid
+  handle             String       @db.VarChar(32)
+  claimText          String       @map("claim_text") @db.VarChar(1000)
+  excerpt            String       @db.VarChar(1000)
+  documentName       String       @map("document_name") @db.VarChar(255)
+  pageNumber         Int?         @map("page_number")
+  clauseLabel        String?      @map("clause_label") @db.VarChar(240)
+  sourceChecksum     String       @map("source_checksum") @db.Char(64)
+  createdAt          DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  answerRun          RagAnswerRun @relation(fields: [answerRunId], references: [id], onDelete: Cascade)
+  chunk              RagChunk     @relation(fields: [chunkId], references: [id], onDelete: Restrict)
+
+  @@unique([answerRunId, handle])
+  @@index([answerRunId, chunkId])
+  @@map("rag_answer_citations")
+}
+
+model RagFeedback {
+  id                 String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String            @map("organisation_id") @db.Uuid
+  tenderId           String            @map("tender_id") @db.Uuid
+  answerRunId        String            @map("answer_run_id") @db.Uuid
+  rating             RagFeedbackRating
+  reasonCode         String?           @map("reason_code") @db.VarChar(80)
+  comment             String?           @db.VarChar(500)
+  submittedByUserId  String            @map("submitted_by_user_id") @db.Uuid
+  createdAt          DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  answerRun          RagAnswerRun      @relation(fields: [answerRunId], references: [id], onDelete: Cascade)
+
+  @@unique([answerRunId, submittedByUserId])
+  @@index([organisationId, tenderId, createdAt])
+  @@map("rag_feedback")
 }

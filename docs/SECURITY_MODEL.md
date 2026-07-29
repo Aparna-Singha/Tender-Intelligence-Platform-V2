@@ -204,3 +204,16 @@ dismiss items. Filenames, tender text, evidence excerpts, and notes remain inert
 untrusted data; Phase 8 has no URL fetching, model or tool execution, permission
 change, notification, export, or submission capability. Safe telemetry excludes
 company and tender content.
+
+## Phase 9 retrieval isolation
+
+Opaque RAG jobs reload organisation, tender, version, extraction, index, and source
+mode from PostgreSQL. SQL applies tenant and source-class predicates before
+ranking; post-filtering is prohibited. Company evidence is excluded by default and
+requires explicit permission.
+
+Retrieved text is inert. The provider has no web, storage, permission, export,
+approval, or submission tool. Unknown citation handles, invalid output, provider
+failure, and embedding mismatch fail closed. Logs, queues, SSE, metrics, and errors
+exclude questions, answers, prompts, passages, and embeddings. Provider privacy and
+regional-processing approval remain production blockers.

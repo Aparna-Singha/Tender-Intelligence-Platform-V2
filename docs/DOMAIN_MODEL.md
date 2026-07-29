@@ -209,3 +209,17 @@ Items move through `OPEN`, `IN_PROGRESS`, `BLOCKED`,
 fresh or reviewed Phase 7 result showing the underlying gap is no longer unresolved.
 Checklist workflow progress is not eligibility, bid readiness, or success
 probability.
+
+## Tender-scoped RAG conversation
+
+`RagIndexRun` is immutable and tied to one organisation, tender version,
+extraction, source mode, policy set, and embedding configuration. `RagChunk`
+retains source class, document, page, clause, extraction coordinates, version, and
+checksum.
+
+`RagConversation` fixes its tenant, tender, mode, and index. Every user
+`RagMessage` creates a fresh `RagAnswerRun`, `RagRetrievalRun`, and ranked
+`RagRetrievalHit` set. `RagAnswerCitation` may reference only a handle from that
+retrieval. History is not evidence. Answers may be insufficient, require review,
+fail, or become invalid; they cannot decide eligibility, draft, approve, export,
+or submit.
