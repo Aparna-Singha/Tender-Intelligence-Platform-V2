@@ -139,3 +139,17 @@ values because document upload and verification are not implemented.
 Reseller, service-provider, and consultant business models add conditional
 completeness requirements. Completion percentage is guidance, not an eligibility
 or tender-match decision.
+
+## Reusable company document vault
+
+A `Document` is an organisation-owned logical record with category, owner, expiry,
+verification, retention, deletion, and processing state. A `DocumentVersion` is
+immutable binary metadata: original filename, declared and detected type, byte
+count, SHA-256, opaque object keys, uploader, and version number. Corrections create
+versions rather than overwriting evidence.
+
+Only `READY` documents with an approved current version may receive a signed
+download. All earlier, quarantined, rejected, failed, and expired states deny
+download. Access attempts and lifecycle changes are append-oriented audit data.
+Deletion is requested first; the worker respects retention before removing all
+object versions and marking the record deleted.

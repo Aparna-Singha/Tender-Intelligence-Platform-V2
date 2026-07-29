@@ -68,6 +68,14 @@ authoritative user or tenant ID. Step payloads are allowlisted by Zod and audit
 metadata records changed field names, never sensitive business values. Profile
 readers receive only data from the authorised organisation.
 
+Phase 3 upload and download routes use document-specific organisation permissions.
+Client identifiers select records only after the guard derives the authenticated
+member, and each repository query repeats the organisation scope. Presigned URLs
+are purpose-bound to one opaque key and expire after five minutes for upload or one
+minute for download by default. User filenames never form object keys. Completion
+independently checks stored byte count, declared MIME, and checksum metadata before
+enqueueing processing.
+
 ## Data protection
 
 - TLS protects data in transit; managed encryption protects databases, objects,
@@ -94,6 +102,17 @@ A file is unavailable to downstream AI processing until it passes policy.
 PDF active content and external references are not trusted. ZIP paths cannot escape
 the extraction area. Failed or suspicious inputs are isolated and reported without
 executing or rendering unsafe content.
+
+The company vault accepts PDF, JPEG, PNG, DOCX, and XLSX up to 25 MiB and 500 active
+logical documents per organisation. The worker verifies SHA-256 and content-sniffed
+MIME against the allowlisted extension before malware scanning. Scanner errors fail
+closed in quarantine. Rejected and quarantined objects never receive signed
+downloads. Document bytes, signed URLs, checksums, and extracted contents are
+excluded from logs. Archive upload is deliberately excluded from this vault phase.
+Workers process at most two document jobs concurrently and enforce an abort-aware
+60-second default deadline. The worker rechecks the object-reported byte count
+before its bounded read, and checks cancellation after type detection, scanning,
+and storage operations so timed-out work cannot later mark a document `READY`.
 
 ## AI-specific controls
 

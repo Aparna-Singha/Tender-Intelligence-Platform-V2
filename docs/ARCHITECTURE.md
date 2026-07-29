@@ -2,8 +2,8 @@
 
 ## Status and constraints
 
-This document records the approved target direction and the Phase 2 progressive
-onboarding and structured company-profile foundation.
+This document records the approved target direction through the Phase 3 private
+reusable company-document vault.
 
 The initial system is a TypeScript monorepo and modular monolith:
 
@@ -99,6 +99,19 @@ framework-independent domain policies. No company document binary is accepted in
 this phase; `evidence_document_id` is a nullable future reference only.
 
 ## Data ownership
+
+Phase 3 adds a company-evidence module and worker consumer. The API validates
+organisation permission and metadata, creates immutable version metadata, and signs
+a five-minute direct upload into an opaque `quarantine/` key. The worker verifies
+size, SHA-256, detected MIME and extension, then sends bytes through a
+provider-neutral `MalwareScanner` port. The local adapter speaks ClamAV's INSTREAM
+protocol. Only clean files move to an opaque `approved/` key and become
+downloadable through a newly authorised one-minute URL. Neither API nor worker
+writes document binaries to local disk.
+
+BullMQ jobs contain only organisation and opaque record identifiers. PostgreSQL
+remains authoritative for upload sessions, versions, processing, verification,
+access, retention, and deletion state.
 
 PostgreSQL stores authoritative users, memberships, metadata, workflow state,
 requirements, findings, citations, evidence links, reviews, audit records, and

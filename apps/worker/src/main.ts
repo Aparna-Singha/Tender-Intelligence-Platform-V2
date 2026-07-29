@@ -1,4 +1,5 @@
-import { Queue } from "bullmq";
+import { Queue, Worker } from "bullmq";
+import { S3Client } from "@aws-sdk/client-s3";
 import { parseEnvironment, workerEnvironmentSchema } from "@tender/config";
 import { createPrismaClient, type PrismaClient } from "@tender/database";
 import { createLogger } from "@tender/observability";
@@ -6,6 +7,9 @@ import { Redis } from "ioredis";
 
 import { createHealthServer } from "./health-server.js";
 import { WorkerReadiness } from "./readiness.js";
+import { ClamAvScanner } from "./malware-scanner.js";
+import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
+import { runWithTimeout } from "./job-timeout.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -26,6 +30,55 @@ async function bootstrap(): Promise<void> {
   const queue = new Queue(environment.QUEUE_NAME, {
     connection: redis,
   });
+  const storage = new S3Client({
+    credentials: {
+      accessKeyId: environment.S3_ACCESS_KEY_ID,
+      secretAccessKey: environment.S3_SECRET_ACCESS_KEY,
+    },
+    endpoint: environment.S3_ENDPOINT,
+    forcePathStyle: environment.S3_FORCE_PATH_STYLE,
+    region: environment.S3_REGION,
+  });
+  const processor = new DocumentProcessor(
+    database,
+    storage,
+    environment.S3_BUCKET,
+    new ClamAvScanner(environment.CLAMAV_HOST, environment.CLAMAV_PORT),
+  );
+  const documentWorker = new Worker<DocumentJob>(
+    environment.QUEUE_NAME,
+    async (job) =>
+      runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async (signal) =>
+        processor.process(job, signal),
+      ),
+    { connection: redis, concurrency: 2 },
+  );
+  documentWorker.on("failed", (job, error) => {
+    logger.error(
+      { errorType: error.name, jobId: job?.id, jobName: job?.name },
+      "Document job failed",
+    );
+    if (job?.name === "process-company-document") {
+      void database.document
+        .updateMany({
+          data: { status: "FAILED" },
+          where: {
+            status: { in: ["UPLOADED", "SCANNING", "PROCESSING"] },
+            versions: { some: { id: job.data.documentVersionId } },
+          },
+        })
+        .catch((failure: unknown) => {
+          logger.error(
+            {
+              errorType:
+                failure instanceof Error ? failure.name : "UnknownError",
+              jobId: job.id,
+            },
+            "Could not persist document job failure",
+          );
+        });
+    }
+  });
   const readiness = new WorkerReadiness({ database, queue, redis });
   const server = createHealthServer({
     logger,
@@ -44,6 +97,7 @@ async function bootstrap(): Promise<void> {
     const results = await Promise.allSettled([
       server.close(),
       queue.close(),
+      documentWorker.close(),
       redis.quit(),
       database.$disconnect(),
     ]);
@@ -71,7 +125,7 @@ async function bootstrap(): Promise<void> {
       healthPort: environment.WORKER_HEALTH_PORT,
       queue: environment.QUEUE_NAME,
     },
-    "Worker infrastructure is ready; no business consumers are registered",
+    "Worker infrastructure and document consumer are ready",
   );
 }
 

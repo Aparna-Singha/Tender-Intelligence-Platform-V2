@@ -71,7 +71,22 @@ services:
         mc anonymous set none "local/$${S3_BUCKET}"
     restart: "no"
 
+  clamav:
+    image: clamav/clamav:1.4.3
+    ports:
+      - "127.0.0.1:3310:3310"
+    volumes:
+      - clamav_data:/var/lib/clamav
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clamdcheck.sh"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+    restart: unless-stopped
+
 volumes:
+  clamav_data:
   minio_data:
   postgres_data:
   redis_data:

@@ -191,3 +191,24 @@ Phase 2 is accepted when:
 - formatting, linting, strict type-checking, tests, and production builds pass;
 - no document upload, tender ingestion, analysis, RAG, or drafting behavior is
   introduced.
+
+## Phase 3: Secure reusable company document vault
+
+Phase 3 is accepted when:
+
+- binaries upload directly to private object storage under opaque quarantine keys
+  and application processes never persist them to local disk;
+- requests validate organisation permission, safe filename, MIME/extension, size,
+  document count, and duplicate checksum;
+- completion checks object metadata and creates an idempotent processing job;
+- the worker verifies bytes, SHA-256, content MIME, extension, and malware state;
+- scanner failure fails closed and only clean files become `READY`;
+- every download repeats tenant authorization, refuses non-ready files, records
+  access, and returns a short-lived approved-object URL;
+- PostgreSQL retains owner, expiry, verification, immutable versions, access,
+  retention, and deletion state;
+- the web exposes upload, filtering, status, details, versions, expiry warnings, and
+  authorized download controls;
+- required malicious upload and tenant-isolation tests and all repository quality
+  gates pass;
+- no tender-upload behavior is introduced.
