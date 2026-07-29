@@ -185,6 +185,11 @@ URL lifetimes are bounded by `DOCUMENT_UPLOAD_TTL_SECONDS` (60–900) and
 directly between the browser and private MinIO storage and are never persisted to
 the API or worker filesystem.
 
+Phase 4 tender-source binaries follow the same private direct-upload pipeline.
+Accepted source formats are PDF, ZIP, XLSX, DOCX, and CSV up to 25 MiB. ZIP
+inspection rejects traversal, nested archives, excessive members, expanded-size
+limits, and suspicious compression ratios before malware scanning.
+
 ## Authentication API
 
 The OpenAPI 3 contract is generated from controllers and is available at
@@ -205,6 +210,11 @@ Phase 2 adds:
 All endpoints derive the user from the database session and enforce
 organisation-scoped permissions. The OpenAPI UI and `/openapi-json` include these
 operations.
+
+Phase 4 adds organisation-scoped `/organisations/{organisationId}/tenders`
+operations for workspace creation, controlled imports, metadata, versioned source
+uploads, corrigenda, private downloads, job status/cancellation, and server-sent
+job events. Parsing, analysis, eligibility, RAG, and drafting remain unavailable.
 
 ## API envelopes
 

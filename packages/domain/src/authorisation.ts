@@ -25,6 +25,14 @@ export const permissions = [
   "DOCUMENT_UPLOAD",
   "DOCUMENT_DELETE",
   "DOCUMENT_VERIFY",
+  "TENDER_CREATE",
+  "TENDER_READ",
+  "TENDER_UPDATE",
+  "TENDER_UPLOAD",
+  "TENDER_VERSION_CREATE",
+  "TENDER_CORRIGENDUM_CREATE",
+  "TENDER_JOB_CANCEL",
+  "TENDER_ADMIN_IMPORT",
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -46,6 +54,14 @@ const permissionsByRole: Readonly<
     "DOCUMENT_UPLOAD",
     "DOCUMENT_DELETE",
     "DOCUMENT_VERIFY",
+    "TENDER_CREATE",
+    "TENDER_READ",
+    "TENDER_UPDATE",
+    "TENDER_UPLOAD",
+    "TENDER_VERSION_CREATE",
+    "TENDER_CORRIGENDUM_CREATE",
+    "TENDER_JOB_CANCEL",
+    "TENDER_ADMIN_IMPORT",
   ],
   TENDER_EXECUTIVE: [
     "ORGANISATION_READ",
@@ -56,6 +72,13 @@ const permissionsByRole: Readonly<
     "DOCUMENT_READ",
     "DOCUMENT_UPLOAD",
     "DOCUMENT_DELETE",
+    "TENDER_CREATE",
+    "TENDER_READ",
+    "TENDER_UPDATE",
+    "TENDER_UPLOAD",
+    "TENDER_VERSION_CREATE",
+    "TENDER_CORRIGENDUM_CREATE",
+    "TENDER_JOB_CANCEL",
   ],
   CONSULTANT: [
     "ORGANISATION_READ",
@@ -65,6 +88,13 @@ const permissionsByRole: Readonly<
     "ONBOARDING_UPDATE",
     "DOCUMENT_READ",
     "DOCUMENT_UPLOAD",
+    "TENDER_CREATE",
+    "TENDER_READ",
+    "TENDER_UPDATE",
+    "TENDER_UPLOAD",
+    "TENDER_VERSION_CREATE",
+    "TENDER_CORRIGENDUM_CREATE",
+    "TENDER_JOB_CANCEL",
   ],
   REVIEWER: [
     "ORGANISATION_READ",
@@ -72,6 +102,7 @@ const permissionsByRole: Readonly<
     "ONBOARDING_READ",
     "DOCUMENT_READ",
     "DOCUMENT_VERIFY",
+    "TENDER_READ",
   ],
 };
 

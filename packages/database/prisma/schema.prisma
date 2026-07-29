@@ -45,6 +45,76 @@ enum AuditEventType {
   DOCUMENT_DOWNLOADED
   DOCUMENT_DELETED
   DOCUMENT_VERSION_CREATED
+  TENDER_CREATED
+  TENDER_UPDATED
+  TENDER_UPLOAD_REQUESTED
+  TENDER_UPLOAD_COMPLETED
+  TENDER_DUPLICATE_DETECTED
+  TENDER_VERSION_CREATED
+  TENDER_CORRIGENDUM_CREATED
+  TENDER_DOCUMENT_DOWNLOADED
+  TENDER_JOB_CANCELLED
+  TENDER_IMPORTED
+}
+
+enum TenderSourceType {
+  MANUAL_UPLOAD
+  CURATED_DATASET
+  ADMIN_IMPORT
+}
+
+enum TenderLifecycleStatus {
+  DRAFT
+  INGESTING
+  SOURCE_READY
+  FAILED
+  ARCHIVED
+}
+
+enum TenderWorkspaceStatus {
+  DRAFT
+  INGESTING
+  SOURCE_READY
+  FAILED
+  ARCHIVED
+}
+
+enum TenderDocumentRole {
+  PRIMARY
+  ANNEXURE
+  BOQ
+  SUPPORTING
+  TECHNICAL_SPECIFICATION
+  FORM
+  DECLARATION
+  CORRIGENDUM
+  AMENDMENT
+  CLARIFICATION
+}
+
+enum TenderDocumentStatus {
+  UPLOADING
+  UPLOADED
+  QUARANTINED
+  SCANNING
+  READY
+  REJECTED
+  FAILED
+}
+
+enum TenderJobType {
+  SOURCE_INGESTION
+}
+
+enum TenderJobState {
+  QUEUED
+  SCANNING
+  PARSING
+  STRUCTURING
+  ANALYSING
+  COMPLETE
+  FAILED
+  CANCELLED
 }
 
 enum DocumentCategory {
@@ -141,6 +211,12 @@ model User {
   uploadedDocumentVersions DocumentVersion[]  @relation("DocumentVersionUploader")
   documentVerifications DocumentVerification[] @relation("DocumentVerifier")
   documentAccessEvents DocumentAccessEvent[]
+  createdTenders Tender[] @relation("TenderCreator")
+  createdTenderVersions TenderVersion[] @relation("TenderVersionCreator")
+  uploadedTenderDocuments TenderDocument[] @relation("TenderDocumentUploader")
+  importedTenderSources TenderSource[] @relation("TenderSourceImporter")
+  createdTenderWorkspaces TenderWorkspace[] @relation("TenderWorkspaceCreator")
+  cancelledTenderJobs ProcessingJob[] @relation("TenderJobCanceller")
 
   @@map("users")
 }
@@ -183,6 +259,11 @@ model Organisation {
   documents       Document[]
   uploadSessions  UploadSession[]
   documentAccessEvents DocumentAccessEvent[]
+  tenders Tender[]
+  tenderWorkspaces TenderWorkspace[]
+  tenderDocuments TenderDocument[]
+  tenderSources TenderSource[]
+  tenderProcessingJobs ProcessingJob[]
 
   @@map("organisations")
 }
@@ -451,4 +532,190 @@ model DocumentAccessEvent {
 
   @@index([organisationId, documentId, createdAt])
   @@map("document_access_events")
+}
+
+model TenderWorkspace {
+  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId       String                @map("organisation_id") @db.Uuid
+  tenderId             String?               @unique @map("tender_id") @db.Uuid
+  status               TenderWorkspaceStatus @default(DRAFT)
+  sourceSectionStatus  String                @default("NOT_STARTED") @map("source_section_status") @db.VarChar(32)
+  processingProgress   Int                   @default(0) @map("processing_progress")
+  createdByUserId      String                @map("created_by_user_id") @db.Uuid
+  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation         Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender               Tender?               @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  createdBy            User                  @relation("TenderWorkspaceCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, status, updatedAt])
+  @@map("tender_workspaces")
+}
+
+model Tender {
+  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String                @map("organisation_id") @db.Uuid
+  currentVersionId      String?               @unique @map("current_version_id") @db.Uuid
+  sourceTenderNumber    String?               @map("source_tender_number") @db.VarChar(160)
+  title                 String                @db.VarChar(300)
+  buyer                 String                @db.VarChar(240)
+  category              String?               @db.VarChar(120)
+  procurementType       String?               @map("procurement_type") @db.VarChar(80)
+  publicationDate       DateTime?             @map("publication_date") @db.Date
+  submissionDeadline    DateTime              @map("submission_deadline") @db.Timestamptz(3)
+  preBidMeetingDate     DateTime?             @map("pre_bid_meeting_date") @db.Timestamptz(3)
+  openingDate           DateTime?             @map("opening_date") @db.Timestamptz(3)
+  officialSourceUrl     String?               @map("official_source_url") @db.VarChar(2048)
+  sourceType            TenderSourceType      @map("source_type")
+  description           String?               @db.VarChar(4000)
+  isDemonstration       Boolean               @default(false) @map("is_demonstration")
+  lifecycleStatus       TenderLifecycleStatus @default(DRAFT) @map("lifecycle_status")
+  createdByUserId       String                @map("created_by_user_id") @db.Uuid
+  archivedAt            DateTime?             @map("archived_at") @db.Timestamptz(3)
+  deletedAt             DateTime?             @map("deleted_at") @db.Timestamptz(3)
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation          Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdBy             User                  @relation("TenderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  workspace             TenderWorkspace?
+  currentVersion        TenderVersion?        @relation("CurrentTenderVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions              TenderVersion[]       @relation("TenderVersions")
+  sources               TenderSource[]
+  corrigenda            TenderCorrigendum[]
+  processingJobs        ProcessingJob[]
+
+  @@index([organisationId, lifecycleStatus, submissionDeadline])
+  @@index([organisationId, sourceTenderNumber])
+  @@map("tenders")
+}
+
+model TenderVersion {
+  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId              String            @map("tender_id") @db.Uuid
+  versionNumber         Int               @map("version_number")
+  previousVersionId     String?           @map("previous_version_id") @db.Uuid
+  reason                String            @db.VarChar(500)
+  sourceSnapshot        Json              @map("source_snapshot")
+  sourceFingerprint     String            @map("source_fingerprint") @db.Char(64)
+  sourceProvenance      String            @map("source_provenance") @db.VarChar(1000)
+  createdByUserId       String            @map("created_by_user_id") @db.Uuid
+  ingestedAt            DateTime          @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  tender                Tender            @relation("TenderVersions", fields: [tenderId], references: [id], onDelete: Cascade)
+  currentForTender      Tender?           @relation("CurrentTenderVersion")
+  previousVersion       TenderVersion?    @relation("TenderVersionChain", fields: [previousVersionId], references: [id], onDelete: Restrict)
+  nextVersions          TenderVersion[]   @relation("TenderVersionChain")
+  createdBy             User              @relation("TenderVersionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  documents             TenderDocument[]
+  amendedByCorrigenda   TenderCorrigendum[] @relation("CorrigendumAffectedVersion")
+  createdByCorrigendum  TenderCorrigendum?  @relation("CorrigendumResultVersion")
+  processingJobs        ProcessingJob[]
+
+  @@unique([tenderId, versionNumber])
+  @@unique([tenderId, sourceFingerprint])
+  @@map("tender_versions")
+}
+
+model TenderDocument {
+  id                    String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String               @map("organisation_id") @db.Uuid
+  tenderVersionId       String               @map("tender_version_id") @db.Uuid
+  role                  TenderDocumentRole
+  originalFilename      String               @map("original_filename") @db.VarChar(255)
+  displayFilename       String               @map("display_filename") @db.VarChar(255)
+  declaredMimeType      String               @map("declared_mime_type") @db.VarChar(120)
+  detectedMimeType      String?              @map("detected_mime_type") @db.VarChar(120)
+  extension             String               @db.VarChar(16)
+  sizeBytes             BigInt               @map("size_bytes")
+  sha256                String               @db.Char(64)
+  quarantineObjectKey   String               @unique @map("quarantine_object_key") @db.VarChar(512)
+  approvedObjectKey     String?              @unique @map("approved_object_key") @db.VarChar(512)
+  status                TenderDocumentStatus @default(UPLOADING)
+  sourceUrl             String?              @map("source_url") @db.VarChar(2048)
+  provenance            String               @db.VarChar(1000)
+  storageMetadata       Json                 @default("{}") @map("storage_metadata")
+  uploadedByUserId      String               @map("uploaded_by_user_id") @db.Uuid
+  uploadSessionExpiresAt DateTime             @map("upload_session_expires_at") @db.Timestamptz(3)
+  uploadCompletedAt     DateTime?             @map("upload_completed_at") @db.Timestamptz(3)
+  retentionUntil        DateTime?             @map("retention_until") @db.Timestamptz(3)
+  deletedAt             DateTime?             @map("deleted_at") @db.Timestamptz(3)
+  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation          Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tenderVersion         TenderVersion         @relation(fields: [tenderVersionId], references: [id], onDelete: Cascade)
+  uploadedBy            User                  @relation("TenderDocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organisationId, tenderVersionId, role, sha256])
+  @@index([organisationId, sha256])
+  @@index([tenderVersionId, status])
+  @@map("tender_documents")
+}
+
+model TenderSource {
+  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String           @map("organisation_id") @db.Uuid
+  tenderId           String           @map("tender_id") @db.Uuid
+  adapterType        TenderSourceType @map("adapter_type")
+  sourceName         String           @map("source_name") @db.VarChar(160)
+  sourceUrl          String?          @map("source_url") @db.VarChar(2048)
+  sourceTenderId     String?          @map("source_tender_id") @db.VarChar(160)
+  provenance         String           @db.VarChar(1000)
+  importMethod       String           @map("import_method") @db.VarChar(80)
+  externalMetadata   Json?            @map("external_metadata")
+  importedByUserId   String           @map("imported_by_user_id") @db.Uuid
+  importedAt         DateTime         @default(now()) @map("imported_at") @db.Timestamptz(3)
+  organisation       Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender             Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  importedBy         User             @relation("TenderSourceImporter", fields: [importedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, adapterType, sourceTenderId])
+  @@map("tender_sources")
+}
+
+model TenderCorrigendum {
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId             String        @map("tender_id") @db.Uuid
+  affectedVersionId    String        @map("affected_version_id") @db.Uuid
+  resultingVersionId   String        @unique @map("resulting_version_id") @db.Uuid
+  identifier           String        @db.VarChar(160)
+  publicationDate      DateTime?     @map("publication_date") @db.Date
+  description          String        @db.VarChar(2000)
+  sourceUrl            String?       @map("source_url") @db.VarChar(2048)
+  ingestedAt           DateTime      @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  tender               Tender        @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  affectedVersion      TenderVersion @relation("CorrigendumAffectedVersion", fields: [affectedVersionId], references: [id], onDelete: Restrict)
+  resultingVersion     TenderVersion @relation("CorrigendumResultVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([tenderId, identifier])
+  @@index([tenderId, ingestedAt])
+  @@map("tender_corrigenda")
+}
+
+model ProcessingJob {
+  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String         @map("organisation_id") @db.Uuid
+  tenderId              String         @map("tender_id") @db.Uuid
+  tenderVersionId       String         @map("tender_version_id") @db.Uuid
+  jobType               TenderJobType  @map("job_type")
+  idempotencyKey        String         @unique @map("idempotency_key") @db.VarChar(200)
+  state                 TenderJobState @default(QUEUED)
+  progressPercentage    Int            @default(0) @map("progress_percentage")
+  currentStage          String         @default("QUEUED") @map("current_stage") @db.VarChar(80)
+  publicMessage         String         @default("Source ingestion queued") @map("public_message") @db.VarChar(240)
+  eventSequence         Int            @default(1) @map("event_sequence")
+  retryCount            Int            @default(0) @map("retry_count")
+  failureCategory       String?        @map("failure_category") @db.VarChar(80)
+  internalErrorReference String?       @map("internal_error_reference") @db.VarChar(128)
+  cancellationRequestedAt DateTime?    @map("cancellation_requested_at") @db.Timestamptz(3)
+  cancelledByUserId     String?        @map("cancelled_by_user_id") @db.Uuid
+  startedAt             DateTime?      @map("started_at") @db.Timestamptz(3)
+  completedAt           DateTime?      @map("completed_at") @db.Timestamptz(3)
+  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation          Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                Tender         @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion         TenderVersion  @relation(fields: [tenderVersionId], references: [id], onDelete: Cascade)
+  cancelledBy           User?          @relation("TenderJobCanceller", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, tenderId, state])
+  @@index([tenderVersionId, createdAt])
+  @@map("processing_jobs")
 }

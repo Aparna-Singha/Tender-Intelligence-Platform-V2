@@ -153,3 +153,17 @@ download. All earlier, quarantined, rejected, failed, and expired states deny
 download. Access attempts and lifecycle changes are append-oriented audit data.
 Deletion is requested first; the worker respects retention before removing all
 object versions and marking the record deleted.
+
+## Manual tender ingestion
+
+`TenderWorkspace` is the organisation-private container for a `Tender`. A tender
+has a current immutable `TenderVersion`; source changes and corrigenda create new
+versions rather than overwriting history. `TenderDocument` records typed
+attachments and opaque private-object references. `TenderSource` preserves
+adapter, provenance, official URL, and external identifiers. `TenderCorrigendum`
+links affected and resulting versions. `ProcessingJob` is the authoritative,
+idempotency-keyed asynchronous lifecycle record.
+
+Curated fixtures always carry “Demonstration tender — not live procurement
+information.” Phase 4 ends at `SOURCE_READY`; no state implies successful parsing,
+eligibility, analysis, or bid readiness.

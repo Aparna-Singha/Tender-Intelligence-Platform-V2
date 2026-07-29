@@ -1,0 +1,244 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState, type FormEvent, type JSX } from "react";
+import { apiRequest } from "../lib/api";
+
+interface Workspace {
+  buyer: string;
+  demonstration_label?: string;
+  id: string;
+  lifecycleStatus: string;
+  processingJobs: readonly {
+    currentStage: string;
+    id: string;
+    progressPercentage: number;
+    publicMessage: string;
+    state: string;
+  }[];
+  sources: readonly {
+    adapterType: string;
+    provenance: string;
+    sourceName: string;
+    sourceUrl: string | null;
+  }[];
+  title: string;
+  versions: readonly {
+    documents: readonly {
+      displayFilename: string;
+      id: string;
+      role: string;
+      status: string;
+    }[];
+    id: string;
+    reason: string;
+    versionNumber: number;
+  }[];
+  workspace: { processingProgress: number; sourceSectionStatus: string };
+}
+
+interface UploadSession {
+  document_id: string;
+  upload_url: string;
+}
+
+async function sha256(file: File): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    await file.arrayBuffer(),
+  );
+  return Array.from(new Uint8Array(digest))
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export function TenderWorkspace({
+  organisationId,
+  tenderId,
+}: {
+  readonly organisationId: string;
+  readonly tenderId: string;
+}): JSX.Element {
+  const [workspace, setWorkspace] = useState<Workspace | null>(null);
+  const [message, setMessage] = useState("Loading workspace…");
+  const [selectedVersionId, setSelectedVersionId] = useState("");
+
+  async function load(): Promise<void> {
+    try {
+      const loaded = await apiRequest<Workspace>(
+        `/organisations/${organisationId}/tenders/${tenderId}`,
+      );
+      setWorkspace(loaded);
+      setSelectedVersionId((current) =>
+        current === "" ? (loaded.versions[0]?.id ?? "") : current,
+      );
+      setMessage("");
+    } catch {
+      setMessage("Unable to load this tender workspace.");
+    }
+  }
+
+  useEffect(() => {
+    void load();
+    const timer = window.setInterval(() => void load(), 5000);
+    return () => window.clearInterval(timer);
+  }, [organisationId, tenderId]);
+
+  async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    if (workspace === null) return;
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const file = values.get("file");
+    const version = workspace.versions[0];
+    if (!(file instanceof File) || file.size === 0 || version === undefined)
+      return;
+    setMessage("Preparing secure direct upload…");
+    try {
+      const checksum = await sha256(file);
+      const session = await apiRequest<UploadSession>(
+        `/organisations/${organisationId}/tenders/${tenderId}/versions/${version.id}/upload-sessions`,
+        {
+          body: JSON.stringify({
+            checksum_sha256: checksum,
+            filename: file.name,
+            mime_type: file.type,
+            role: values.get("role"),
+            size_bytes: file.size,
+          }),
+          method: "POST",
+        },
+      );
+      const response = await fetch(session.upload_url, {
+        body: file,
+        headers: {
+          "content-type": file.type,
+          "x-amz-meta-sha256": checksum,
+        },
+        method: "PUT",
+      });
+      if (!response.ok) throw new Error("Object upload failed");
+      await apiRequest(
+        `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
+        {
+          body: JSON.stringify({ checksum_sha256: checksum }),
+          method: "POST",
+        },
+      );
+      form.reset();
+      setMessage("Upload accepted. Security processing is in progress.");
+      await load();
+    } catch {
+      setMessage("Upload rejected. Check the file type, size, and contents.");
+    }
+  }
+
+  return (
+    <main>
+      <div className="panel">
+        <Link href={`/tenders/${organisationId}`}>All tender workspaces</Link>
+        <h1>{workspace?.title ?? "Tender workspace"}</h1>
+        {workspace?.demonstration_label !== undefined && (
+          <p className="warning">{workspace.demonstration_label}</p>
+        )}
+        <p>{workspace?.buyer}</p>
+        <section>
+          <h2>Source and processing</h2>
+          <p>
+            Status: {workspace?.lifecycleStatus ?? "Loading"} ·{" "}
+            {workspace?.workspace.processingProgress ?? 0}%
+          </p>
+          {workspace?.sources.map((source) => (
+            <article key={`${source.adapterType}:${source.sourceName}`}>
+              <h3>{source.sourceName}</h3>
+              <p>{source.provenance}</p>
+              {source.sourceUrl !== null && (
+                <a href={source.sourceUrl} rel="noreferrer" target="_blank">
+                  Official source
+                </a>
+              )}
+            </article>
+          ))}
+          <form onSubmit={(event) => void upload(event)}>
+            <label>
+              Document role
+              <select name="role">
+                <option value="PRIMARY">Primary tender</option>
+                <option value="ANNEXURE">Annexure</option>
+                <option value="BOQ">BOQ</option>
+                <option value="TECHNICAL_SPECIFICATION">
+                  Technical specification
+                </option>
+                <option value="FORM">Form</option>
+                <option value="DECLARATION">Declaration</option>
+              </select>
+            </label>
+            <label>
+              PDF, ZIP, XLSX, DOCX, or CSV (maximum 25 MiB)
+              <input
+                accept=".pdf,.zip,.xlsx,.docx,.csv"
+                name="file"
+                required
+                type="file"
+              />
+            </label>
+            <button type="submit">Upload source securely</button>
+          </form>
+          <p aria-live="polite">{message}</p>
+          <label>
+            Source version
+            <select
+              value={selectedVersionId}
+              onChange={(event) => setSelectedVersionId(event.target.value)}
+            >
+              {workspace?.versions.map((version, index) => (
+                <option key={version.id} value={version.id}>
+                  Version {version.versionNumber}
+                  {index === 0 ? " — current" : ""}
+                </option>
+              ))}
+            </select>
+          </label>
+          {workspace?.versions
+            .filter((version) => version.id === selectedVersionId)
+            .map((version) => (
+              <article key={version.id}>
+                <h3>Version {version.versionNumber}</h3>
+                <p>{version.reason}</p>
+                {version.documents.map((document) => (
+                  <p key={document.id}>
+                    {document.displayFilename} · {document.role} ·{" "}
+                    {document.status}
+                  </p>
+                ))}
+              </article>
+            ))}
+          <h3>Processing timeline</h3>
+          {workspace?.processingJobs.length === 0 && (
+            <p>No source-processing jobs have started.</p>
+          )}
+          {workspace?.processingJobs.map((job) => (
+            <p key={job.id}>
+              {job.state} · {job.progressPercentage}% · {job.publicMessage}
+            </p>
+          ))}
+        </section>
+        {[
+          "Summary",
+          "Risks",
+          "Requirements",
+          "Evidence matrix",
+          "Missing documents",
+          "Chatbot",
+          "Draft",
+          "Readiness audit",
+        ].map((section) => (
+          <section key={section}>
+            <h2>{section}</h2>
+            <p>Not implemented in this phase.</p>
+          </section>
+        ))}
+      </div>
+    </main>
+  );
+}

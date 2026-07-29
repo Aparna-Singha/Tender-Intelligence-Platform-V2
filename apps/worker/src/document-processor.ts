@@ -6,7 +6,6 @@ import {
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { PrismaClient } from "@tender/database";
 import { isAllowedMimeExtension, MAX_UPLOAD_BYTES } from "@tender/domain";
-import type { Job } from "bullmq";
 import { fileTypeFromBuffer } from "file-type";
 import { createHash } from "node:crypto";
 import type { MalwareScanner } from "./malware-scanner.js";
@@ -25,20 +24,21 @@ export class DocumentProcessor {
   ) {}
 
   public async process(
-    job: Job<DocumentJob>,
+    jobName: string,
+    data: DocumentJob,
     signal?: AbortSignal,
   ): Promise<void> {
-    if (job.name === "delete-company-document") {
-      await this.deleteDocument(job.data);
+    if (jobName === "delete-company-document") {
+      await this.deleteDocument(data);
       return;
     }
-    if (job.name !== "process-company-document")
+    if (jobName !== "process-company-document")
       throw new Error("Unsupported job");
     const version = await this.database.documentVersion.findFirst({
       include: { document: true },
       where: {
-        id: job.data.documentVersionId,
-        document: { organisationId: job.data.organisationId },
+        id: data.documentVersionId,
+        document: { organisationId: data.organisationId },
       },
     });
     if (version === null) throw new Error("Document version not found");
@@ -101,7 +101,7 @@ export class DocumentProcessor {
       where: { id: version.documentId },
     });
     signal?.throwIfAborted();
-    const approvedKey = `approved/${job.data.organisationId}/${version.id}`;
+    const approvedKey = `approved/${data.organisationId}/${version.id}`;
     await this.storage.send(
       new CopyObjectCommand({
         Bucket: this.bucket,

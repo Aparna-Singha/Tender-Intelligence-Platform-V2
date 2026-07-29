@@ -38,3 +38,16 @@ export {
   MAX_DOCUMENTS_PER_ORGANISATION,
   MAX_UPLOAD_BYTES,
 } from "./document-policy.js";
+export {
+  AdminImportAdapter,
+  CuratedDatasetAdapter,
+  DEMONSTRATION_LABEL,
+  ManualUploadAdapter,
+  validateZipEntries,
+} from "./tender-source.js";
+export type {
+  NormalizedTenderSource,
+  TenderSourceAdapter,
+  TenderSourceInput,
+  ZipEntry,
+} from "./tender-source.js";

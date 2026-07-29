@@ -113,6 +113,18 @@ BullMQ jobs contain only organisation and opaque record identifiers. PostgreSQL
 remains authoritative for upload sessions, versions, processing, verification,
 access, retention, and deletion state.
 
+Phase 4 adds the tender-ingestion module within the modular monolith. A source
+adapter port normalizes manual uploads, curated demonstration data, and controlled
+administrator imports while preserving provenance. Tender workspaces, immutable
+versions, source documents, corrigenda, and jobs are organisation-owned PostgreSQL
+records. Binaries use opaque `tender-quarantine/` and `tender-approved/` keys and
+the Phase 3 scanner. PostgreSQL remains the job-status authority; server-sent
+events read that status and close at terminal states.
+
+The worker performs bounded reads, checksum and content-type checks, metadata-only
+ZIP inspection, malware scanning, and fail-closed promotion. Phase 4 performs no
+text extraction, requirement parsing, analysis, or AI work.
+
 PostgreSQL stores authoritative users, memberships, metadata, workflow state,
 requirements, findings, citations, evidence links, reviews, audit records, and
 export manifests. Object storage holds encrypted private binaries and derived

@@ -86,6 +86,10 @@ export function Dashboard(): JSX.Element {
           <Link href={`/documents/${organisation.id}`}>
             Open document centre
           </Link>
+          {" · "}
+          <Link href={`/tenders/${organisation.id}`}>
+            Open tender workspaces
+          </Link>
           <p>
             Dashboard mode:{" "}
             {guidance[organisation.id]?.display_mode ?? "BEGINNER"}

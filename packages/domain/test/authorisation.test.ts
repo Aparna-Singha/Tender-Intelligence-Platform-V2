@@ -49,5 +49,11 @@ describe("organisation authorisation policy", () => {
     expect(hasPermission("OWNER", "MEMBERSHIP_ROLE_CHANGE")).toBe(true);
     expect(hasPermission("REVIEWER", "ONBOARDING_UPDATE")).toBe(false);
     expect(hasPermission("TENDER_EXECUTIVE", "ONBOARDING_UPDATE")).toBe(true);
+    expect(hasPermission("REVIEWER", "TENDER_READ")).toBe(true);
+    expect(hasPermission("REVIEWER", "TENDER_UPLOAD")).toBe(false);
+    expect(hasPermission("TENDER_EXECUTIVE", "TENDER_ADMIN_IMPORT")).toBe(
+      false,
+    );
+    expect(hasPermission("ADMIN", "TENDER_ADMIN_IMPORT")).toBe(true);
   });
 });
