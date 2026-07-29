@@ -79,6 +79,17 @@ export type {
   ReviewExtractionRequest,
   StartExtractionRequest,
 } from "./extraction.js";
+export {
+  pursuitDecisionSchema,
+  riskFindingFilterSchema,
+  riskReviewSchema,
+  startRiskAnalysisSchema,
+} from "./risk-analysis.js";
+export type {
+  PursuitDecisionRequest,
+  RiskFindingFilter,
+  RiskReviewRequest,
+} from "./risk-analysis.js";
 export type {
   BusinessIdentityStep,
   CapabilitiesStep,

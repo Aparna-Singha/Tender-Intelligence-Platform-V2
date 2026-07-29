@@ -362,8 +362,38 @@ export class ExtractionProcessor {
         },
         where: { id: runId },
       });
+      const staleRuns = await transaction.riskAnalysisRun.findMany({
+        select: { id: true },
+        where: {
+          extractionRunId: { not: runId },
+          gateType: "EARLY",
+          status: { in: ["QUEUED", "ANALYSING", "VALIDATING", "COMPLETE"] },
+          tenderVersionId,
+        },
+      });
+      if (staleRuns.length > 0) {
+        const staleIds = staleRuns.map((run) => run.id);
+        await transaction.riskAnalysisRun.updateMany({
+          data: {
+            currentStage: "INVALIDATED",
+            invalidatedAt: new Date(),
+            publicMessage:
+              "A newer extraction requires a fresh early risk analysis",
+            status: "INVALIDATED",
+          },
+          where: { id: { in: staleIds } },
+        });
+        await transaction.riskFinding.updateMany({
+          data: { findingStatus: "INVALIDATED", invalidatedAt: new Date() },
+          where: { riskAnalysisRunId: { in: staleIds } },
+        });
+        await transaction.earlyPursuitDecision.updateMany({
+          data: { supersededAt: new Date() },
+          where: { riskAnalysisRunId: { in: staleIds }, supersededAt: null },
+        });
+      }
       await transaction.tenderVersion.update({
-        data: { activeExtractionRunId: runId },
+        data: { activeEarlyRiskRunId: null, activeExtractionRunId: runId },
         where: { id: tenderVersionId },
       });
     });

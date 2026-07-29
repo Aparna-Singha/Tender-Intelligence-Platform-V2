@@ -50,6 +50,16 @@ Status: implemented on the Phase 5 feature branch.
 
 ## Milestone 1: Secure manual-ingestion vertical slice
 
+## Phase 6: Immediate cited tender-risk and ambiguity analysis
+
+Status: implemented on the Phase 6 feature branch.
+
+- deterministic immutable `EARLY` runs over the active extraction;
+- validated citations, append-only reviews, invalidation, and human-only pursuit
+  decisions;
+- evidence comparison is deferred to Phase 7 and missing-document checks to Phase 8;
+- final readiness, eligibility, RAG, drafting, export, and submission remain absent.
+
 In progress; Phase 4 establishes ingestion only.
 
 - Phase 1B complete on its feature branch: account, database session,

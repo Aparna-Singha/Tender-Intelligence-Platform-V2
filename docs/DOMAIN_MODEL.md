@@ -177,3 +177,12 @@ Phase 5 adds `ExtractionRun`, `ExtractionRunDocument`, `ExtractedUnit`,
 `STRUCTURING`, and `COMPLETE`, or terminal `FAILED`, `CANCELLED`, and `INVALIDATED`
 states. Results are immutable. Review records preserve corrections separately, and
 the active completed run is only a pointer on a tender version.
+
+## Early tender-risk analysis
+
+`RiskAnalysisRun` targets one tender version and active extraction.
+`RiskFinding` separates category, severity, confidence, materiality, lifecycle, and
+review state. `RiskFindingCitation` reuses exact extraction citations.
+`RiskFindingReview` preserves human disposition history. `EarlyPursuitDecision`
+records human-only CONTINUE/HOLD/STOP choices and supersession. No record is an
+eligibility assessment or legal conclusion.

@@ -254,3 +254,14 @@ Phase 5 is accepted when:
   pass;
 - company comparison, eligibility decisions, risk analysis, RAG, drafting,
   scraping, and automatic submission remain absent.
+
+## Phase 6: Immediate cited tender-risk and ambiguity analysis
+
+Phase 6 is accepted when asynchronous immutable `EARLY` runs use only the active
+completed extraction; material findings reuse validated citations; severity,
+confidence, materiality, status, and review state remain distinct; human reviews do
+not overwrite machine rationale; only an authorised human records an unpreselected
+CONTINUE/HOLD/STOP decision; extraction changes invalidate current results; tenant
+scope is enforced; and quality gates pass. Evidence comparison, missing documents,
+eligibility, final readiness, RAG, drafting, export, scraping, and submission remain
+absent.

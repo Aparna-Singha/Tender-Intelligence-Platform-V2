@@ -184,3 +184,12 @@ citations, and commits results atomically before activating the run. Progress us
 bounded server-sent events with polling fallback. Parser and OCR contracts live in
 the domain layer; no OCR adapter is configured, so scanned pages honestly report
 `OCR_UNAVAILABLE`.
+
+## Phase 6 early risk gate
+
+The API fingerprints the exact active extraction and queues opaque identifiers. The
+worker reloads tenant-scoped PostgreSQL records, applies versioned deterministic
+rules, validates reused citations, and atomically activates the completed `EARLY`
+report. Reviews and pursuit decisions are human-authored history records. A changed
+extraction invalidates current risk state. See
+[Early Tender-Risk Policy](RISK_POLICY.md).

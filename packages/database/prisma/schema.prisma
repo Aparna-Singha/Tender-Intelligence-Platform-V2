@@ -63,6 +63,87 @@ enum AuditEventType {
   EXTRACTION_REQUIREMENT_REVIEWED
   EXTRACTION_CORRECTION_CREATED
   EXTRACTION_CONFLICT_RESOLVED
+  RISK_ANALYSIS_STARTED
+  RISK_ANALYSIS_CANCELLED
+  RISK_ANALYSIS_RETRIED
+  RISK_ANALYSIS_ACTIVATED
+  RISK_ANALYSIS_INVALIDATED
+  RISK_FINDING_REVIEWED
+  RISK_PURSUIT_DECISION_RECORDED
+  RISK_PURSUIT_DECISION_SUPERSEDED
+}
+
+enum RiskAnalysisGate {
+  EARLY
+  FINAL_READINESS
+}
+
+enum RiskAnalysisRunStatus {
+  QUEUED
+  ANALYSING
+  VALIDATING
+  COMPLETE
+  FAILED
+  CANCELLED
+  INVALIDATED
+}
+
+enum RiskAnalysisTriggerType {
+  USER
+  RETRY
+  EXTRACTION_CHANGE
+  CORRIGENDUM
+}
+
+enum RiskSeverity {
+  INFORMATIONAL
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum RiskMateriality {
+  NON_MATERIAL
+  MATERIAL
+  POTENTIALLY_BLOCKING
+  BLOCKING_REQUIRES_HUMAN_DISPOSITION
+}
+
+enum RiskFindingStatus {
+  OPEN
+  UNDER_REVIEW
+  ACKNOWLEDGED
+  MITIGATED
+  ACCEPTED_RISK
+  DISMISSED
+  RESOLVED
+  SUPERSEDED
+  INVALIDATED
+}
+
+enum RiskReviewState {
+  UNREVIEWED
+  HUMAN_REVIEW_REQUIRED
+  REVIEWED
+}
+
+enum RiskReviewAction {
+  ACKNOWLEDGE
+  REQUEST_REVIEW
+  CONFIRM
+  DISMISS
+  CHANGE_SEVERITY
+  MARK_MITIGATED
+  ACCEPT_RISK
+  RESOLVE
+  REOPEN
+}
+
+enum PursuitDecision {
+  CONTINUE
+  HOLD
+  STOP
 }
 
 enum ExtractionRunStatus {
@@ -277,83 +358,90 @@ enum OnboardingStatus {
 }
 
 model User {
-  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  email               String               @unique @db.VarChar(320)
-  passwordHash        String               @map("password_hash")
-  displayName         String               @map("display_name") @db.VarChar(120)
-  platformRole        Role?                @map("platform_role")
-  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt           DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
-  sessions            Session[]
-  memberships         OrganisationMembership[]
-  createdOrganisations Organisation[]      @relation("OrganisationCreator")
-  sentInvitations     Invitation[]          @relation("InvitationSender")
-  acceptedInvitations Invitation[]          @relation("InvitationAcceptor")
-  passwordResetTokens PasswordResetToken[]
-  auditEvents         AuditEvent[]          @relation("AuditActor")
-  onboardingProgress  OnboardingProgress[]
-  updatedProfileValues CompanyProfileValue[] @relation("ProfileValueUpdater")
-  ownedDocuments       Document[]             @relation("DocumentOwner")
-  uploadedDocumentVersions DocumentVersion[]  @relation("DocumentVersionUploader")
-  documentVerifications DocumentVerification[] @relation("DocumentVerifier")
-  documentAccessEvents DocumentAccessEvent[]
-  createdTenders Tender[] @relation("TenderCreator")
-  createdTenderVersions TenderVersion[] @relation("TenderVersionCreator")
-  uploadedTenderDocuments TenderDocument[] @relation("TenderDocumentUploader")
-  importedTenderSources TenderSource[] @relation("TenderSourceImporter")
-  createdTenderWorkspaces TenderWorkspace[] @relation("TenderWorkspaceCreator")
-  cancelledTenderJobs ProcessingJob[] @relation("TenderJobCanceller")
-  requestedExtractionRuns ExtractionRun[] @relation("ExtractionRunRequester")
-  extractionReviews ExtractionReview[]
+  id                        String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  email                     String                   @unique @db.VarChar(320)
+  passwordHash              String                   @map("password_hash")
+  displayName               String                   @map("display_name") @db.VarChar(120)
+  platformRole              Role?                    @map("platform_role")
+  createdAt                 DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                 DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  sessions                  Session[]
+  memberships               OrganisationMembership[]
+  createdOrganisations      Organisation[]           @relation("OrganisationCreator")
+  sentInvitations           Invitation[]             @relation("InvitationSender")
+  acceptedInvitations       Invitation[]             @relation("InvitationAcceptor")
+  passwordResetTokens       PasswordResetToken[]
+  auditEvents               AuditEvent[]             @relation("AuditActor")
+  onboardingProgress        OnboardingProgress[]
+  updatedProfileValues      CompanyProfileValue[]    @relation("ProfileValueUpdater")
+  ownedDocuments            Document[]               @relation("DocumentOwner")
+  uploadedDocumentVersions  DocumentVersion[]        @relation("DocumentVersionUploader")
+  documentVerifications     DocumentVerification[]   @relation("DocumentVerifier")
+  documentAccessEvents      DocumentAccessEvent[]
+  createdTenders            Tender[]                 @relation("TenderCreator")
+  createdTenderVersions     TenderVersion[]          @relation("TenderVersionCreator")
+  uploadedTenderDocuments   TenderDocument[]         @relation("TenderDocumentUploader")
+  importedTenderSources     TenderSource[]           @relation("TenderSourceImporter")
+  createdTenderWorkspaces   TenderWorkspace[]        @relation("TenderWorkspaceCreator")
+  cancelledTenderJobs       ProcessingJob[]          @relation("TenderJobCanceller")
+  requestedExtractionRuns   ExtractionRun[]          @relation("ExtractionRunRequester")
+  extractionReviews         ExtractionReview[]
+  requestedRiskAnalysisRuns RiskAnalysisRun[]        @relation("RiskAnalysisRequester")
+  riskFindingReviews        RiskFindingReview[]
+  pursuitDecisions          EarlyPursuitDecision[]
 
   @@map("users")
 }
 
 model Session {
-  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId        String    @map("user_id") @db.Uuid
-  tokenHash     String    @unique @map("token_hash") @db.Char(64)
-  activeOrganisationId String? @map("active_organisation_id") @db.Uuid
-  expiresAt     DateTime  @map("expires_at") @db.Timestamptz(3)
-  revokedAt     DateTime? @map("revoked_at") @db.Timestamptz(3)
-  lastSeenAt    DateTime  @default(now()) @map("last_seen_at") @db.Timestamptz(3)
-  ipHash        String?   @map("ip_hash") @db.Char(64)
-  userAgentHash String?   @map("user_agent_hash") @db.Char(64)
-  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  activeOrganisation Organisation? @relation(fields: [activeOrganisationId], references: [id], onDelete: SetNull)
+  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId               String        @map("user_id") @db.Uuid
+  tokenHash            String        @unique @map("token_hash") @db.Char(64)
+  activeOrganisationId String?       @map("active_organisation_id") @db.Uuid
+  expiresAt            DateTime      @map("expires_at") @db.Timestamptz(3)
+  revokedAt            DateTime?     @map("revoked_at") @db.Timestamptz(3)
+  lastSeenAt           DateTime      @default(now()) @map("last_seen_at") @db.Timestamptz(3)
+  ipHash               String?       @map("ip_hash") @db.Char(64)
+  userAgentHash        String?       @map("user_agent_hash") @db.Char(64)
+  createdAt            DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  activeOrganisation   Organisation? @relation(fields: [activeOrganisationId], references: [id], onDelete: SetNull)
 
   @@index([userId, revokedAt, expiresAt])
   @@map("sessions")
 }
 
 model Organisation {
-  id             String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  name           String               @db.VarChar(160)
-  type           OrganisationType
-  createdByUserId String               @map("created_by_user_id") @db.Uuid
-  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime             @updatedAt @map("updated_at") @db.Timestamptz(3)
-  createdBy      User                 @relation("OrganisationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  memberships    OrganisationMembership[]
-  invitations    Invitation[]
-  sessions       Session[]
-  auditEvents    AuditEvent[]
-  onboardingProgress OnboardingProgress[]
-  companyProfile CompanyProfile?
-  profileValues CompanyProfileValue[]
-  turnoverRecords CompanyTurnover[]
-  documentReadiness DocumentReadiness[]
-  documents       Document[]
-  uploadSessions  UploadSession[]
-  documentAccessEvents DocumentAccessEvent[]
-  tenders Tender[]
-  tenderWorkspaces TenderWorkspace[]
-  tenderDocuments TenderDocument[]
-  tenderSources TenderSource[]
-  tenderProcessingJobs ProcessingJob[]
-  extractionRuns ExtractionRun[]
-  extractionReviews ExtractionReview[]
+  id                    String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name                  String                   @db.VarChar(160)
+  type                  OrganisationType
+  createdByUserId       String                   @map("created_by_user_id") @db.Uuid
+  createdAt             DateTime                 @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt             DateTime                 @updatedAt @map("updated_at") @db.Timestamptz(3)
+  createdBy             User                     @relation("OrganisationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  memberships           OrganisationMembership[]
+  invitations           Invitation[]
+  sessions              Session[]
+  auditEvents           AuditEvent[]
+  onboardingProgress    OnboardingProgress[]
+  companyProfile        CompanyProfile?
+  profileValues         CompanyProfileValue[]
+  turnoverRecords       CompanyTurnover[]
+  documentReadiness     DocumentReadiness[]
+  documents             Document[]
+  uploadSessions        UploadSession[]
+  documentAccessEvents  DocumentAccessEvent[]
+  tenders               Tender[]
+  tenderWorkspaces      TenderWorkspace[]
+  tenderDocuments       TenderDocument[]
+  tenderSources         TenderSource[]
+  tenderProcessingJobs  ProcessingJob[]
+  extractionRuns        ExtractionRun[]
+  extractionReviews     ExtractionReview[]
+  riskAnalysisRuns      RiskAnalysisRun[]
+  riskFindings          RiskFinding[]
+  riskFindingReviews    RiskFindingReview[]
+  earlyPursuitDecisions EarlyPursuitDecision[]
 
   @@map("organisations")
 }
@@ -375,20 +463,20 @@ model OrganisationMembership {
 }
 
 model Invitation {
-  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId String           @map("organisation_id") @db.Uuid
-  email          String           @db.VarChar(320)
-  role           Role
-  tokenHash      String           @unique @map("token_hash") @db.Char(64)
-  status         InvitationStatus @default(PENDING)
-  expiresAt      DateTime         @map("expires_at") @db.Timestamptz(3)
-  invitedByUserId String          @map("invited_by_user_id") @db.Uuid
-  acceptedByUserId String?        @map("accepted_by_user_id") @db.Uuid
-  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
-  acceptedAt     DateTime?        @map("accepted_at") @db.Timestamptz(3)
-  organisation   Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  invitedBy      User             @relation("InvitationSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
-  acceptedBy     User?            @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId   String           @map("organisation_id") @db.Uuid
+  email            String           @db.VarChar(320)
+  role             Role
+  tokenHash        String           @unique @map("token_hash") @db.Char(64)
+  status           InvitationStatus @default(PENDING)
+  expiresAt        DateTime         @map("expires_at") @db.Timestamptz(3)
+  invitedByUserId  String           @map("invited_by_user_id") @db.Uuid
+  acceptedByUserId String?          @map("accepted_by_user_id") @db.Uuid
+  createdAt        DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  acceptedAt       DateTime?        @map("accepted_at") @db.Timestamptz(3)
+  organisation     Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  invitedBy        User             @relation("InvitationSender", fields: [invitedByUserId], references: [id], onDelete: Restrict)
+  acceptedBy       User?            @relation("InvitationAcceptor", fields: [acceptedByUserId], references: [id], onDelete: SetNull)
 
   @@index([organisationId, status])
   @@index([email, status])
@@ -396,13 +484,13 @@ model Invitation {
 }
 
 model PasswordResetToken {
-  id          String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  userId      String    @map("user_id") @db.Uuid
-  tokenHash   String    @unique @map("token_hash") @db.Char(64)
-  expiresAt   DateTime  @map("expires_at") @db.Timestamptz(3)
-  consumedAt  DateTime? @map("consumed_at") @db.Timestamptz(3)
-  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
-  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id         String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  tokenHash  String    @unique @map("token_hash") @db.Char(64)
+  expiresAt  DateTime  @map("expires_at") @db.Timestamptz(3)
+  consumedAt DateTime? @map("consumed_at") @db.Timestamptz(3)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, consumedAt, expiresAt])
   @@map("password_reset_tokens")
@@ -430,17 +518,17 @@ model AuditEvent {
 }
 
 model OnboardingProgress {
-  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId String       @map("organisation_id") @db.Uuid
-  userId         String       @map("user_id") @db.Uuid
-  currentStep    Int          @default(1) @map("current_step")
-  completedSteps Int[]        @default([]) @map("completed_steps")
+  id             String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId String           @map("organisation_id") @db.Uuid
+  userId         String           @map("user_id") @db.Uuid
+  currentStep    Int              @default(1) @map("current_step")
+  completedSteps Int[]            @default([]) @map("completed_steps")
   status         OnboardingStatus @default(NOT_STARTED)
-  completedAt    DateTime?    @map("completed_at") @db.Timestamptz(3)
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
-  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  completedAt    DateTime?        @map("completed_at") @db.Timestamptz(3)
+  createdAt      DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation   Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user           User             @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([organisationId, userId])
   @@map("onboarding_progress")
@@ -513,26 +601,26 @@ model DocumentReadiness {
 }
 
 model Document {
-  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId     String                     @map("organisation_id") @db.Uuid
-  ownerUserId        String                     @map("owner_user_id") @db.Uuid
-  category           DocumentCategory
-  displayName        String                     @map("display_name") @db.VarChar(255)
-  status             DocumentStatus             @default(UPLOADING)
-  verificationStatus DocumentVerificationStatus @default(UNVERIFIED) @map("verification_status")
-  expiryDate         DateTime?                  @map("expiry_date") @db.Date
-  currentVersionId   String?                    @unique @map("current_version_id") @db.Uuid
-  retentionUntil     DateTime?                  @map("retention_until") @db.Timestamptz(3)
-  deletionRequestedAt DateTime?                 @map("deletion_requested_at") @db.Timestamptz(3)
-  deletedAt          DateTime?                  @map("deleted_at") @db.Timestamptz(3)
-  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
-  organisation       Organisation               @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  owner              User                       @relation("DocumentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
-  currentVersion     DocumentVersion?           @relation("CurrentDocumentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  versions           DocumentVersion[]          @relation("DocumentVersions")
-  verifications      DocumentVerification[]
-  accessEvents       DocumentAccessEvent[]
+  id                  String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId      String                     @map("organisation_id") @db.Uuid
+  ownerUserId         String                     @map("owner_user_id") @db.Uuid
+  category            DocumentCategory
+  displayName         String                     @map("display_name") @db.VarChar(255)
+  status              DocumentStatus             @default(UPLOADING)
+  verificationStatus  DocumentVerificationStatus @default(UNVERIFIED) @map("verification_status")
+  expiryDate          DateTime?                  @map("expiry_date") @db.Date
+  currentVersionId    String?                    @unique @map("current_version_id") @db.Uuid
+  retentionUntil      DateTime?                  @map("retention_until") @db.Timestamptz(3)
+  deletionRequestedAt DateTime?                  @map("deletion_requested_at") @db.Timestamptz(3)
+  deletedAt           DateTime?                  @map("deleted_at") @db.Timestamptz(3)
+  createdAt           DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation        Organisation               @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  owner               User                       @relation("DocumentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  currentVersion      DocumentVersion?           @relation("CurrentDocumentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions            DocumentVersion[]          @relation("DocumentVersions")
+  verifications       DocumentVerification[]
+  accessEvents        DocumentAccessEvent[]
 
   @@index([organisationId, category, status])
   @@index([organisationId, expiryDate])
@@ -540,24 +628,24 @@ model Document {
 }
 
 model DocumentVersion {
-  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  documentId         String         @map("document_id") @db.Uuid
-  versionNumber      Int            @map("version_number")
-  originalFilename   String         @map("original_filename") @db.VarChar(255)
-  declaredMimeType   String         @map("declared_mime_type") @db.VarChar(120)
-  detectedMimeType   String?        @map("detected_mime_type") @db.VarChar(120)
-  extension          String         @db.VarChar(16)
-  sizeBytes          BigInt         @map("size_bytes")
-  sha256             String         @db.Char(64)
-  quarantineObjectKey String        @unique @map("quarantine_object_key") @db.VarChar(512)
-  approvedObjectKey  String?        @unique @map("approved_object_key") @db.VarChar(512)
-  uploadedByUserId   String         @map("uploaded_by_user_id") @db.Uuid
-  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  document           Document       @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
-  currentForDocument Document?      @relation("CurrentDocumentVersion")
-  uploadedBy         User           @relation("DocumentVersionUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
-  uploadSession      UploadSession?
-  extraction         DocumentExtraction?
+  id                  String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId          String              @map("document_id") @db.Uuid
+  versionNumber       Int                 @map("version_number")
+  originalFilename    String              @map("original_filename") @db.VarChar(255)
+  declaredMimeType    String              @map("declared_mime_type") @db.VarChar(120)
+  detectedMimeType    String?             @map("detected_mime_type") @db.VarChar(120)
+  extension           String              @db.VarChar(16)
+  sizeBytes           BigInt              @map("size_bytes")
+  sha256              String              @db.Char(64)
+  quarantineObjectKey String              @unique @map("quarantine_object_key") @db.VarChar(512)
+  approvedObjectKey   String?             @unique @map("approved_object_key") @db.VarChar(512)
+  uploadedByUserId    String              @map("uploaded_by_user_id") @db.Uuid
+  createdAt           DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  document            Document            @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentForDocument  Document?           @relation("CurrentDocumentVersion")
+  uploadedBy          User                @relation("DocumentVersionUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  uploadSession       UploadSession?
+  extraction          DocumentExtraction?
 
   @@unique([documentId, versionNumber])
   @@index([sha256])
@@ -565,15 +653,15 @@ model DocumentVersion {
 }
 
 model UploadSession {
-  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId     String              @map("organisation_id") @db.Uuid
-  documentVersionId  String              @unique @map("document_version_id") @db.Uuid
-  status             UploadSessionStatus @default(PENDING)
-  expiresAt          DateTime            @map("expires_at") @db.Timestamptz(3)
-  completedAt        DateTime?           @map("completed_at") @db.Timestamptz(3)
-  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
-  organisation       Organisation        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  documentVersion    DocumentVersion     @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+  id                String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId    String              @map("organisation_id") @db.Uuid
+  documentVersionId String              @unique @map("document_version_id") @db.Uuid
+  status            UploadSessionStatus @default(PENDING)
+  expiresAt         DateTime            @map("expires_at") @db.Timestamptz(3)
+  completedAt       DateTime?           @map("completed_at") @db.Timestamptz(3)
+  createdAt         DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation      Organisation        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  documentVersion   DocumentVersion     @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
 
   @@index([organisationId, status, expiresAt])
   @@map("upload_sessions")
@@ -594,14 +682,14 @@ model DocumentExtraction {
 }
 
 model DocumentVerification {
-  id             String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  documentId     String                     @map("document_id") @db.Uuid
-  status         DocumentVerificationStatus
-  rationale      String?                    @db.VarChar(1000)
-  verifiedByUserId String?                  @map("verified_by_user_id") @db.Uuid
-  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
-  document       Document                   @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  verifiedBy     User?                      @relation("DocumentVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+  id               String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId       String                     @map("document_id") @db.Uuid
+  status           DocumentVerificationStatus
+  rationale        String?                    @db.VarChar(1000)
+  verifiedByUserId String?                    @map("verified_by_user_id") @db.Uuid
+  createdAt        DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  document         Document                   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  verifiedBy       User?                      @relation("DocumentVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
 
   @@index([documentId, createdAt])
   @@map("document_verifications")
@@ -625,55 +713,58 @@ model DocumentAccessEvent {
 }
 
 model TenderWorkspace {
-  id                   String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId       String                @map("organisation_id") @db.Uuid
-  tenderId             String?               @unique @map("tender_id") @db.Uuid
-  status               TenderWorkspaceStatus @default(DRAFT)
-  sourceSectionStatus  String                @default("NOT_STARTED") @map("source_section_status") @db.VarChar(32)
-  processingProgress   Int                   @default(0) @map("processing_progress")
-  createdByUserId      String                @map("created_by_user_id") @db.Uuid
-  createdAt            DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt            DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
-  organisation         Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  tender               Tender?               @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  createdBy            User                  @relation("TenderWorkspaceCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId      String                @map("organisation_id") @db.Uuid
+  tenderId            String?               @unique @map("tender_id") @db.Uuid
+  status              TenderWorkspaceStatus @default(DRAFT)
+  sourceSectionStatus String                @default("NOT_STARTED") @map("source_section_status") @db.VarChar(32)
+  processingProgress  Int                   @default(0) @map("processing_progress")
+  createdByUserId     String                @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation        Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender              Tender?               @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  createdBy           User                  @relation("TenderWorkspaceCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@index([organisationId, status, updatedAt])
   @@map("tender_workspaces")
 }
 
 model Tender {
-  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId        String                @map("organisation_id") @db.Uuid
-  currentVersionId      String?               @unique @map("current_version_id") @db.Uuid
-  sourceTenderNumber    String?               @map("source_tender_number") @db.VarChar(160)
-  title                 String                @db.VarChar(300)
-  buyer                 String                @db.VarChar(240)
-  category              String?               @db.VarChar(120)
-  procurementType       String?               @map("procurement_type") @db.VarChar(80)
-  publicationDate       DateTime?             @map("publication_date") @db.Date
-  submissionDeadline    DateTime              @map("submission_deadline") @db.Timestamptz(3)
-  preBidMeetingDate     DateTime?             @map("pre_bid_meeting_date") @db.Timestamptz(3)
-  openingDate           DateTime?             @map("opening_date") @db.Timestamptz(3)
-  officialSourceUrl     String?               @map("official_source_url") @db.VarChar(2048)
-  sourceType            TenderSourceType      @map("source_type")
-  description           String?               @db.VarChar(4000)
-  isDemonstration       Boolean               @default(false) @map("is_demonstration")
-  lifecycleStatus       TenderLifecycleStatus @default(DRAFT) @map("lifecycle_status")
-  createdByUserId       String                @map("created_by_user_id") @db.Uuid
-  archivedAt            DateTime?             @map("archived_at") @db.Timestamptz(3)
-  deletedAt             DateTime?             @map("deleted_at") @db.Timestamptz(3)
-  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
-  organisation          Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  createdBy             User                  @relation("TenderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  workspace             TenderWorkspace?
-  currentVersion        TenderVersion?        @relation("CurrentTenderVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  versions              TenderVersion[]       @relation("TenderVersions")
-  sources               TenderSource[]
-  corrigenda            TenderCorrigendum[]
-  processingJobs        ProcessingJob[]
-  extractionRuns        ExtractionRun[]
+  id                 String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String                 @map("organisation_id") @db.Uuid
+  currentVersionId   String?                @unique @map("current_version_id") @db.Uuid
+  sourceTenderNumber String?                @map("source_tender_number") @db.VarChar(160)
+  title              String                 @db.VarChar(300)
+  buyer              String                 @db.VarChar(240)
+  category           String?                @db.VarChar(120)
+  procurementType    String?                @map("procurement_type") @db.VarChar(80)
+  publicationDate    DateTime?              @map("publication_date") @db.Date
+  submissionDeadline DateTime               @map("submission_deadline") @db.Timestamptz(3)
+  preBidMeetingDate  DateTime?              @map("pre_bid_meeting_date") @db.Timestamptz(3)
+  openingDate        DateTime?              @map("opening_date") @db.Timestamptz(3)
+  officialSourceUrl  String?                @map("official_source_url") @db.VarChar(2048)
+  sourceType         TenderSourceType       @map("source_type")
+  description        String?                @db.VarChar(4000)
+  isDemonstration    Boolean                @default(false) @map("is_demonstration")
+  lifecycleStatus    TenderLifecycleStatus  @default(DRAFT) @map("lifecycle_status")
+  createdByUserId    String                 @map("created_by_user_id") @db.Uuid
+  archivedAt         DateTime?              @map("archived_at") @db.Timestamptz(3)
+  deletedAt          DateTime?              @map("deleted_at") @db.Timestamptz(3)
+  createdAt          DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime               @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation       Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  createdBy          User                   @relation("TenderCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  workspace          TenderWorkspace?
+  currentVersion     TenderVersion?         @relation("CurrentTenderVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions           TenderVersion[]        @relation("TenderVersions")
+  sources            TenderSource[]
+  corrigenda         TenderCorrigendum[]
+  processingJobs     ProcessingJob[]
+  extractionRuns     ExtractionRun[]
+  riskAnalysisRuns   RiskAnalysisRun[]
+  riskFindings       RiskFinding[]
+  pursuitDecisions   EarlyPursuitDecision[]
 
   @@index([organisationId, lifecycleStatus, submissionDeadline])
   @@index([organisationId, sourceTenderNumber])
@@ -681,28 +772,33 @@ model Tender {
 }
 
 model TenderVersion {
-  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenderId              String            @map("tender_id") @db.Uuid
-  versionNumber         Int               @map("version_number")
-  previousVersionId     String?           @map("previous_version_id") @db.Uuid
-  activeExtractionRunId String?           @unique @map("active_extraction_run_id") @db.Uuid
-  reason                String            @db.VarChar(500)
-  sourceSnapshot        Json              @map("source_snapshot")
-  sourceFingerprint     String            @map("source_fingerprint") @db.Char(64)
-  sourceProvenance      String            @map("source_provenance") @db.VarChar(1000)
-  createdByUserId       String            @map("created_by_user_id") @db.Uuid
-  ingestedAt            DateTime          @default(now()) @map("ingested_at") @db.Timestamptz(3)
-  tender                Tender            @relation("TenderVersions", fields: [tenderId], references: [id], onDelete: Cascade)
-  currentForTender      Tender?           @relation("CurrentTenderVersion")
-  previousVersion       TenderVersion?    @relation("TenderVersionChain", fields: [previousVersionId], references: [id], onDelete: Restrict)
-  nextVersions          TenderVersion[]   @relation("TenderVersionChain")
-  createdBy             User              @relation("TenderVersionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId              String                 @map("tender_id") @db.Uuid
+  versionNumber         Int                    @map("version_number")
+  previousVersionId     String?                @map("previous_version_id") @db.Uuid
+  activeExtractionRunId String?                @unique @map("active_extraction_run_id") @db.Uuid
+  reason                String                 @db.VarChar(500)
+  sourceSnapshot        Json                   @map("source_snapshot")
+  sourceFingerprint     String                 @map("source_fingerprint") @db.Char(64)
+  sourceProvenance      String                 @map("source_provenance") @db.VarChar(1000)
+  createdByUserId       String                 @map("created_by_user_id") @db.Uuid
+  ingestedAt            DateTime               @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  tender                Tender                 @relation("TenderVersions", fields: [tenderId], references: [id], onDelete: Cascade)
+  currentForTender      Tender?                @relation("CurrentTenderVersion")
+  previousVersion       TenderVersion?         @relation("TenderVersionChain", fields: [previousVersionId], references: [id], onDelete: Restrict)
+  nextVersions          TenderVersion[]        @relation("TenderVersionChain")
+  createdBy             User                   @relation("TenderVersionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   documents             TenderDocument[]
-  amendedByCorrigenda   TenderCorrigendum[] @relation("CorrigendumAffectedVersion")
-  createdByCorrigendum  TenderCorrigendum?  @relation("CorrigendumResultVersion")
+  amendedByCorrigenda   TenderCorrigendum[]    @relation("CorrigendumAffectedVersion")
+  createdByCorrigendum  TenderCorrigendum?     @relation("CorrigendumResultVersion")
   processingJobs        ProcessingJob[]
-  extractionRuns        ExtractionRun[]      @relation("TenderVersionExtractionRuns")
-  activeExtractionRun   ExtractionRun?       @relation("ActiveTenderExtraction", fields: [activeExtractionRunId], references: [id], onDelete: SetNull)
+  extractionRuns        ExtractionRun[]        @relation("TenderVersionExtractionRuns")
+  activeExtractionRun   ExtractionRun?         @relation("ActiveTenderExtraction", fields: [activeExtractionRunId], references: [id], onDelete: SetNull)
+  activeEarlyRiskRunId  String?                @unique @map("active_early_risk_run_id") @db.Uuid
+  riskAnalysisRuns      RiskAnalysisRun[]      @relation("TenderVersionRiskRuns")
+  activeEarlyRiskRun    RiskAnalysisRun?       @relation("ActiveEarlyRiskRun", fields: [activeEarlyRiskRunId], references: [id], onDelete: SetNull)
+  riskFindings          RiskFinding[]
+  pursuitDecisions      EarlyPursuitDecision[]
 
   @@unique([tenderId, versionNumber])
   @@unique([tenderId, sourceFingerprint])
@@ -710,34 +806,34 @@ model TenderVersion {
 }
 
 model TenderDocument {
-  id                    String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId        String               @map("organisation_id") @db.Uuid
-  tenderVersionId       String               @map("tender_version_id") @db.Uuid
-  role                  TenderDocumentRole
-  originalFilename      String               @map("original_filename") @db.VarChar(255)
-  displayFilename       String               @map("display_filename") @db.VarChar(255)
-  declaredMimeType      String               @map("declared_mime_type") @db.VarChar(120)
-  detectedMimeType      String?              @map("detected_mime_type") @db.VarChar(120)
-  extension             String               @db.VarChar(16)
-  sizeBytes             BigInt               @map("size_bytes")
-  sha256                String               @db.Char(64)
-  quarantineObjectKey   String               @unique @map("quarantine_object_key") @db.VarChar(512)
-  approvedObjectKey     String?              @unique @map("approved_object_key") @db.VarChar(512)
-  status                TenderDocumentStatus @default(UPLOADING)
-  sourceUrl             String?              @map("source_url") @db.VarChar(2048)
-  provenance            String               @db.VarChar(1000)
-  storageMetadata       Json                 @default("{}") @map("storage_metadata")
-  uploadedByUserId      String               @map("uploaded_by_user_id") @db.Uuid
-  uploadSessionExpiresAt DateTime             @map("upload_session_expires_at") @db.Timestamptz(3)
-  uploadCompletedAt     DateTime?             @map("upload_completed_at") @db.Timestamptz(3)
-  retentionUntil        DateTime?             @map("retention_until") @db.Timestamptz(3)
-  deletedAt             DateTime?             @map("deleted_at") @db.Timestamptz(3)
-  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
-  organisation          Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  tenderVersion         TenderVersion         @relation(fields: [tenderVersionId], references: [id], onDelete: Cascade)
-  uploadedBy            User                  @relation("TenderDocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  id                     String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId         String                  @map("organisation_id") @db.Uuid
+  tenderVersionId        String                  @map("tender_version_id") @db.Uuid
+  role                   TenderDocumentRole
+  originalFilename       String                  @map("original_filename") @db.VarChar(255)
+  displayFilename        String                  @map("display_filename") @db.VarChar(255)
+  declaredMimeType       String                  @map("declared_mime_type") @db.VarChar(120)
+  detectedMimeType       String?                 @map("detected_mime_type") @db.VarChar(120)
+  extension              String                  @db.VarChar(16)
+  sizeBytes              BigInt                  @map("size_bytes")
+  sha256                 String                  @db.Char(64)
+  quarantineObjectKey    String                  @unique @map("quarantine_object_key") @db.VarChar(512)
+  approvedObjectKey      String?                 @unique @map("approved_object_key") @db.VarChar(512)
+  status                 TenderDocumentStatus    @default(UPLOADING)
+  sourceUrl              String?                 @map("source_url") @db.VarChar(2048)
+  provenance             String                  @db.VarChar(1000)
+  storageMetadata        Json                    @default("{}") @map("storage_metadata")
+  uploadedByUserId       String                  @map("uploaded_by_user_id") @db.Uuid
+  uploadSessionExpiresAt DateTime                @map("upload_session_expires_at") @db.Timestamptz(3)
+  uploadCompletedAt      DateTime?               @map("upload_completed_at") @db.Timestamptz(3)
+  retentionUntil         DateTime?               @map("retention_until") @db.Timestamptz(3)
+  deletedAt              DateTime?               @map("deleted_at") @db.Timestamptz(3)
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation           Organisation            @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tenderVersion          TenderVersion           @relation(fields: [tenderVersionId], references: [id], onDelete: Cascade)
+  uploadedBy             User                    @relation("TenderDocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   extractionRunDocuments ExtractionRunDocument[]
-  extractionCitations   ExtractionCitation[]
+  extractionCitations    ExtractionCitation[]
 
   @@unique([organisationId, tenderVersionId, role, sha256])
   @@index([organisationId, sha256])
@@ -746,39 +842,39 @@ model TenderDocument {
 }
 
 model TenderSource {
-  id                 String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId     String           @map("organisation_id") @db.Uuid
-  tenderId           String           @map("tender_id") @db.Uuid
-  adapterType        TenderSourceType @map("adapter_type")
-  sourceName         String           @map("source_name") @db.VarChar(160)
-  sourceUrl          String?          @map("source_url") @db.VarChar(2048)
-  sourceTenderId     String?          @map("source_tender_id") @db.VarChar(160)
-  provenance         String           @db.VarChar(1000)
-  importMethod       String           @map("import_method") @db.VarChar(80)
-  externalMetadata   Json?            @map("external_metadata")
-  importedByUserId   String           @map("imported_by_user_id") @db.Uuid
-  importedAt         DateTime         @default(now()) @map("imported_at") @db.Timestamptz(3)
-  organisation       Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  tender             Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  importedBy         User             @relation("TenderSourceImporter", fields: [importedByUserId], references: [id], onDelete: Restrict)
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId   String           @map("organisation_id") @db.Uuid
+  tenderId         String           @map("tender_id") @db.Uuid
+  adapterType      TenderSourceType @map("adapter_type")
+  sourceName       String           @map("source_name") @db.VarChar(160)
+  sourceUrl        String?          @map("source_url") @db.VarChar(2048)
+  sourceTenderId   String?          @map("source_tender_id") @db.VarChar(160)
+  provenance       String           @db.VarChar(1000)
+  importMethod     String           @map("import_method") @db.VarChar(80)
+  externalMetadata Json?            @map("external_metadata")
+  importedByUserId String           @map("imported_by_user_id") @db.Uuid
+  importedAt       DateTime         @default(now()) @map("imported_at") @db.Timestamptz(3)
+  organisation     Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender           Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  importedBy       User             @relation("TenderSourceImporter", fields: [importedByUserId], references: [id], onDelete: Restrict)
 
   @@index([organisationId, adapterType, sourceTenderId])
   @@map("tender_sources")
 }
 
 model TenderCorrigendum {
-  id                   String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  tenderId             String        @map("tender_id") @db.Uuid
-  affectedVersionId    String        @map("affected_version_id") @db.Uuid
-  resultingVersionId   String        @unique @map("resulting_version_id") @db.Uuid
-  identifier           String        @db.VarChar(160)
-  publicationDate      DateTime?     @map("publication_date") @db.Date
-  description          String        @db.VarChar(2000)
-  sourceUrl            String?       @map("source_url") @db.VarChar(2048)
-  ingestedAt           DateTime      @default(now()) @map("ingested_at") @db.Timestamptz(3)
-  tender               Tender        @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  affectedVersion      TenderVersion @relation("CorrigendumAffectedVersion", fields: [affectedVersionId], references: [id], onDelete: Restrict)
-  resultingVersion     TenderVersion @relation("CorrigendumResultVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict)
+  id                 String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenderId           String        @map("tender_id") @db.Uuid
+  affectedVersionId  String        @map("affected_version_id") @db.Uuid
+  resultingVersionId String        @unique @map("resulting_version_id") @db.Uuid
+  identifier         String        @db.VarChar(160)
+  publicationDate    DateTime?     @map("publication_date") @db.Date
+  description        String        @db.VarChar(2000)
+  sourceUrl          String?       @map("source_url") @db.VarChar(2048)
+  ingestedAt         DateTime      @default(now()) @map("ingested_at") @db.Timestamptz(3)
+  tender             Tender        @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  affectedVersion    TenderVersion @relation("CorrigendumAffectedVersion", fields: [affectedVersionId], references: [id], onDelete: Restrict)
+  resultingVersion   TenderVersion @relation("CorrigendumResultVersion", fields: [resultingVersionId], references: [id], onDelete: Restrict)
 
   @@unique([tenderId, identifier])
   @@index([tenderId, ingestedAt])
@@ -786,30 +882,30 @@ model TenderCorrigendum {
 }
 
 model ProcessingJob {
-  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId        String         @map("organisation_id") @db.Uuid
-  tenderId              String         @map("tender_id") @db.Uuid
-  tenderVersionId       String         @map("tender_version_id") @db.Uuid
-  jobType               TenderJobType  @map("job_type")
-  idempotencyKey        String         @unique @map("idempotency_key") @db.VarChar(200)
-  state                 TenderJobState @default(QUEUED)
-  progressPercentage    Int            @default(0) @map("progress_percentage")
-  currentStage          String         @default("QUEUED") @map("current_stage") @db.VarChar(80)
-  publicMessage         String         @default("Source ingestion queued") @map("public_message") @db.VarChar(240)
-  eventSequence         Int            @default(1) @map("event_sequence")
-  retryCount            Int            @default(0) @map("retry_count")
-  failureCategory       String?        @map("failure_category") @db.VarChar(80)
-  internalErrorReference String?       @map("internal_error_reference") @db.VarChar(128)
-  cancellationRequestedAt DateTime?    @map("cancellation_requested_at") @db.Timestamptz(3)
-  cancelledByUserId     String?        @map("cancelled_by_user_id") @db.Uuid
-  startedAt             DateTime?      @map("started_at") @db.Timestamptz(3)
-  completedAt           DateTime?      @map("completed_at") @db.Timestamptz(3)
-  createdAt             DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
-  organisation          Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  tender                Tender         @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  tenderVersion         TenderVersion  @relation(fields: [tenderVersionId], references: [id], onDelete: Cascade)
-  cancelledBy           User?          @relation("TenderJobCanceller", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+  id                      String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId          String         @map("organisation_id") @db.Uuid
+  tenderId                String         @map("tender_id") @db.Uuid
+  tenderVersionId         String         @map("tender_version_id") @db.Uuid
+  jobType                 TenderJobType  @map("job_type")
+  idempotencyKey          String         @unique @map("idempotency_key") @db.VarChar(200)
+  state                   TenderJobState @default(QUEUED)
+  progressPercentage      Int            @default(0) @map("progress_percentage")
+  currentStage            String         @default("QUEUED") @map("current_stage") @db.VarChar(80)
+  publicMessage           String         @default("Source ingestion queued") @map("public_message") @db.VarChar(240)
+  eventSequence           Int            @default(1) @map("event_sequence")
+  retryCount              Int            @default(0) @map("retry_count")
+  failureCategory         String?        @map("failure_category") @db.VarChar(80)
+  internalErrorReference  String?        @map("internal_error_reference") @db.VarChar(128)
+  cancellationRequestedAt DateTime?      @map("cancellation_requested_at") @db.Timestamptz(3)
+  cancelledByUserId       String?        @map("cancelled_by_user_id") @db.Uuid
+  startedAt               DateTime?      @map("started_at") @db.Timestamptz(3)
+  completedAt             DateTime?      @map("completed_at") @db.Timestamptz(3)
+  createdAt               DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation            Organisation   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                  Tender         @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion           TenderVersion  @relation(fields: [tenderVersionId], references: [id], onDelete: Cascade)
+  cancelledBy             User?          @relation("TenderJobCanceller", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
 
   @@index([organisationId, tenderId, state])
   @@index([tenderVersionId, createdAt])
@@ -817,47 +913,49 @@ model ProcessingJob {
 }
 
 model ExtractionRun {
-  id                    String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId        String                @map("organisation_id") @db.Uuid
-  tenderId              String                @map("tender_id") @db.Uuid
-  tenderVersionId       String                @map("tender_version_id") @db.Uuid
-  status                ExtractionRunStatus   @default(QUEUED)
-  triggerType           ExtractionTriggerType @map("trigger_type")
-  parserPolicyVersion   String                @map("parser_policy_version") @db.VarChar(80)
-  structuringPolicyVersion String              @map("structuring_policy_version") @db.VarChar(80)
-  idempotencyKey        String                @unique @map("idempotency_key") @db.VarChar(240)
-  sourceFingerprint     String                @map("source_fingerprint") @db.Char(64)
-  progressPercentage    Int                   @default(0) @map("progress_percentage")
-  currentStage          String                @default("QUEUED") @map("current_stage") @db.VarChar(80)
-  publicMessage         String                @default("Extraction queued") @map("public_message") @db.VarChar(240)
-  eventSequence         Int                   @default(1) @map("event_sequence")
-  requestedByUserId     String                @map("requested_by_user_id") @db.Uuid
-  cancellationRequestedAt DateTime?           @map("cancellation_requested_at") @db.Timestamptz(3)
-  retryCount            Int                   @default(0) @map("retry_count")
-  failureCategory       String?               @map("failure_category") @db.VarChar(80)
-  internalFailureReference String?            @map("internal_failure_reference") @db.VarChar(128)
-  safeFailureMessage    String?               @map("safe_failure_message") @db.VarChar(240)
-  qualitySummary        Json                  @default("{}") @map("quality_summary")
-  startedAt             DateTime?             @map("started_at") @db.Timestamptz(3)
-  completedAt           DateTime?             @map("completed_at") @db.Timestamptz(3)
-  invalidatedAt         DateTime?             @map("invalidated_at") @db.Timestamptz(3)
-  createdAt             DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
-  updatedAt             DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
-  organisation          Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  tender                Tender                @relation(fields: [tenderId], references: [id], onDelete: Cascade)
-  tenderVersion         TenderVersion         @relation("TenderVersionExtractionRuns", fields: [tenderVersionId], references: [id], onDelete: Restrict)
-  activeForVersion      TenderVersion?        @relation("ActiveTenderExtraction")
-  requestedBy           User                  @relation("ExtractionRunRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
-  documents             ExtractionRunDocument[]
-  units                 ExtractedUnit[]
-  blocks                ExtractedBlock[]
-  tables                ExtractedTable[]
-  sections              ClassifiedSection[]
-  fields                ExtractedTenderField[]
-  requirements          StructuredRequirement[]
-  citations             ExtractionCitation[]
-  issues                ExtractionIssue[]
-  reviews               ExtractionReview[]
+  id                       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String                  @map("organisation_id") @db.Uuid
+  tenderId                 String                  @map("tender_id") @db.Uuid
+  tenderVersionId          String                  @map("tender_version_id") @db.Uuid
+  status                   ExtractionRunStatus     @default(QUEUED)
+  triggerType              ExtractionTriggerType   @map("trigger_type")
+  parserPolicyVersion      String                  @map("parser_policy_version") @db.VarChar(80)
+  structuringPolicyVersion String                  @map("structuring_policy_version") @db.VarChar(80)
+  idempotencyKey           String                  @unique @map("idempotency_key") @db.VarChar(240)
+  sourceFingerprint        String                  @map("source_fingerprint") @db.Char(64)
+  progressPercentage       Int                     @default(0) @map("progress_percentage")
+  currentStage             String                  @default("QUEUED") @map("current_stage") @db.VarChar(80)
+  publicMessage            String                  @default("Extraction queued") @map("public_message") @db.VarChar(240)
+  eventSequence            Int                     @default(1) @map("event_sequence")
+  requestedByUserId        String                  @map("requested_by_user_id") @db.Uuid
+  cancellationRequestedAt  DateTime?               @map("cancellation_requested_at") @db.Timestamptz(3)
+  retryCount               Int                     @default(0) @map("retry_count")
+  failureCategory          String?                 @map("failure_category") @db.VarChar(80)
+  internalFailureReference String?                 @map("internal_failure_reference") @db.VarChar(128)
+  safeFailureMessage       String?                 @map("safe_failure_message") @db.VarChar(240)
+  qualitySummary           Json                    @default("{}") @map("quality_summary")
+  startedAt                DateTime?               @map("started_at") @db.Timestamptz(3)
+  completedAt              DateTime?               @map("completed_at") @db.Timestamptz(3)
+  invalidatedAt            DateTime?               @map("invalidated_at") @db.Timestamptz(3)
+  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation             Organisation            @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                   Tender                  @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion            TenderVersion           @relation("TenderVersionExtractionRuns", fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  activeForVersion         TenderVersion?          @relation("ActiveTenderExtraction")
+  requestedBy              User                    @relation("ExtractionRunRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  documents                ExtractionRunDocument[]
+  units                    ExtractedUnit[]
+  blocks                   ExtractedBlock[]
+  tables                   ExtractedTable[]
+  sections                 ClassifiedSection[]
+  fields                   ExtractedTenderField[]
+  requirements             StructuredRequirement[]
+  citations                ExtractionCitation[]
+  issues                   ExtractionIssue[]
+  reviews                  ExtractionReview[]
+  riskAnalysisRuns         RiskAnalysisRun[]
+  riskFindings             RiskFinding[]
 
   @@index([organisationId, tenderId, status, createdAt])
   @@index([tenderVersionId, createdAt])
@@ -866,22 +964,22 @@ model ExtractionRun {
 }
 
 model ExtractionRunDocument {
-  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String        @map("extraction_run_id") @db.Uuid
-  tenderDocumentId      String        @map("tender_document_id") @db.Uuid
-  sourceChecksum        String        @map("source_checksum") @db.Char(64)
-  detectedFormat        String        @map("detected_format") @db.VarChar(32)
-  parserName            String        @map("parser_name") @db.VarChar(80)
-  parserVersion         String        @map("parser_version") @db.VarChar(80)
-  parserConfiguration   Json          @default("{}") @map("parser_configuration")
-  status                String        @db.VarChar(32)
-  warningCount          Int           @default(0) @map("warning_count")
-  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  extractionRun         ExtractionRun @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  tenderDocument        TenderDocument @relation(fields: [tenderDocumentId], references: [id], onDelete: Restrict)
-  units                 ExtractedUnit[]
-  blocks                ExtractedBlock[]
-  citations             ExtractionCitation[]
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId     String               @map("extraction_run_id") @db.Uuid
+  tenderDocumentId    String               @map("tender_document_id") @db.Uuid
+  sourceChecksum      String               @map("source_checksum") @db.Char(64)
+  detectedFormat      String               @map("detected_format") @db.VarChar(32)
+  parserName          String               @map("parser_name") @db.VarChar(80)
+  parserVersion       String               @map("parser_version") @db.VarChar(80)
+  parserConfiguration Json                 @default("{}") @map("parser_configuration")
+  status              String               @db.VarChar(32)
+  warningCount        Int                  @default(0) @map("warning_count")
+  createdAt           DateTime             @default(now()) @map("created_at") @db.Timestamptz(3)
+  extractionRun       ExtractionRun        @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  tenderDocument      TenderDocument       @relation(fields: [tenderDocumentId], references: [id], onDelete: Restrict)
+  units               ExtractedUnit[]
+  blocks              ExtractedBlock[]
+  citations           ExtractionCitation[]
 
   @@unique([extractionRunId, tenderDocumentId])
   @@index([tenderDocumentId, extractionRunId])
@@ -889,23 +987,23 @@ model ExtractionRunDocument {
 }
 
 model ExtractedUnit {
-  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String            @map("extraction_run_id") @db.Uuid
-  extractionRunDocumentId String          @map("extraction_run_document_id") @db.Uuid
-  unitType              ExtractedUnitType @map("unit_type")
-  unitIndex             Int               @map("unit_index")
-  label                 String?           @db.VarChar(200)
-  archiveMemberPath     String?           @map("archive_member_path") @db.VarChar(512)
-  language              String?           @db.VarChar(32)
-  characterCount        Int               @default(0) @map("character_count")
-  parserConfidence      ExtractionConfidence @map("parser_confidence")
-  ocrStatus             String            @default("NOT_REQUIRED") @map("ocr_status") @db.VarChar(40)
-  ocrConfidence         Float?            @map("ocr_confidence")
-  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
-  extractionRun         ExtractionRun     @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  extractionRunDocument ExtractionRunDocument @relation(fields: [extractionRunDocumentId], references: [id], onDelete: Cascade)
-  blocks                ExtractedBlock[]
-  citations             ExtractionCitation[]
+  id                      String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId         String                @map("extraction_run_id") @db.Uuid
+  extractionRunDocumentId String                @map("extraction_run_document_id") @db.Uuid
+  unitType                ExtractedUnitType     @map("unit_type")
+  unitIndex               Int                   @map("unit_index")
+  label                   String?               @db.VarChar(200)
+  archiveMemberPath       String?               @map("archive_member_path") @db.VarChar(512)
+  language                String?               @db.VarChar(32)
+  characterCount          Int                   @default(0) @map("character_count")
+  parserConfidence        ExtractionConfidence  @map("parser_confidence")
+  ocrStatus               String                @default("NOT_REQUIRED") @map("ocr_status") @db.VarChar(40)
+  ocrConfidence           Float?                @map("ocr_confidence")
+  createdAt               DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  extractionRun           ExtractionRun         @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  extractionRunDocument   ExtractionRunDocument @relation(fields: [extractionRunDocumentId], references: [id], onDelete: Cascade)
+  blocks                  ExtractedBlock[]
+  citations               ExtractionCitation[]
 
   @@unique([extractionRunDocumentId, unitType, unitIndex, archiveMemberPath])
   @@index([extractionRunId, unitType, unitIndex])
@@ -913,25 +1011,25 @@ model ExtractedUnit {
 }
 
 model ExtractedBlock {
-  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String            @map("extraction_run_id") @db.Uuid
-  extractionRunDocumentId String          @map("extraction_run_document_id") @db.Uuid
-  extractedUnitId       String            @map("extracted_unit_id") @db.Uuid
-  blockType             ExtractedBlockType @map("block_type")
-  readingOrder          Int               @map("reading_order")
-  normalizedText        String            @map("normalized_text") @db.Text
-  sourceStartOffset     Int               @map("source_start_offset")
-  sourceEndOffset       Int               @map("source_end_offset")
-  headingLevel          Int?              @map("heading_level")
-  coordinates           Json?
-  language              String?           @db.VarChar(32)
-  confidence            ExtractionConfidence
-  warnings              String[]          @default([])
-  extractionRun         ExtractionRun     @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  extractionRunDocument ExtractionRunDocument @relation(fields: [extractionRunDocumentId], references: [id], onDelete: Cascade)
-  extractedUnit         ExtractedUnit      @relation(fields: [extractedUnitId], references: [id], onDelete: Cascade)
-  table                 ExtractedTable?
-  citations             ExtractionCitation[]
+  id                      String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId         String                @map("extraction_run_id") @db.Uuid
+  extractionRunDocumentId String                @map("extraction_run_document_id") @db.Uuid
+  extractedUnitId         String                @map("extracted_unit_id") @db.Uuid
+  blockType               ExtractedBlockType    @map("block_type")
+  readingOrder            Int                   @map("reading_order")
+  normalizedText          String                @map("normalized_text") @db.Text
+  sourceStartOffset       Int                   @map("source_start_offset")
+  sourceEndOffset         Int                   @map("source_end_offset")
+  headingLevel            Int?                  @map("heading_level")
+  coordinates             Json?
+  language                String?               @db.VarChar(32)
+  confidence              ExtractionConfidence
+  warnings                String[]              @default([])
+  extractionRun           ExtractionRun         @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  extractionRunDocument   ExtractionRunDocument @relation(fields: [extractionRunDocumentId], references: [id], onDelete: Cascade)
+  extractedUnit           ExtractedUnit         @relation(fields: [extractedUnitId], references: [id], onDelete: Cascade)
+  table                   ExtractedTable?
+  citations               ExtractionCitation[]
 
   @@unique([extractedUnitId, readingOrder])
   @@index([extractionRunId, blockType, readingOrder])
@@ -939,129 +1037,130 @@ model ExtractedBlock {
 }
 
 model ExtractedTable {
-  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String        @map("extraction_run_id") @db.Uuid
-  extractedBlockId      String        @unique @map("extracted_block_id") @db.Uuid
-  rowCount              Int           @map("row_count")
-  columnCount           Int           @map("column_count")
-  confidence            ExtractionConfidence
-  extractionRun         ExtractionRun @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  extractedBlock        ExtractedBlock @relation(fields: [extractedBlockId], references: [id], onDelete: Cascade)
-  cells                 ExtractedTableCell[]
+  id               String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId  String               @map("extraction_run_id") @db.Uuid
+  extractedBlockId String               @unique @map("extracted_block_id") @db.Uuid
+  rowCount         Int                  @map("row_count")
+  columnCount      Int                  @map("column_count")
+  confidence       ExtractionConfidence
+  extractionRun    ExtractionRun        @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  extractedBlock   ExtractedBlock       @relation(fields: [extractedBlockId], references: [id], onDelete: Cascade)
+  cells            ExtractedTableCell[]
 
   @@index([extractionRunId])
   @@map("extracted_tables")
 }
 
 model ExtractedTableCell {
-  id                    String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractedTableId      String         @map("extracted_table_id") @db.Uuid
-  rowIndex              Int            @map("row_index")
-  columnIndex           Int            @map("column_index")
-  cellReference         String?        @map("cell_reference") @db.VarChar(32)
-  displayedValue        String         @map("displayed_value") @db.Text
-  formulaText           String?        @map("formula_text") @db.Text
-  rowSpan               Int            @default(1) @map("row_span")
-  columnSpan            Int            @default(1) @map("column_span")
-  extractedTable        ExtractedTable @relation(fields: [extractedTableId], references: [id], onDelete: Cascade)
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractedTableId String         @map("extracted_table_id") @db.Uuid
+  rowIndex         Int            @map("row_index")
+  columnIndex      Int            @map("column_index")
+  cellReference    String?        @map("cell_reference") @db.VarChar(32)
+  displayedValue   String         @map("displayed_value") @db.Text
+  formulaText      String?        @map("formula_text") @db.Text
+  rowSpan          Int            @default(1) @map("row_span")
+  columnSpan       Int            @default(1) @map("column_span")
+  extractedTable   ExtractedTable @relation(fields: [extractedTableId], references: [id], onDelete: Cascade)
 
   @@unique([extractedTableId, rowIndex, columnIndex])
   @@map("extracted_table_cells")
 }
 
 model ClassifiedSection {
-  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String        @map("extraction_run_id") @db.Uuid
-  category              String        @db.VarChar(80)
-  title                 String        @db.VarChar(300)
-  startReadingOrder     Int           @map("start_reading_order")
-  endReadingOrder       Int           @map("end_reading_order")
-  classificationState   String        @map("classification_state") @db.VarChar(40)
-  confidence            ExtractionConfidence
-  extractionRun         ExtractionRun @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  id                  String               @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId     String               @map("extraction_run_id") @db.Uuid
+  category            String               @db.VarChar(80)
+  title               String               @db.VarChar(300)
+  startReadingOrder   Int                  @map("start_reading_order")
+  endReadingOrder     Int                  @map("end_reading_order")
+  classificationState String               @map("classification_state") @db.VarChar(40)
+  confidence          ExtractionConfidence
+  extractionRun       ExtractionRun        @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
 
   @@index([extractionRunId, category, startReadingOrder])
   @@map("classified_sections")
 }
 
 model ExtractedTenderField {
-  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String                 @map("extraction_run_id") @db.Uuid
-  fieldType             String                 @map("field_type") @db.VarChar(80)
-  sourceWording         String                 @map("source_wording") @db.Text
-  normalizedTextValue   String?                @map("normalized_text_value") @db.Text
-  normalizedNumericValue Decimal?              @map("normalized_numeric_value") @db.Decimal(20, 4)
-  normalizedDateValue   DateTime?              @map("normalized_date_value") @db.Date
-  unit                  String?                @db.VarChar(40)
-  currency              String?                @db.Char(3)
-  findingState          ExtractionFindingState @map("finding_state")
-  confidence            ExtractionConfidence
-  reviewState           ExtractionReviewState @default(UNREVIEWED) @map("review_state")
-  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  extractionRun         ExtractionRun          @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  citations             ExtractionCitation[]
+  id                     String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId        String                 @map("extraction_run_id") @db.Uuid
+  fieldType              String                 @map("field_type") @db.VarChar(80)
+  sourceWording          String                 @map("source_wording") @db.Text
+  normalizedTextValue    String?                @map("normalized_text_value") @db.Text
+  normalizedNumericValue Decimal?               @map("normalized_numeric_value") @db.Decimal(20, 4)
+  normalizedDateValue    DateTime?              @map("normalized_date_value") @db.Date
+  unit                   String?                @db.VarChar(40)
+  currency               String?                @db.Char(3)
+  findingState           ExtractionFindingState @map("finding_state")
+  confidence             ExtractionConfidence
+  reviewState            ExtractionReviewState  @default(UNREVIEWED) @map("review_state")
+  createdAt              DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  extractionRun          ExtractionRun          @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  citations              ExtractionCitation[]
 
   @@index([extractionRunId, fieldType, reviewState])
   @@map("extracted_tender_fields")
 }
 
 model StructuredRequirement {
-  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String                 @map("extraction_run_id") @db.Uuid
-  category              String                 @db.VarChar(80)
-  title                 String                 @db.VarChar(300)
-  normalizedStatement   String                 @map("normalized_statement") @db.Text
-  sourceWording         String                 @map("source_wording") @db.Text
-  obligation            RequirementObligation
-  conditionText         String?                @map("condition_text") @db.Text
-  exceptionText         String?                @map("exception_text") @db.Text
-  thresholdOperator     String?                @map("threshold_operator") @db.VarChar(20)
-  thresholdNumericValue Decimal?               @map("threshold_numeric_value") @db.Decimal(20, 4)
-  thresholdTextValue    String?                @map("threshold_text_value") @db.Text
-  unit                  String?                @db.VarChar(40)
-  currency              String?                @db.Char(3)
-  submissionStage       String?                @map("submission_stage") @db.VarChar(80)
-  confidence            ExtractionConfidence
-  findingState          ExtractionFindingState @map("finding_state")
-  reviewState           ExtractionReviewState @default(UNREVIEWED) @map("review_state")
-  supersedesRequirementId String?              @map("supersedes_requirement_id") @db.Uuid
-  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  extractionRun         ExtractionRun          @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  supersedesRequirement StructuredRequirement? @relation("RequirementSupersession", fields: [supersedesRequirementId], references: [id], onDelete: SetNull)
-  supersededBy          StructuredRequirement[] @relation("RequirementSupersession")
-  citations             ExtractionCitation[]
+  id                      String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId         String                  @map("extraction_run_id") @db.Uuid
+  category                String                  @db.VarChar(80)
+  title                   String                  @db.VarChar(300)
+  normalizedStatement     String                  @map("normalized_statement") @db.Text
+  sourceWording           String                  @map("source_wording") @db.Text
+  obligation              RequirementObligation
+  conditionText           String?                 @map("condition_text") @db.Text
+  exceptionText           String?                 @map("exception_text") @db.Text
+  thresholdOperator       String?                 @map("threshold_operator") @db.VarChar(20)
+  thresholdNumericValue   Decimal?                @map("threshold_numeric_value") @db.Decimal(20, 4)
+  thresholdTextValue      String?                 @map("threshold_text_value") @db.Text
+  unit                    String?                 @db.VarChar(40)
+  currency                String?                 @db.Char(3)
+  submissionStage         String?                 @map("submission_stage") @db.VarChar(80)
+  confidence              ExtractionConfidence
+  findingState            ExtractionFindingState  @map("finding_state")
+  reviewState             ExtractionReviewState   @default(UNREVIEWED) @map("review_state")
+  supersedesRequirementId String?                 @map("supersedes_requirement_id") @db.Uuid
+  createdAt               DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  extractionRun           ExtractionRun           @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  supersedesRequirement   StructuredRequirement?  @relation("RequirementSupersession", fields: [supersedesRequirementId], references: [id], onDelete: SetNull)
+  supersededBy            StructuredRequirement[] @relation("RequirementSupersession")
+  citations               ExtractionCitation[]
 
   @@index([extractionRunId, category, obligation, confidence, reviewState])
   @@map("structured_requirements")
 }
 
 model ExtractionCitation {
-  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String        @map("extraction_run_id") @db.Uuid
-  extractionRunDocumentId String      @map("extraction_run_document_id") @db.Uuid
-  tenderDocumentId      String        @map("tender_document_id") @db.Uuid
-  extractedUnitId       String?       @map("extracted_unit_id") @db.Uuid
-  extractedBlockId      String?       @map("extracted_block_id") @db.Uuid
-  extractedTenderFieldId String?      @map("extracted_tender_field_id") @db.Uuid
-  structuredRequirementId String?     @map("structured_requirement_id") @db.Uuid
-  documentName          String        @map("document_name") @db.VarChar(255)
-  pageNumber            Int?          @map("page_number")
-  sheetName             String?       @map("sheet_name") @db.VarChar(200)
-  cellRange             String?       @map("cell_range") @db.VarChar(80)
-  archiveMemberPath     String?       @map("archive_member_path") @db.VarChar(512)
-  clauseLabel           String?       @map("clause_label") @db.VarChar(160)
-  startOffset           Int           @map("start_offset")
-  endOffset             Int           @map("end_offset")
-  boundedExcerpt        String        @map("bounded_excerpt") @db.VarChar(1000)
-  sourceChecksum        String        @map("source_checksum") @db.Char(64)
-  validationStatus      String        @map("validation_status") @db.VarChar(40)
-  extractionRun         ExtractionRun @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  extractionRunDocument ExtractionRunDocument @relation(fields: [extractionRunDocumentId], references: [id], onDelete: Cascade)
-  tenderDocument        TenderDocument @relation(fields: [tenderDocumentId], references: [id], onDelete: Restrict)
-  extractedUnit         ExtractedUnit? @relation(fields: [extractedUnitId], references: [id], onDelete: Cascade)
-  extractedBlock        ExtractedBlock? @relation(fields: [extractedBlockId], references: [id], onDelete: Cascade)
-  extractedTenderField  ExtractedTenderField? @relation(fields: [extractedTenderFieldId], references: [id], onDelete: Cascade)
-  structuredRequirement StructuredRequirement? @relation(fields: [structuredRequirementId], references: [id], onDelete: Cascade)
+  id                      String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId         String                 @map("extraction_run_id") @db.Uuid
+  extractionRunDocumentId String                 @map("extraction_run_document_id") @db.Uuid
+  tenderDocumentId        String                 @map("tender_document_id") @db.Uuid
+  extractedUnitId         String?                @map("extracted_unit_id") @db.Uuid
+  extractedBlockId        String?                @map("extracted_block_id") @db.Uuid
+  extractedTenderFieldId  String?                @map("extracted_tender_field_id") @db.Uuid
+  structuredRequirementId String?                @map("structured_requirement_id") @db.Uuid
+  documentName            String                 @map("document_name") @db.VarChar(255)
+  pageNumber              Int?                   @map("page_number")
+  sheetName               String?                @map("sheet_name") @db.VarChar(200)
+  cellRange               String?                @map("cell_range") @db.VarChar(80)
+  archiveMemberPath       String?                @map("archive_member_path") @db.VarChar(512)
+  clauseLabel             String?                @map("clause_label") @db.VarChar(160)
+  startOffset             Int                    @map("start_offset")
+  endOffset               Int                    @map("end_offset")
+  boundedExcerpt          String                 @map("bounded_excerpt") @db.VarChar(1000)
+  sourceChecksum          String                 @map("source_checksum") @db.Char(64)
+  validationStatus        String                 @map("validation_status") @db.VarChar(40)
+  extractionRun           ExtractionRun          @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  extractionRunDocument   ExtractionRunDocument  @relation(fields: [extractionRunDocumentId], references: [id], onDelete: Cascade)
+  tenderDocument          TenderDocument         @relation(fields: [tenderDocumentId], references: [id], onDelete: Restrict)
+  extractedUnit           ExtractedUnit?         @relation(fields: [extractedUnitId], references: [id], onDelete: Cascade)
+  extractedBlock          ExtractedBlock?        @relation(fields: [extractedBlockId], references: [id], onDelete: Cascade)
+  extractedTenderField    ExtractedTenderField?  @relation(fields: [extractedTenderFieldId], references: [id], onDelete: Cascade)
+  structuredRequirement   StructuredRequirement? @relation(fields: [structuredRequirementId], references: [id], onDelete: Cascade)
+  riskFindingCitations    RiskFindingCitation[]
 
   @@index([extractionRunId, tenderDocumentId, pageNumber])
   @@index([extractedTenderFieldId])
@@ -1070,40 +1169,184 @@ model ExtractionCitation {
 }
 
 model ExtractionIssue {
-  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  extractionRunId       String        @map("extraction_run_id") @db.Uuid
-  issueType             String        @map("issue_type") @db.VarChar(80)
-  severity              String        @db.VarChar(20)
-  safeMessage           String        @map("safe_message") @db.VarChar(500)
-  sourceDocumentId      String?       @map("source_document_id") @db.Uuid
-  extractedUnitId       String?       @map("extracted_unit_id") @db.Uuid
-  requiresHumanReview   Boolean       @default(false) @map("requires_human_review")
-  resolvedAt            DateTime?     @map("resolved_at") @db.Timestamptz(3)
-  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
-  extractionRun         ExtractionRun @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  extractionRunId     String        @map("extraction_run_id") @db.Uuid
+  issueType           String        @map("issue_type") @db.VarChar(80)
+  severity            String        @db.VarChar(20)
+  safeMessage         String        @map("safe_message") @db.VarChar(500)
+  sourceDocumentId    String?       @map("source_document_id") @db.Uuid
+  extractedUnitId     String?       @map("extracted_unit_id") @db.Uuid
+  requiresHumanReview Boolean       @default(false) @map("requires_human_review")
+  resolvedAt          DateTime?     @map("resolved_at") @db.Timestamptz(3)
+  createdAt           DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  extractionRun       ExtractionRun @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
 
   @@index([extractionRunId, issueType, resolvedAt])
   @@map("extraction_issues")
 }
 
 model ExtractionReview {
-  id                    String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  organisationId        String                 @map("organisation_id") @db.Uuid
-  extractionRunId       String                 @map("extraction_run_id") @db.Uuid
-  targetType            ExtractionReviewTarget @map("target_type")
-  targetId              String                 @map("target_id") @db.Uuid
-  action                ExtractionReviewAction
-  previousValue         String?                @map("previous_value") @db.Text
-  correctedValue        String?                @map("corrected_value") @db.Text
-  reason                String                 @db.VarChar(1000)
-  reviewVersion         Int                    @map("review_version")
-  actorUserId           String                 @map("actor_user_id") @db.Uuid
-  createdAt             DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
-  organisation          Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
-  extractionRun         ExtractionRun          @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
-  actor                 User                   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  id              String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId  String                 @map("organisation_id") @db.Uuid
+  extractionRunId String                 @map("extraction_run_id") @db.Uuid
+  targetType      ExtractionReviewTarget @map("target_type")
+  targetId        String                 @map("target_id") @db.Uuid
+  action          ExtractionReviewAction
+  previousValue   String?                @map("previous_value") @db.Text
+  correctedValue  String?                @map("corrected_value") @db.Text
+  reason          String                 @db.VarChar(1000)
+  reviewVersion   Int                    @map("review_version")
+  actorUserId     String                 @map("actor_user_id") @db.Uuid
+  createdAt       DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation    Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  extractionRun   ExtractionRun          @relation(fields: [extractionRunId], references: [id], onDelete: Cascade)
+  actor           User                   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
 
   @@unique([extractionRunId, targetType, targetId, reviewVersion])
   @@index([organisationId, extractionRunId, targetType, targetId])
   @@map("extraction_reviews")
+}
+
+model RiskAnalysisRun {
+  id                       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String                  @map("organisation_id") @db.Uuid
+  tenderId                 String                  @map("tender_id") @db.Uuid
+  tenderVersionId          String                  @map("tender_version_id") @db.Uuid
+  extractionRunId          String                  @map("extraction_run_id") @db.Uuid
+  gateType                 RiskAnalysisGate        @default(EARLY) @map("gate_type")
+  status                   RiskAnalysisRunStatus   @default(QUEUED)
+  triggerType              RiskAnalysisTriggerType @map("trigger_type")
+  riskPolicyVersion        String                  @map("risk_policy_version") @db.VarChar(80)
+  sourceFingerprint        String                  @map("source_fingerprint") @db.Char(64)
+  idempotencyKey           String                  @unique @map("idempotency_key") @db.VarChar(240)
+  progressPercentage       Int                     @default(0) @map("progress_percentage")
+  currentStage             String                  @default("QUEUED") @map("current_stage") @db.VarChar(80)
+  publicMessage            String                  @default("Early risk analysis queued") @map("public_message") @db.VarChar(240)
+  eventSequence            Int                     @default(1) @map("event_sequence")
+  requestedByUserId        String                  @map("requested_by_user_id") @db.Uuid
+  cancellationRequestedAt  DateTime?               @map("cancellation_requested_at") @db.Timestamptz(3)
+  failureCategory          String?                 @map("failure_category") @db.VarChar(80)
+  safeFailureMessage       String?                 @map("safe_failure_message") @db.VarChar(240)
+  internalFailureReference String?                 @map("internal_failure_reference") @db.VarChar(128)
+  summary                  Json                    @default("{}")
+  startedAt                DateTime?               @map("started_at") @db.Timestamptz(3)
+  completedAt              DateTime?               @map("completed_at") @db.Timestamptz(3)
+  invalidatedAt            DateTime?               @map("invalidated_at") @db.Timestamptz(3)
+  createdAt                DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime                @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation             Organisation            @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                   Tender                  @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion            TenderVersion           @relation("TenderVersionRiskRuns", fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  extractionRun            ExtractionRun           @relation(fields: [extractionRunId], references: [id], onDelete: Restrict)
+  requestedBy              User                    @relation("RiskAnalysisRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  activeForVersion         TenderVersion?          @relation("ActiveEarlyRiskRun")
+  findings                 RiskFinding[]
+  reviews                  RiskFindingReview[]
+  decisions                EarlyPursuitDecision[]
+
+  @@index([organisationId, tenderId, gateType, status, createdAt])
+  @@index([tenderVersionId, extractionRunId, createdAt])
+  @@index([organisationId, sourceFingerprint, riskPolicyVersion])
+  @@map("risk_analysis_runs")
+}
+
+model RiskFinding {
+  id                       String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String                @map("organisation_id") @db.Uuid
+  tenderId                 String                @map("tender_id") @db.Uuid
+  tenderVersionId          String                @map("tender_version_id") @db.Uuid
+  extractionRunId          String                @map("extraction_run_id") @db.Uuid
+  riskAnalysisRunId        String                @map("risk_analysis_run_id") @db.Uuid
+  category                 String                @db.VarChar(80)
+  title                    String                @db.VarChar(300)
+  explanation              String                @db.VarChar(2000)
+  sourceSupportedRationale String                @map("source_supported_rationale") @db.VarChar(4000)
+  severity                 RiskSeverity
+  confidence               ExtractionConfidence
+  materiality              RiskMateriality
+  blocking                 Boolean               @default(false)
+  findingStatus            RiskFindingStatus     @default(OPEN) @map("finding_status")
+  reviewState              RiskReviewState       @default(UNREVIEWED) @map("review_state")
+  deterministicRuleId      String                @map("deterministic_rule_id") @db.VarChar(120)
+  deterministicRuleVersion String                @map("deterministic_rule_version") @db.VarChar(40)
+  sourceInputFingerprint   String                @map("source_input_fingerprint") @db.Char(64)
+  invalidatedAt            DateTime?             @map("invalidated_at") @db.Timestamptz(3)
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation             Organisation          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                   Tender                @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion            TenderVersion         @relation(fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  extractionRun            ExtractionRun         @relation(fields: [extractionRunId], references: [id], onDelete: Restrict)
+  riskAnalysisRun          RiskAnalysisRun       @relation(fields: [riskAnalysisRunId], references: [id], onDelete: Cascade)
+  citations                RiskFindingCitation[]
+  reviews                  RiskFindingReview[]
+
+  @@index([organisationId, riskAnalysisRunId, severity, category])
+  @@index([riskAnalysisRunId, findingStatus, reviewState, blocking])
+  @@map("risk_findings")
+}
+
+model RiskFindingCitation {
+  id                   String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  riskFindingId        String             @map("risk_finding_id") @db.Uuid
+  extractionCitationId String             @map("extraction_citation_id") @db.Uuid
+  validationStatus     String             @map("validation_status") @db.VarChar(40)
+  createdAt            DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  riskFinding          RiskFinding        @relation(fields: [riskFindingId], references: [id], onDelete: Cascade)
+  extractionCitation   ExtractionCitation @relation(fields: [extractionCitationId], references: [id], onDelete: Restrict)
+
+  @@unique([riskFindingId, extractionCitationId])
+  @@index([extractionCitationId])
+  @@map("risk_finding_citations")
+}
+
+model RiskFindingReview {
+  id                String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId    String            @map("organisation_id") @db.Uuid
+  riskAnalysisRunId String            @map("risk_analysis_run_id") @db.Uuid
+  riskFindingId     String            @map("risk_finding_id") @db.Uuid
+  actorUserId       String            @map("actor_user_id") @db.Uuid
+  action            RiskReviewAction
+  previousStatus    RiskFindingStatus @map("previous_status")
+  newStatus         RiskFindingStatus @map("new_status")
+  previousSeverity  RiskSeverity      @map("previous_severity")
+  newSeverity       RiskSeverity      @map("new_severity")
+  rationale         String            @db.VarChar(1000)
+  reviewVersion     Int               @map("review_version")
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation      Organisation      @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  riskAnalysisRun   RiskAnalysisRun   @relation(fields: [riskAnalysisRunId], references: [id], onDelete: Cascade)
+  riskFinding       RiskFinding       @relation(fields: [riskFindingId], references: [id], onDelete: Cascade)
+  actor             User              @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([riskFindingId, reviewVersion])
+  @@index([organisationId, riskAnalysisRunId, riskFindingId])
+  @@map("risk_finding_reviews")
+}
+
+model EarlyPursuitDecision {
+  id                          String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId              String                 @map("organisation_id") @db.Uuid
+  tenderId                    String                 @map("tender_id") @db.Uuid
+  tenderVersionId             String                 @map("tender_version_id") @db.Uuid
+  riskAnalysisRunId           String                 @map("risk_analysis_run_id") @db.Uuid
+  actorUserId                 String                 @map("actor_user_id") @db.Uuid
+  decision                    PursuitDecision
+  rationale                   String                 @db.VarChar(2000)
+  unresolvedHighCriticalCount Int                    @map("unresolved_high_critical_count")
+  acknowledgedLimitations     Boolean                @map("acknowledged_limitations")
+  priorDecisionId             String?                @map("prior_decision_id") @db.Uuid
+  supersededAt                DateTime?              @map("superseded_at") @db.Timestamptz(3)
+  createdAt                   DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation                Organisation           @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                      Tender                 @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion               TenderVersion          @relation(fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  riskAnalysisRun             RiskAnalysisRun        @relation(fields: [riskAnalysisRunId], references: [id], onDelete: Restrict)
+  actor                       User                   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  priorDecision               EarlyPursuitDecision?  @relation("DecisionHistory", fields: [priorDecisionId], references: [id], onDelete: SetNull)
+  supersedingDecisions        EarlyPursuitDecision[] @relation("DecisionHistory")
+
+  @@index([organisationId, tenderId, tenderVersionId, createdAt])
+  @@index([riskAnalysisRunId, supersededAt])
+  @@map("early_pursuit_decisions")
 }

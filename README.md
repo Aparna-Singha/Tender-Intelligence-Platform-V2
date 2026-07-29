@@ -287,3 +287,11 @@ discussion.
 ## License
 
 No license has been selected. Until one is added, all rights are reserved.
+
+## Phase 6 early cited risk analysis
+
+Phase 6 adds a deterministic `EARLY` risk gate over the active completed extraction,
+with exact citations, append-only human reviews, and human-only CONTINUE/HOLD/STOP
+decisions. It does not determine eligibility, compare company evidence, provide
+legal advice, guarantee detection, or implement final-readiness analysis. See the
+[risk policy](docs/RISK_POLICY.md).
