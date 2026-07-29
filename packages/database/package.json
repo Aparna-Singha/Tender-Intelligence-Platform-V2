@@ -16,7 +16,7 @@
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
     "lint": "eslint src prisma.config.ts",
-    "test": "vitest run --passWithNoTests",
+    "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

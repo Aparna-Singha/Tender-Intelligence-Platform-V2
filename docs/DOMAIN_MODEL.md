@@ -122,3 +122,20 @@ clearly marked and cannot be exported as approved facts.
   readiness.
 - Deleting source evidence invalidates or retains, according to policy, dependent
   outputs without leaving misleading approved claims.
+
+## Progressive onboarding and company profile
+
+Onboarding is an eight-step, resumable workflow scoped to a user and organisation.
+Company profile values are organisation-owned and stored as individually typed
+records rather than one response document. Each important value records its source,
+verification state, optional future evidence-document reference, update time, and
+updating user. Annual turnover and document readiness use dedicated structured
+tables.
+
+Profile verification states are `SELF_DECLARED`, `DOCUMENT_VERIFIED`, `EXPIRED`,
+`CONFLICTING`, and `HUMAN_REVIEW_REQUIRED`. Phase 2 creates only self-declared
+values because document upload and verification are not implemented.
+
+Reseller, service-provider, and consultant business models add conditional
+completeness requirements. Completion percentage is guidance, not an eligibility
+or tender-match decision.

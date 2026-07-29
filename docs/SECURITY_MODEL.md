@@ -61,6 +61,13 @@ creation, invitation creation/acceptance, role change, session revocation, and
 password reset completion. Audit metadata contains hashes rather than raw attempted
 emails or network identifiers where applicable.
 
+Phase 2 onboarding reads and writes use the same organisation permission guard.
+The authenticated session supplies the user; URL organisation identifiers remain
+selectors checked against membership. Autosave payloads cannot supply an
+authoritative user or tenant ID. Step payloads are allowlisted by Zod and audit
+metadata records changed field names, never sensitive business values. Profile
+readers receive only data from the authorised organisation.
+
 ## Data protection
 
 - TLS protects data in transit; managed encryption protects databases, objects,

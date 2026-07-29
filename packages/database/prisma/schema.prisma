@@ -37,6 +37,37 @@ enum AuditEventType {
   ROLE_CHANGED
   SESSION_REVOKED
   PASSWORD_RESET_COMPLETED
+  ONBOARDING_STEP_SAVED
+  ONBOARDING_COMPLETED
+  COMPANY_PROFILE_UPDATED
+}
+
+enum VerificationStatus {
+  SELF_DECLARED
+  DOCUMENT_VERIFIED
+  EXPIRED
+  CONFLICTING
+  HUMAN_REVIEW_REQUIRED
+}
+
+enum ProfileValueSource {
+  USER_INPUT
+  ADMIN_INPUT
+  DOCUMENT
+}
+
+enum ProfileValueType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  DATE
+  TEXT_LIST
+}
+
+enum OnboardingStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
 }
 
 model User {
@@ -55,6 +86,7 @@ model User {
   passwordResetTokens PasswordResetToken[]
   auditEvents         AuditEvent[]          @relation("AuditActor")
   onboardingProgress  OnboardingProgress[]
+  updatedProfileValues CompanyProfileValue[] @relation("ProfileValueUpdater")
 
   @@map("users")
 }
@@ -91,6 +123,9 @@ model Organisation {
   auditEvents    AuditEvent[]
   onboardingProgress OnboardingProgress[]
   companyProfile CompanyProfile?
+  profileValues CompanyProfileValue[]
+  turnoverRecords CompanyTurnover[]
+  documentReadiness DocumentReadiness[]
 
   @@map("organisations")
 }
@@ -170,7 +205,10 @@ model OnboardingProgress {
   id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organisationId String       @map("organisation_id") @db.Uuid
   userId         String       @map("user_id") @db.Uuid
-  completedSteps Json         @default("[]") @map("completed_steps")
+  currentStep    Int          @default(1) @map("current_step")
+  completedSteps Int[]        @default([]) @map("completed_steps")
+  status         OnboardingStatus @default(NOT_STARTED)
+  completedAt    DateTime?    @map("completed_at") @db.Timestamptz(3)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
@@ -183,10 +221,65 @@ model OnboardingProgress {
 model CompanyProfile {
   id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organisationId String       @unique @map("organisation_id") @db.Uuid
-  profileData    Json         @default("{}") @map("profile_data")
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
   organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
 
   @@map("company_profiles")
+}
+
+model CompanyProfileValue {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String             @map("organisation_id") @db.Uuid
+  fieldKey           String             @map("field_key") @db.VarChar(80)
+  valueType          ProfileValueType   @map("value_type")
+  textValue          String?            @map("text_value")
+  numberValue        Decimal?           @map("number_value") @db.Decimal(18, 2)
+  booleanValue       Boolean?           @map("boolean_value")
+  dateValue          DateTime?          @map("date_value") @db.Date
+  textListValue      String[]           @default([]) @map("text_list_value")
+  source             ProfileValueSource @default(USER_INPUT)
+  verificationStatus VerificationStatus @default(SELF_DECLARED) @map("verification_status")
+  evidenceDocumentId String?            @map("evidence_document_id") @db.Uuid
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedByUserId    String             @map("updated_by_user_id") @db.Uuid
+  organisation       Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  updatedBy          User               @relation("ProfileValueUpdater", fields: [updatedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organisationId, fieldKey])
+  @@index([organisationId, verificationStatus])
+  @@map("company_profile_values")
+}
+
+model CompanyTurnover {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String             @map("organisation_id") @db.Uuid
+  financialYear      String             @map("financial_year") @db.VarChar(7)
+  amountInr          Decimal            @map("amount_inr") @db.Decimal(18, 2)
+  source             ProfileValueSource @default(USER_INPUT)
+  verificationStatus VerificationStatus @default(SELF_DECLARED) @map("verification_status")
+  evidenceDocumentId String?            @map("evidence_document_id") @db.Uuid
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedByUserId    String             @map("updated_by_user_id") @db.Uuid
+  organisation       Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, financialYear])
+  @@map("company_turnover")
+}
+
+model DocumentReadiness {
+  id                 String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String             @map("organisation_id") @db.Uuid
+  documentType       String             @map("document_type") @db.VarChar(80)
+  readinessStatus    String             @map("readiness_status") @db.VarChar(24)
+  expectedExpiry     DateTime?          @map("expected_expiry") @db.Date
+  source             ProfileValueSource @default(USER_INPUT)
+  verificationStatus VerificationStatus @default(SELF_DECLARED) @map("verification_status")
+  evidenceDocumentId String?            @map("evidence_document_id") @db.Uuid
+  updatedAt          DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+  updatedByUserId    String             @map("updated_by_user_id") @db.Uuid
+  organisation       Organisation       @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, documentType])
+  @@map("document_readiness")
 }

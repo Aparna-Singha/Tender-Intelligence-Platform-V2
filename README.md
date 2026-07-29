@@ -18,6 +18,10 @@ authentication, organisations, invitations, deny-by-default authorisation, and a
 minimal protected web shell. Tender and onboarding business features remain
 intentionally unimplemented.
 
+Phase 2 adds an eight-step progressive onboarding wizard and structured,
+organisation-scoped company profiles. It does not upload or verify documents and
+does not perform tender matching.
+
 ## Product principles
 
 - Evidence before assertion: important findings cite document, page, and clause.
@@ -184,6 +188,17 @@ session listing/revocation, organisation creation/listing/selection, membership,
 invitation, and role-change operations. Browser mutation requests first fetch
 `GET /auth/csrf`, retain `data.csrf_token` in memory, and send it as
 `x-csrf-token`; credentials are always cookie-based.
+
+Phase 2 adds:
+
+- `GET /organisations/{organisationId}/onboarding`
+- `PUT /organisations/{organisationId}/onboarding/steps/{step}`
+- `GET /organisations/{organisationId}/company-profile`
+- `GET /organisations/{organisationId}/dashboard-recommendations`
+
+All endpoints derive the user from the database session and enforce
+organisation-scoped permissions. The OpenAPI UI and `/openapi-json` include these
+operations.
 
 ## API envelopes
 

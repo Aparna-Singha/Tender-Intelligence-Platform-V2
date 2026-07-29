@@ -23,6 +23,29 @@ export {
   organisationRoleSchema,
   organisationTypeSchema,
 } from "./organisations.js";
+export {
+  businessIdentityStepSchema,
+  capabilitiesStepSchema,
+  documentReadinessStepSchema,
+  documentTypes,
+  eligibilityStepSchema,
+  onboardingStepPayloadSchemas,
+  onboardingStepSchema,
+  reviewStepSchema,
+  tenderPreferencesStepSchema,
+  userContextStepSchema,
+  workflowStepSchema,
+} from "./onboarding.js";
+export type {
+  BusinessIdentityStep,
+  CapabilitiesStep,
+  DocumentReadinessStep,
+  EligibilityStep,
+  OnboardingStep,
+  TenderPreferencesStep,
+  UserContextStep,
+  WorkflowStep,
+} from "./onboarding.js";
 export type {
   ChangeMembershipRoleRequest,
   CreateInvitationRequest,

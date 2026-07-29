@@ -15,6 +15,16 @@ export {
   permissions,
   roles,
 } from "./authorisation.js";
+export {
+  buildOnboardingRecommendations,
+  calculateProfileCompleteness,
+  dashboardMode,
+  onboardingStepNames,
+} from "./onboarding.js";
+export type {
+  DashboardRecommendation,
+  ProfileCompleteness,
+} from "./onboarding.js";
 export type {
   OrganisationPrincipal,
   OrganisationRole,

@@ -167,3 +167,27 @@ Phase 1B is accepted when:
 - security unit tests, formatting, Markdown lint, ESLint, strict type-checking,
   tests, and all three production builds pass;
 - no tender features or onboarding business questions are introduced.
+
+## Phase 2: Progressive onboarding and structured profile
+
+Phase 2 is accepted when:
+
+- all eight specified steps are navigable independently and support resume,
+  autosave, back, next, optional skipping, and later profile editing;
+- beginner mode provides guidance and professional mode provides compact context;
+- reseller, service-provider, and consultant conditional requirements are validated
+  by both shared contracts and server-side policy;
+- profile values are stored as typed rows with source, verification state, optional
+  evidence reference, update time, and updater;
+- annual turnover and document readiness use dedicated structured tables;
+- no complete onboarding response is stored as an unvalidated JSON blob;
+- completeness and recommendations are deterministic, tested domain policies and
+  do not claim eligibility or tender matching;
+- the server derives user identity and verifies organisation membership for every
+  read and write;
+- important changes create audit events without logging profile values;
+- unit, API, conditional validation, autosave/resume, tenant-isolation, and
+  completion tests pass;
+- formatting, linting, strict type-checking, tests, and production builds pass;
+- no document upload, tender ingestion, analysis, RAG, or drafting behavior is
+  introduced.

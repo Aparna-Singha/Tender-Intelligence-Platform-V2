@@ -47,5 +47,7 @@ describe("organisation authorisation policy", () => {
   it("denies permissions that are not explicitly granted", () => {
     expect(hasPermission("REVIEWER", "MEMBERSHIP_ROLE_CHANGE")).toBe(false);
     expect(hasPermission("OWNER", "MEMBERSHIP_ROLE_CHANGE")).toBe(true);
+    expect(hasPermission("REVIEWER", "ONBOARDING_UPDATE")).toBe(false);
+    expect(hasPermission("TENDER_EXECUTIVE", "ONBOARDING_UPDATE")).toBe(true);
   });
 });

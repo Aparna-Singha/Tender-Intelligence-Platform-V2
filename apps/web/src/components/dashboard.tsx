@@ -2,11 +2,21 @@
 
 import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiRequest } from "../lib/api";
 
 interface OrganisationMembership {
   organisation: { id: string; name: string; type: string };
   role: string;
+}
+
+interface DashboardGuidance {
+  display_mode: "BEGINNER" | "PROFESSIONAL";
+  recommendations: readonly {
+    action: string;
+    id: string;
+    priority: string;
+  }[];
 }
 
 export function Dashboard(): JSX.Element {
@@ -15,10 +25,27 @@ export function Dashboard(): JSX.Element {
     [],
   );
   const [message, setMessage] = useState("Loading…");
+  const [guidance, setGuidance] = useState<
+    Readonly<Record<string, DashboardGuidance>>
+  >({});
   async function load(): Promise<void> {
     try {
       await apiRequest("/auth/session");
-      setOrganisations(await apiRequest("/organisations"));
+      const memberships =
+        await apiRequest<OrganisationMembership[]>("/organisations");
+      setOrganisations(memberships);
+      const dashboardEntries = await Promise.all(
+        memberships.map(
+          async ({ organisation }) =>
+            [
+              organisation.id,
+              await apiRequest<DashboardGuidance>(
+                `/organisations/${organisation.id}/dashboard-recommendations`,
+              ),
+            ] as const,
+        ),
+      );
+      setGuidance(Object.fromEntries(dashboardEntries));
       setMessage("");
     } catch {
       router.replace("/login");
@@ -49,6 +76,28 @@ export function Dashboard(): JSX.Element {
         features.
       </p>
       {message && <p>{message}</p>}
+      {organisations.map(({ organisation }) => (
+        <section key={organisation.id}>
+          <h2>{organisation.name}</h2>
+          <Link href={`/onboarding/${organisation.id}`}>
+            Continue onboarding or edit profile
+          </Link>
+          <p>
+            Dashboard mode:{" "}
+            {guidance[organisation.id]?.display_mode ?? "BEGINNER"}
+          </p>
+          <div aria-label={`Recommendations for ${organisation.name}`}>
+            {guidance[organisation.id]?.recommendations.map(
+              (recommendation) => (
+                <article key={recommendation.id}>
+                  <h3>{recommendation.priority} priority</h3>
+                  <p>{recommendation.action}</p>
+                </article>
+              ),
+            )}
+          </div>
+        </section>
+      ))}
       <label>
         Organisation
         <select
