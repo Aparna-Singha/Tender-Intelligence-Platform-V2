@@ -75,6 +75,12 @@ approval-blocking validation placeholder to every changed section. Version
 comparison returns text, claims, citations, placeholders, source versions, and
 review state.
 
+Phase 10 does not yet expose structured claim authoring for new human prose.
+Consequently, a version containing a human-edited section remains approval-blocked
+even if its generic placeholder is resolved. This prevents prose from bypassing
+claim classification; an approved follow-up must add a structured revalidation
+contract before such versions can be approved.
+
 Review events are append-oriented and audit the actor and rationale. Only a user
 with the approval permission may approve; the creator cannot self-approve. Current
 source versions, valid cited material claims, reviewed commitments, resolved

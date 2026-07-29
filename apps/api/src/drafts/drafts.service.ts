@@ -1242,6 +1242,9 @@ export class DraftsService {
         isCurrentVersion: version.draft.currentVersionId === version.id,
         rationale: input.rationale,
         sourcesCurrent,
+        unvalidatedHumanEdits: version.sections.filter(
+          ({ contentOrigin }) => contentOrigin === "HUMAN_EDITED",
+        ).length,
         unreviewedCommitments: version.sections.flatMap(({ claims }) =>
           claims.filter(
             ({ claimClass, reviewState }) =>

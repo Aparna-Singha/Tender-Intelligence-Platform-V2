@@ -162,6 +162,7 @@ export interface ApprovalPolicyInput {
   readonly unsupportedMaterialClaims: number;
   readonly unresolvedConflicts: number;
   readonly blockingPlaceholders: number;
+  readonly unvalidatedHumanEdits: number;
   readonly unreviewedCommitments: number;
   readonly rationale: string;
 }
@@ -180,6 +181,7 @@ export function draftApprovalBlockers(
     blockers.push("UNSUPPORTED_MATERIAL_CLAIMS");
   if (input.unresolvedConflicts > 0) blockers.push("UNRESOLVED_CONFLICTS");
   if (input.blockingPlaceholders > 0) blockers.push("BLOCKING_PLACEHOLDERS");
+  if (input.unvalidatedHumanEdits > 0) blockers.push("UNVALIDATED_HUMAN_EDITS");
   if (input.unreviewedCommitments > 0) blockers.push("UNREVIEWED_COMMITMENTS");
   if (input.rationale.trim().length < 10)
     blockers.push("APPROVAL_RATIONALE_REQUIRED");

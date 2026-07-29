@@ -110,6 +110,7 @@ describe("fact-constrained drafting policy", () => {
         isCurrentVersion: false,
         rationale: "short",
         sourcesCurrent: false,
+        unvalidatedHumanEdits: 1,
         unreviewedCommitments: 1,
         unresolvedConflicts: 1,
         unsupportedMaterialClaims: 1,
@@ -123,6 +124,7 @@ describe("fact-constrained drafting policy", () => {
       "UNSUPPORTED_MATERIAL_CLAIMS",
       "UNRESOLVED_CONFLICTS",
       "BLOCKING_PLACEHOLDERS",
+      "UNVALIDATED_HUMAN_EDITS",
       "UNREVIEWED_COMMITMENTS",
       "APPROVAL_RATIONALE_REQUIRED",
     ]);
@@ -137,6 +139,7 @@ describe("fact-constrained drafting policy", () => {
         isCurrentVersion: true,
         rationale: "Reviewed every cited material claim.",
         sourcesCurrent: true,
+        unvalidatedHumanEdits: 0,
         unreviewedCommitments: 0,
         unresolvedConflicts: 0,
         unsupportedMaterialClaims: 0,
