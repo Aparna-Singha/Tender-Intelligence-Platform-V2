@@ -71,6 +71,22 @@ enum AuditEventType {
   RISK_FINDING_REVIEWED
   RISK_PURSUIT_DECISION_RECORDED
   RISK_PURSUIT_DECISION_SUPERSEDED
+  ELIGIBILITY_ASSESSMENT_STARTED
+  ELIGIBILITY_ASSESSMENT_CANCELLED
+  ELIGIBILITY_ASSESSMENT_RETRIED
+  ELIGIBILITY_ASSESSMENT_ACTIVATED
+  ELIGIBILITY_ASSESSMENT_INVALIDATED
+  ELIGIBILITY_SNAPSHOT_CREATED
+  COMPANY_EVIDENCE_FACT_CREATED
+  COMPANY_EVIDENCE_FACT_VERSION_CREATED
+  COMPANY_EVIDENCE_CITATION_CREATED
+  COMPANY_EVIDENCE_FACT_REVIEWED
+  ELIGIBILITY_ASSESSMENT_REVIEWED
+  ELIGIBILITY_ASSESSMENT_VERIFIED
+  ELIGIBILITY_ASSESSMENT_NOT_APPLICABLE
+  ELIGIBILITY_CONFLICT_RESOLVED
+  ELIGIBILITY_EVIDENCE_LINKED
+  ELIGIBILITY_EVIDENCE_UNLINKED
 }
 
 enum RiskAnalysisGate {
@@ -357,6 +373,79 @@ enum OnboardingStatus {
   COMPLETED
 }
 
+enum EligibilityAssessmentRunStatus {
+  QUEUED
+  SNAPSHOTTING
+  MATCHING
+  VALIDATING
+  COMPLETE
+  FAILED
+  CANCELLED
+  INVALIDATED
+}
+
+enum EligibilityAssessmentTriggerType {
+  USER
+  RETRY
+}
+
+enum EligibilityState {
+  VERIFIED
+  LIKELY_MET
+  MISSING
+  CONFLICT
+  NOT_APPLICABLE
+  HUMAN_REVIEW_REQUIRED
+}
+
+enum EligibilityReviewState {
+  UNREVIEWED
+  HUMAN_REVIEW_REQUIRED
+  REVIEWED
+  FINALISED
+}
+
+enum EvidenceValueType {
+  TEXT
+  NUMBER
+  BOOLEAN
+  DATE
+  MONEY
+  DURATION
+  TEXT_LIST
+  IDENTIFIER
+  DOCUMENT_EXISTENCE
+}
+
+enum EvidenceFactReviewState {
+  UNREVIEWED
+  ACCEPTED
+  REJECTED
+  HUMAN_REVIEW_REQUIRED
+  INVALIDATED
+}
+
+enum EvidenceLinkType {
+  DIRECT_SUPPORT
+  PARTIAL_SUPPORT
+  CONTRADICTS
+  CONTEXT_ONLY
+  DOCUMENT_EXISTS_ONLY
+  SELF_DECLARED_SUPPORT
+}
+
+enum EligibilityReviewAction {
+  ACCEPT_PROPOSAL
+  MARK_VERIFIED
+  MARK_LIKELY_MET
+  MARK_MISSING
+  MARK_CONFLICT
+  MARK_NOT_APPLICABLE
+  REQUEST_HUMAN_REVIEW
+  RESOLVE_CONFLICT
+  REOPEN
+}
+
 model User {
   id                        String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   email                     String                   @unique @db.VarChar(320)
@@ -389,6 +478,12 @@ model User {
   requestedRiskAnalysisRuns RiskAnalysisRun[]        @relation("RiskAnalysisRequester")
   riskFindingReviews        RiskFindingReview[]
   pursuitDecisions          EarlyPursuitDecision[]
+  requestedEligibilityRuns EligibilityAssessmentRun[] @relation("EligibilityRunRequester")
+  createdEvidenceFacts      CompanyEvidenceFact[] @relation("EvidenceFactCreator")
+  createdEvidenceVersions   CompanyEvidenceFactVersion[] @relation("EvidenceVersionCreator")
+  createdEvidenceCitations  CompanyEvidenceCitation[] @relation("EvidenceCitationCreator")
+  evidenceFactReviews       CompanyEvidenceReview[]
+  eligibilityReviews        EligibilityAssessmentReview[]
 
   @@map("users")
 }
@@ -442,6 +537,10 @@ model Organisation {
   riskFindings          RiskFinding[]
   riskFindingReviews    RiskFindingReview[]
   earlyPursuitDecisions EarlyPursuitDecision[]
+  evidenceFacts CompanyEvidenceFact[]
+  evidenceSnapshots EligibilityInputSnapshot[]
+  eligibilityRuns EligibilityAssessmentRun[]
+  eligibilityAssessments EligibilityAssessment[]
 
   @@map("organisations")
 }
@@ -621,6 +720,9 @@ model Document {
   versions            DocumentVersion[]          @relation("DocumentVersions")
   verifications       DocumentVerification[]
   accessEvents        DocumentAccessEvent[]
+  evidenceFacts       CompanyEvidenceFact[]
+  evidenceCitations   CompanyEvidenceCitation[]
+  snapshotDocuments   EligibilitySnapshotDocument[]
 
   @@index([organisationId, category, status])
   @@index([organisationId, expiryDate])
@@ -646,6 +748,9 @@ model DocumentVersion {
   uploadedBy          User                @relation("DocumentVersionUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   uploadSession       UploadSession?
   extraction          DocumentExtraction?
+  evidenceFactVersions CompanyEvidenceFactVersion[]
+  evidenceCitations   CompanyEvidenceCitation[]
+  snapshotDocuments   EligibilitySnapshotDocument[]
 
   @@unique([documentId, versionNumber])
   @@index([sha256])
@@ -765,6 +870,8 @@ model Tender {
   riskAnalysisRuns   RiskAnalysisRun[]
   riskFindings       RiskFinding[]
   pursuitDecisions   EarlyPursuitDecision[]
+  eligibilityRuns    EligibilityAssessmentRun[]
+  eligibilityAssessments EligibilityAssessment[]
 
   @@index([organisationId, lifecycleStatus, submissionDeadline])
   @@index([organisationId, sourceTenderNumber])
@@ -799,6 +906,10 @@ model TenderVersion {
   activeEarlyRiskRun    RiskAnalysisRun?       @relation("ActiveEarlyRiskRun", fields: [activeEarlyRiskRunId], references: [id], onDelete: SetNull)
   riskFindings          RiskFinding[]
   pursuitDecisions      EarlyPursuitDecision[]
+  activeEligibilityAssessmentRunId String? @unique @map("active_eligibility_assessment_run_id") @db.Uuid
+  eligibilityAssessmentRuns EligibilityAssessmentRun[] @relation("TenderVersionEligibilityRuns")
+  activeEligibilityAssessmentRun EligibilityAssessmentRun? @relation("ActiveEligibilityAssessmentRun", fields: [activeEligibilityAssessmentRunId], references: [id], onDelete: SetNull)
+  eligibilityAssessments EligibilityAssessment[]
 
   @@unique([tenderId, versionNumber])
   @@unique([tenderId, sourceFingerprint])
@@ -955,6 +1066,7 @@ model ExtractionRun {
   issues                   ExtractionIssue[]
   reviews                  ExtractionReview[]
   riskAnalysisRuns         RiskAnalysisRun[]
+  eligibilityRuns          EligibilityAssessmentRun[]
   riskFindings             RiskFinding[]
 
   @@index([organisationId, tenderId, status, createdAt])
@@ -1128,6 +1240,7 @@ model StructuredRequirement {
   supersedesRequirement   StructuredRequirement?  @relation("RequirementSupersession", fields: [supersedesRequirementId], references: [id], onDelete: SetNull)
   supersededBy            StructuredRequirement[] @relation("RequirementSupersession")
   citations               ExtractionCitation[]
+  eligibilityAssessments  EligibilityAssessment[]
 
   @@index([extractionRunId, category, obligation, confidence, reviewState])
   @@map("structured_requirements")
@@ -1161,6 +1274,7 @@ model ExtractionCitation {
   extractedTenderField    ExtractedTenderField?  @relation(fields: [extractedTenderFieldId], references: [id], onDelete: Cascade)
   structuredRequirement   StructuredRequirement? @relation(fields: [structuredRequirementId], references: [id], onDelete: Cascade)
   riskFindingCitations    RiskFindingCitation[]
+  eligibilityAssessments  EligibilityAssessment[]
 
   @@index([extractionRunId, tenderDocumentId, pageNumber])
   @@index([extractedTenderFieldId])
@@ -1243,6 +1357,7 @@ model RiskAnalysisRun {
   findings                 RiskFinding[]
   reviews                  RiskFindingReview[]
   decisions                EarlyPursuitDecision[]
+  eligibilityRuns          EligibilityAssessmentRun[]
 
   @@index([organisationId, tenderId, gateType, status, createdAt])
   @@index([tenderVersionId, extractionRunId, createdAt])
@@ -1345,8 +1460,367 @@ model EarlyPursuitDecision {
   actor                       User                   @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
   priorDecision               EarlyPursuitDecision?  @relation("DecisionHistory", fields: [priorDecisionId], references: [id], onDelete: SetNull)
   supersedingDecisions        EarlyPursuitDecision[] @relation("DecisionHistory")
+  eligibilityRuns             EligibilityAssessmentRun[]
 
   @@index([organisationId, tenderId, tenderVersionId, createdAt])
   @@index([riskAnalysisRunId, supersededAt])
   @@map("early_pursuit_decisions")
+}
+
+model CompanyEvidenceFact {
+  id                String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId    String                       @map("organisation_id") @db.Uuid
+  documentId        String                       @map("document_id") @db.Uuid
+  factType          String                       @map("fact_type") @db.VarChar(80)
+  currentVersionId  String?                      @unique @map("current_version_id") @db.Uuid
+  createdByUserId   String                       @map("created_by_user_id") @db.Uuid
+  invalidatedAt     DateTime?                    @map("invalidated_at") @db.Timestamptz(3)
+  createdAt         DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation      Organisation                 @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  document          Document                     @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  createdBy         User                         @relation("EvidenceFactCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  currentVersion    CompanyEvidenceFactVersion?  @relation("CurrentEvidenceFactVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions          CompanyEvidenceFactVersion[] @relation("EvidenceFactVersions")
+  reviews           CompanyEvidenceReview[]
+
+  @@index([organisationId, factType, invalidatedAt])
+  @@map("company_evidence_facts")
+}
+
+model CompanyEvidenceFactVersion {
+  id                 String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  evidenceFactId     String                    @map("evidence_fact_id") @db.Uuid
+  documentVersionId  String                    @map("document_version_id") @db.Uuid
+  versionNumber      Int                       @map("version_number")
+  valueType          EvidenceValueType         @map("value_type")
+  textValue          String?                   @map("text_value") @db.VarChar(1000)
+  numberValue        Decimal?                  @map("number_value") @db.Decimal(20, 4)
+  booleanValue       Boolean?                  @map("boolean_value")
+  dateValue          DateTime?                 @map("date_value") @db.Date
+  textListValue      String[]                  @default([]) @map("text_list_value")
+  unit               String?                   @db.VarChar(40)
+  currency           String?                   @db.Char(3)
+  financialYear      String?                   @map("financial_year") @db.VarChar(7)
+  issuingAuthority   String?                   @map("issuing_authority") @db.VarChar(240)
+  scope              String?                   @db.VarChar(1000)
+  validFrom           DateTime?                 @map("valid_from") @db.Date
+  validUntil          DateTime?                 @map("valid_until") @db.Date
+  reviewState         EvidenceFactReviewState   @default(UNREVIEWED) @map("review_state")
+  confidence          Decimal                   @default(1) @db.Decimal(3, 2)
+  createdByUserId     String                    @map("created_by_user_id") @db.Uuid
+  createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  evidenceFact        CompanyEvidenceFact       @relation("EvidenceFactVersions", fields: [evidenceFactId], references: [id], onDelete: Cascade)
+  currentForFact      CompanyEvidenceFact?      @relation("CurrentEvidenceFactVersion")
+  documentVersion     DocumentVersion            @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+  createdBy           User                       @relation("EvidenceVersionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  citations           CompanyEvidenceCitation[]
+  snapshotFacts       EligibilitySnapshotEvidenceFact[]
+  assessmentLinks     EligibilityAssessmentEvidenceLink[]
+
+  @@unique([evidenceFactId, versionNumber])
+  @@index([documentVersionId, reviewState])
+  @@map("company_evidence_fact_versions")
+}
+
+model CompanyEvidenceCitation {
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String                     @map("organisation_id") @db.Uuid
+  evidenceFactVersionId String                     @map("evidence_fact_version_id") @db.Uuid
+  documentId            String                     @map("document_id") @db.Uuid
+  documentVersionId     String                     @map("document_version_id") @db.Uuid
+  documentChecksum      String                     @map("document_checksum") @db.Char(64)
+  documentName          String                     @map("document_name") @db.VarChar(255)
+  documentCategory      DocumentCategory           @map("document_category")
+  locatorType           String                     @map("locator_type") @db.VarChar(32)
+  pageNumber            Int?                       @map("page_number")
+  sectionLabel          String?                    @map("section_label") @db.VarChar(160)
+  sheetName             String?                    @map("sheet_name") @db.VarChar(200)
+  cellRange             String?                    @map("cell_range") @db.VarChar(80)
+  boundedExcerpt        String                     @map("bounded_excerpt") @db.VarChar(1000)
+  validationStatus      String                     @default("PENDING_REVIEW") @map("validation_status") @db.VarChar(40)
+  invalidatedAt         DateTime?                  @map("invalidated_at") @db.Timestamptz(3)
+  createdByUserId       String                     @map("created_by_user_id") @db.Uuid
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  evidenceFactVersion   CompanyEvidenceFactVersion @relation(fields: [evidenceFactVersionId], references: [id], onDelete: Cascade)
+  document              Document                   @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  documentVersion       DocumentVersion            @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+  createdBy             User                       @relation("EvidenceCitationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assessmentLinks       EligibilityAssessmentEvidenceLink[]
+
+  @@index([organisationId, documentId, documentVersionId])
+  @@map("company_evidence_citations")
+}
+
+model CompanyEvidenceReview {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String                  @map("organisation_id") @db.Uuid
+  evidenceFactId        String                  @map("evidence_fact_id") @db.Uuid
+  evidenceFactVersionId String                  @map("evidence_fact_version_id") @db.Uuid
+  action                String                  @db.VarChar(40)
+  previousState         EvidenceFactReviewState @map("previous_state")
+  newState              EvidenceFactReviewState @map("new_state")
+  rationale             String                  @db.VarChar(1000)
+  reviewVersion         Int                     @map("review_version")
+  actorUserId           String                  @map("actor_user_id") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  evidenceFact          CompanyEvidenceFact     @relation(fields: [evidenceFactId], references: [id], onDelete: Cascade)
+  actor                 User                    @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([evidenceFactId, reviewVersion])
+  @@index([organisationId, evidenceFactId])
+  @@map("company_evidence_reviews")
+}
+
+model EligibilityInputSnapshot {
+  id                    String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String                                @map("organisation_id") @db.Uuid
+  tenderVersionId       String                                @map("tender_version_id") @db.Uuid
+  extractionRunId       String                                @map("extraction_run_id") @db.Uuid
+  riskAnalysisRunId     String                                @map("risk_analysis_run_id") @db.Uuid
+  pursuitDecisionId     String                                @map("pursuit_decision_id") @db.Uuid
+  fingerprint           String                                @db.Char(64)
+  capturedAt            DateTime                              @default(now()) @map("captured_at") @db.Timestamptz(3)
+  organisation          Organisation                          @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  profileValues         EligibilitySnapshotProfileValue[]
+  turnoverRecords       EligibilitySnapshotTurnover[]
+  documentReadiness     EligibilitySnapshotDocumentReadiness[]
+  documents             EligibilitySnapshotDocument[]
+  evidenceFacts         EligibilitySnapshotEvidenceFact[]
+  evidenceCitations     EligibilitySnapshotEvidenceCitation[]
+  run                   EligibilityAssessmentRun?
+
+  @@index([organisationId, tenderVersionId, capturedAt])
+  @@map("eligibility_input_snapshots")
+}
+
+model EligibilitySnapshotProfileValue {
+  id                    String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId            String                   @map("snapshot_id") @db.Uuid
+  sourceProfileValueId  String                   @map("source_profile_value_id") @db.Uuid
+  fieldKey              String                   @map("field_key") @db.VarChar(80)
+  valueType             ProfileValueType         @map("value_type")
+  textValue             String?                  @map("text_value")
+  numberValue           Decimal?                 @map("number_value") @db.Decimal(18, 2)
+  booleanValue          Boolean?                 @map("boolean_value")
+  dateValue             DateTime?                @map("date_value") @db.Date
+  textListValue         String[]                 @default([]) @map("text_list_value")
+  source                ProfileValueSource
+  verificationStatus    VerificationStatus       @map("verification_status")
+  evidenceDocumentId    String?                  @map("evidence_document_id") @db.Uuid
+  sourceUpdatedAt       DateTime                 @map("source_updated_at") @db.Timestamptz(3)
+  snapshot              EligibilityInputSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, sourceProfileValueId])
+  @@map("eligibility_snapshot_profile_values")
+}
+
+model EligibilitySnapshotTurnover {
+  id                    String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId            String                   @map("snapshot_id") @db.Uuid
+  sourceTurnoverId      String                   @map("source_turnover_id") @db.Uuid
+  financialYear         String                   @map("financial_year") @db.VarChar(7)
+  amountInr             Decimal                  @map("amount_inr") @db.Decimal(18, 2)
+  source                ProfileValueSource
+  verificationStatus    VerificationStatus       @map("verification_status")
+  evidenceDocumentId    String?                  @map("evidence_document_id") @db.Uuid
+  sourceUpdatedAt       DateTime                 @map("source_updated_at") @db.Timestamptz(3)
+  snapshot              EligibilityInputSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, sourceTurnoverId])
+  @@map("eligibility_snapshot_turnover")
+}
+
+model EligibilitySnapshotDocumentReadiness {
+  id                    String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId            String                   @map("snapshot_id") @db.Uuid
+  sourceReadinessId     String                   @map("source_readiness_id") @db.Uuid
+  documentType          String                   @map("document_type") @db.VarChar(80)
+  readinessStatus       String                   @map("readiness_status") @db.VarChar(24)
+  expectedExpiry        DateTime?                @map("expected_expiry") @db.Date
+  source                ProfileValueSource
+  verificationStatus    VerificationStatus       @map("verification_status")
+  evidenceDocumentId    String?                  @map("evidence_document_id") @db.Uuid
+  sourceUpdatedAt       DateTime                 @map("source_updated_at") @db.Timestamptz(3)
+  snapshot              EligibilityInputSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, sourceReadinessId])
+  @@map("eligibility_snapshot_document_readiness")
+}
+
+model EligibilitySnapshotDocument {
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId            String                     @map("snapshot_id") @db.Uuid
+  documentId            String                     @map("document_id") @db.Uuid
+  documentVersionId     String                     @map("document_version_id") @db.Uuid
+  category              DocumentCategory
+  verificationStatus    DocumentVerificationStatus @map("verification_status")
+  expiryDate            DateTime?                  @map("expiry_date") @db.Date
+  checksum              String                     @db.Char(64)
+  snapshot              EligibilityInputSnapshot   @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  document              Document                   @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  documentVersion       DocumentVersion            @relation(fields: [documentVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([snapshotId, documentId])
+  @@map("eligibility_snapshot_documents")
+}
+
+model EligibilitySnapshotEvidenceFact {
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId            String                     @map("snapshot_id") @db.Uuid
+  evidenceFactVersionId String                     @map("evidence_fact_version_id") @db.Uuid
+  reviewState           EvidenceFactReviewState    @map("review_state")
+  snapshot              EligibilityInputSnapshot   @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  evidenceFactVersion   CompanyEvidenceFactVersion @relation(fields: [evidenceFactVersionId], references: [id], onDelete: Restrict)
+
+  @@unique([snapshotId, evidenceFactVersionId])
+  @@map("eligibility_snapshot_evidence_facts")
+}
+
+model EligibilitySnapshotEvidenceCitation {
+  id                        String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId                String                   @map("snapshot_id") @db.Uuid
+  sourceEvidenceCitationId  String                   @map("source_evidence_citation_id") @db.Uuid
+  evidenceFactVersionId     String                   @map("evidence_fact_version_id") @db.Uuid
+  documentVersionId         String                   @map("document_version_id") @db.Uuid
+  documentChecksum          String                   @map("document_checksum") @db.Char(64)
+  locatorType               String                   @map("locator_type") @db.VarChar(32)
+  pageNumber                Int?                     @map("page_number")
+  sectionLabel              String?                  @map("section_label") @db.VarChar(160)
+  sheetName                 String?                  @map("sheet_name") @db.VarChar(200)
+  cellRange                 String?                  @map("cell_range") @db.VarChar(80)
+  boundedExcerpt            String                   @map("bounded_excerpt") @db.VarChar(1000)
+  validationStatus          String                   @map("validation_status") @db.VarChar(40)
+  sourceCreatedAt           DateTime                 @map("source_created_at") @db.Timestamptz(3)
+  snapshot                  EligibilityInputSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, sourceEvidenceCitationId])
+  @@index([snapshotId, evidenceFactVersionId])
+  @@map("eligibility_snapshot_evidence_citations")
+}
+
+model EligibilityAssessmentRun {
+  id                       String                         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String                         @map("organisation_id") @db.Uuid
+  tenderId                 String                         @map("tender_id") @db.Uuid
+  tenderVersionId          String                         @map("tender_version_id") @db.Uuid
+  extractionRunId          String                         @map("extraction_run_id") @db.Uuid
+  riskAnalysisRunId        String                         @map("risk_analysis_run_id") @db.Uuid
+  pursuitDecisionId        String                         @map("pursuit_decision_id") @db.Uuid
+  snapshotId               String                         @unique @map("snapshot_id") @db.Uuid
+  status                   EligibilityAssessmentRunStatus @default(QUEUED)
+  triggerType              EligibilityAssessmentTriggerType @map("trigger_type")
+  comparisonPolicyVersion  String                         @map("comparison_policy_version") @db.VarChar(80)
+  normalisationPolicyVersion String                       @map("normalisation_policy_version") @db.VarChar(80)
+  sourceFingerprint        String                         @map("source_fingerprint") @db.Char(64)
+  idempotencyKey           String                         @unique @map("idempotency_key") @db.VarChar(240)
+  progressPercentage       Int                            @default(0) @map("progress_percentage")
+  currentStage             String                         @default("QUEUED") @map("current_stage") @db.VarChar(80)
+  publicMessage            String                         @default("Evidence assessment queued") @map("public_message") @db.VarChar(240)
+  eventSequence            Int                            @default(1) @map("event_sequence")
+  requestedByUserId        String                         @map("requested_by_user_id") @db.Uuid
+  cancellationRequestedAt  DateTime?                      @map("cancellation_requested_at") @db.Timestamptz(3)
+  retryCount               Int                            @default(0) @map("retry_count")
+  failureCategory          String?                        @map("failure_category") @db.VarChar(80)
+  safeFailureMessage       String?                        @map("safe_failure_message") @db.VarChar(240)
+  internalFailureReference String?                        @map("internal_failure_reference") @db.VarChar(128)
+  startedAt                DateTime?                      @map("started_at") @db.Timestamptz(3)
+  completedAt              DateTime?                      @map("completed_at") @db.Timestamptz(3)
+  invalidatedAt            DateTime?                      @map("invalidated_at") @db.Timestamptz(3)
+  createdAt                DateTime                       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime                       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation             Organisation                   @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                   Tender                         @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion            TenderVersion                  @relation("TenderVersionEligibilityRuns", fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  extractionRun            ExtractionRun                  @relation(fields: [extractionRunId], references: [id], onDelete: Restrict)
+  riskAnalysisRun          RiskAnalysisRun                @relation(fields: [riskAnalysisRunId], references: [id], onDelete: Restrict)
+  pursuitDecision          EarlyPursuitDecision           @relation(fields: [pursuitDecisionId], references: [id], onDelete: Restrict)
+  snapshot                 EligibilityInputSnapshot       @relation(fields: [snapshotId], references: [id], onDelete: Restrict)
+  requestedBy              User                           @relation("EligibilityRunRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  activeForVersion         TenderVersion?                 @relation("ActiveEligibilityAssessmentRun")
+  assessments              EligibilityAssessment[]
+
+  @@index([organisationId, tenderId, tenderVersionId, status, createdAt])
+  @@index([organisationId, sourceFingerprint, comparisonPolicyVersion])
+  @@map("eligibility_assessment_runs")
+}
+
+model EligibilityAssessment {
+  id                       String                              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String                              @map("organisation_id") @db.Uuid
+  tenderId                 String                              @map("tender_id") @db.Uuid
+  tenderVersionId          String                              @map("tender_version_id") @db.Uuid
+  assessmentRunId          String                              @map("assessment_run_id") @db.Uuid
+  structuredRequirementId  String                              @map("structured_requirement_id") @db.Uuid
+  tenderCitationId         String                              @map("tender_citation_id") @db.Uuid
+  requirementObligation    RequirementObligation               @map("requirement_obligation")
+  requirementCategory      String                              @map("requirement_category") @db.VarChar(80)
+  proposedState            EligibilityState                    @map("proposed_state")
+  currentState             EligibilityState                    @map("current_state")
+  proposedConfidence       Decimal                             @map("proposed_confidence") @db.Decimal(3, 2)
+  proposedRationale        String                              @map("proposed_rationale") @db.VarChar(2000)
+  uncertainty              String                              @db.VarChar(2000)
+  comparisonPolicyRule     String                              @map("comparison_policy_rule") @db.VarChar(120)
+  policyVersion            String                              @map("policy_version") @db.VarChar(80)
+  reviewState              EligibilityReviewState              @default(UNREVIEWED) @map("review_state")
+  finalisedByUserId        String?                             @map("finalised_by_user_id") @db.Uuid
+  finalisedAt              DateTime?                           @map("finalised_at") @db.Timestamptz(3)
+  finalRationale           String?                             @map("final_rationale") @db.VarChar(2000)
+  invalidatedAt            DateTime?                           @map("invalidated_at") @db.Timestamptz(3)
+  createdAt                DateTime                            @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime                            @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation             Organisation                        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  tender                   Tender                              @relation(fields: [tenderId], references: [id], onDelete: Cascade)
+  tenderVersion            TenderVersion                       @relation(fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  assessmentRun            EligibilityAssessmentRun            @relation(fields: [assessmentRunId], references: [id], onDelete: Cascade)
+  structuredRequirement    StructuredRequirement               @relation(fields: [structuredRequirementId], references: [id], onDelete: Restrict)
+  tenderCitation           ExtractionCitation                  @relation(fields: [tenderCitationId], references: [id], onDelete: Restrict)
+  evidenceLinks            EligibilityAssessmentEvidenceLink[]
+  reviews                  EligibilityAssessmentReview[]
+
+  @@unique([assessmentRunId, structuredRequirementId])
+  @@index([organisationId, assessmentRunId, currentState, reviewState])
+  @@index([assessmentRunId, requirementCategory, requirementObligation])
+  @@map("eligibility_assessments")
+}
+
+model EligibilityAssessmentEvidenceLink {
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  assessmentId          String                     @map("assessment_id") @db.Uuid
+  evidenceFactVersionId String?                    @map("evidence_fact_version_id") @db.Uuid
+  evidenceCitationId    String?                    @map("evidence_citation_id") @db.Uuid
+  snapshotProfileValueId String?                   @map("snapshot_profile_value_id") @db.Uuid
+  snapshotDocumentId    String?                    @map("snapshot_document_id") @db.Uuid
+  linkType              EvidenceLinkType           @map("link_type")
+  relevance             Decimal                    @db.Decimal(3, 2)
+  scope                 String?                    @db.VarChar(1000)
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  assessment            EligibilityAssessment      @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  evidenceFactVersion   CompanyEvidenceFactVersion? @relation(fields: [evidenceFactVersionId], references: [id], onDelete: Restrict)
+  evidenceCitation      CompanyEvidenceCitation?   @relation(fields: [evidenceCitationId], references: [id], onDelete: Restrict)
+
+  @@index([assessmentId, linkType])
+  @@index([evidenceFactVersionId])
+  @@unique([assessmentId, evidenceFactVersionId, linkType])
+  @@map("eligibility_assessment_evidence_links")
+}
+
+model EligibilityAssessmentReview {
+  id                  String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId      String                    @map("organisation_id") @db.Uuid
+  assessmentId        String                    @map("assessment_id") @db.Uuid
+  action              EligibilityReviewAction
+  previousState       EligibilityState          @map("previous_state")
+  newState            EligibilityState          @map("new_state")
+  previousReviewState EligibilityReviewState    @map("previous_review_state")
+  newReviewState      EligibilityReviewState    @map("new_review_state")
+  rationale           String                    @db.VarChar(2000)
+  reviewVersion       Int                       @map("review_version")
+  actorUserId         String                    @map("actor_user_id") @db.Uuid
+  createdAt           DateTime                  @default(now()) @map("created_at") @db.Timestamptz(3)
+  assessment          EligibilityAssessment     @relation(fields: [assessmentId], references: [id], onDelete: Cascade)
+  actor               User                      @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([assessmentId, reviewVersion])
+  @@index([organisationId, assessmentId])
+  @@map("eligibility_assessment_reviews")
 }

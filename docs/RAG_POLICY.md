@@ -103,3 +103,8 @@ Sensitive prompt and response bodies are not logged by default.
 
 Conversation, retrieval, and model-call records follow documented retention and
 deletion rules, including derived chunks and embeddings.
+
+Phase 7 does not implement retrieval or a chatbot. Its reviewed, versioned company
+facts and exact citations are designed as possible future Phase 9 inputs, but Phase
+9 must independently re-authorise the organisation and consume only current,
+approved evidence. Assessment state alone is not retrieval evidence.

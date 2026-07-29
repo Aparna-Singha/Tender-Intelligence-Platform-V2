@@ -393,8 +393,42 @@ export class ExtractionProcessor {
         });
       }
       await transaction.tenderVersion.update({
-        data: { activeEarlyRiskRunId: null, activeExtractionRunId: runId },
+        data: {
+          activeEarlyRiskRunId: null,
+          activeEligibilityAssessmentRunId: null,
+          activeExtractionRunId: runId,
+        },
         where: { id: tenderVersionId },
+      });
+      const assessmentInvalidatedAt = new Date();
+      await transaction.eligibilityAssessmentRun.updateMany({
+        data: {
+          currentStage: "INVALIDATED",
+          invalidatedAt: assessmentInvalidatedAt,
+          publicMessage:
+            "A newer extraction requires fresh evidence comparison",
+          status: "INVALIDATED",
+        },
+        where: {
+          extractionRunId: { not: runId },
+          status: {
+            in: [
+              "QUEUED",
+              "SNAPSHOTTING",
+              "MATCHING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
+          tenderVersionId,
+        },
+      });
+      await transaction.eligibilityAssessment.updateMany({
+        data: { invalidatedAt: assessmentInvalidatedAt },
+        where: {
+          assessmentRun: { extractionRunId: { not: runId }, tenderVersionId },
+          invalidatedAt: null,
+        },
       });
     });
   }

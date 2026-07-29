@@ -184,3 +184,11 @@ version, and run scope. Rules never access company-profile or company-vault tabl
 Tender instructions remain inert data; there is no URL fetch, model, tool, approval,
 export, or submission capability. Citation ownership, extraction identity, excerpt,
 and checksum are validated before completion.
+
+## Phase 7 evidence isolation
+
+Phase 7 repeats organisation scope for runs, snapshots, requirements, documents,
+facts, citations, links, reviews, SSE, and signed source opening. Browser IDs are
+selectors, never authority. Queue messages and progress events contain safe IDs,
+counts, stages, and versions only. Tender wording, profile values, document
+excerpts, private keys, and signed URLs are excluded from logs and events.

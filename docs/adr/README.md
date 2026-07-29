@@ -16,6 +16,7 @@ decisions, their context, alternatives, and trade-offs.
 | [0007](0007-database-sessions-and-csrf.md)                | Use database sessions and double-submit CSRF      | Accepted |
 | [0008](0008-deterministic-immutable-tender-extraction.md) | Deterministic immutable tender extraction         | Accepted |
 | [0009](0009-deterministic-early-risk-gate.md)             | Deterministic cited early-risk gate               | Accepted |
+| [0010](0010-immutable-controlled-evidence-assessments.md) | Immutable controlled evidence assessments         | Accepted |
 
 ## Process
 

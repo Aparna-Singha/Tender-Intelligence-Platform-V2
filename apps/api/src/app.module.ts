@@ -13,6 +13,7 @@ import { DocumentsModule } from "./documents/documents.module.js";
 import { TendersModule } from "./tenders/tenders.module.js";
 import { ExtractionsModule } from "./extractions/extractions.module.js";
 import { RisksModule } from "./risks/risks.module.js";
+import { EligibilityModule } from "./eligibility/eligibility.module.js";
 import {
   AccessGuard,
   CsrfGuard,
@@ -52,6 +53,7 @@ import { RateLimitService } from "./common/rate-limit.service.js";
     TendersModule,
     ExtractionsModule,
     RisksModule,
+    EligibilityModule,
   ],
   providers: [
     RateLimitService,

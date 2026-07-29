@@ -361,6 +361,37 @@ export class DocumentsService {
       where: { deletedAt: null, id: documentId, organisationId },
     });
     if (result.count !== 1) throw new NotFoundException();
+    const invalidatedAt = new Date();
+    await this.database.$transaction([
+      this.database.eligibilityAssessmentRun.updateMany({
+        data: {
+          currentStage: "INVALIDATED",
+          invalidatedAt,
+          publicMessage: "Company document deletion was requested",
+          status: "INVALIDATED",
+        },
+        where: {
+          organisationId,
+          status: {
+            in: [
+              "QUEUED",
+              "SNAPSHOTTING",
+              "MATCHING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
+        },
+      }),
+      this.database.eligibilityAssessment.updateMany({
+        data: { invalidatedAt },
+        where: { invalidatedAt: null, organisationId },
+      }),
+      this.database.tenderVersion.updateMany({
+        data: { activeEligibilityAssessmentRunId: null },
+        where: { activeEligibilityAssessmentRun: { organisationId } },
+      }),
+    ]);
     await this.jobs.add(
       "delete-company-document",
       {

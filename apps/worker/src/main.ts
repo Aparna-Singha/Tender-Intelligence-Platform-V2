@@ -19,6 +19,11 @@ import {
   RiskAnalysisProcessor,
   type RiskAnalysisJob,
 } from "./risk-analysis-processor.js";
+import {
+  EvidenceAssessmentProcessor,
+  isEvidenceAssessmentJob,
+  type EvidenceAssessmentJob,
+} from "./evidence-assessment-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -66,8 +71,13 @@ async function bootstrap(): Promise<void> {
     environment.S3_BUCKET,
   );
   const riskAnalysisProcessor = new RiskAnalysisProcessor(database);
+  const evidenceAssessmentProcessor = new EvidenceAssessmentProcessor(database);
   const documentWorker = new Worker<
-    DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob
+    | DocumentJob
+    | TenderDocumentJob
+    | ExtractionJob
+    | RiskAnalysisJob
+    | EvidenceAssessmentJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -97,6 +107,14 @@ async function bootstrap(): Promise<void> {
           riskAnalysisProcessor.process(data, signal),
         );
       }
+      if (job.name === "compare-company-evidence") {
+        if (!isEvidenceAssessmentJob(job.data))
+          throw new Error("Invalid evidence assessment job");
+        const data = job.data;
+        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+          evidenceAssessmentProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -117,6 +135,14 @@ async function bootstrap(): Promise<void> {
       isRiskAnalysisJob(job.data)
     )
       void riskAnalysisProcessor.fail(job.data.riskAnalysisRunId, error.name);
+    if (
+      job?.name === "compare-company-evidence" &&
+      isEvidenceAssessmentJob(job.data)
+    )
+      void evidenceAssessmentProcessor.fail(
+        job.data.assessmentRunId,
+        error.name,
+      );
     if (
       job?.name === "process-company-document" &&
       isCompanyDocumentJob(job.data)
@@ -192,25 +218,45 @@ async function bootstrap(): Promise<void> {
 }
 
 function isTenderDocumentJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
+  value:
+    | DocumentJob
+    | TenderDocumentJob
+    | ExtractionJob
+    | RiskAnalysisJob
+    | EvidenceAssessmentJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
 
 function isCompanyDocumentJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
+  value:
+    | DocumentJob
+    | TenderDocumentJob
+    | ExtractionJob
+    | RiskAnalysisJob
+    | EvidenceAssessmentJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
 
 function isExtractionJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
+  value:
+    | DocumentJob
+    | TenderDocumentJob
+    | ExtractionJob
+    | RiskAnalysisJob
+    | EvidenceAssessmentJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
 
 function isRiskAnalysisJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
+  value:
+    | DocumentJob
+    | TenderDocumentJob
+    | ExtractionJob
+    | RiskAnalysisJob
+    | EvidenceAssessmentJob,
 ): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }

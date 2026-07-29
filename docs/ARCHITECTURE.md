@@ -193,3 +193,13 @@ rules, validates reused citations, and atomically activates the completed `EARLY
 report. Reviews and pursuit decisions are human-authored history records. A changed
 extraction invalidates current risk state. See
 [Early Tender-Risk Policy](RISK_POLICY.md).
+
+## Phase 7 evidence comparison
+
+Phase 7 adds an `eligibility` module and an opaque-ID BullMQ worker. The API
+validates the current extraction, completed EARLY risk run, and human `CONTINUE`
+decision before transactionally capturing relational company-evidence snapshots.
+The worker reloads and re-authorises inputs, creates one conservative assessment
+per cited requirement, validates evidence links, and atomically activates a
+completed run. See [the comparison policy](COMPARISON_POLICY.md) and
+[ADR 0010](adr/0010-immutable-controlled-evidence-assessments.md).
