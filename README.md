@@ -13,9 +13,10 @@ evidence, prepare reviewable drafts, and complete a human-controlled readiness a
 
 ## Repository status
 
-Phase 1A establishes the production monorepo, API and worker process foundations,
-local infrastructure, shared packages, tests, and CI. Authentication and tender
-business features are intentionally not implemented.
+Phase 1B adds the PostgreSQL identity schema, database-backed browser sessions,
+authentication, organisations, invitations, deny-by-default authorisation, and a
+minimal protected web shell. Tender and onboarding business features remain
+intentionally unimplemented.
 
 ## Product principles
 
@@ -160,12 +161,29 @@ pnpm dev:infra:down
 ## Environment configuration
 
 All applications fail fast on invalid environment values through
-`@tender/config`. `.env.example` documents the complete Phase 1A local contract.
+`@tender/config`. `.env.example` documents the complete Phase 1B local contract.
 Real credentials and production configuration must come from an approved secret
 manager and must not be committed.
 
 Next.js only receives `NEXT_PUBLIC_API_URL`. Server credentials must never use a
 `NEXT_PUBLIC_` prefix.
+
+For local HTTP only, set `SESSION_COOKIE_SECURE=false`; production must use
+`SESSION_COOKIE_SECURE=true` behind TLS. Set `WEB_ORIGIN` to the exact browser
+origin. Registration and login work without notification delivery, but invitations
+and usable password-reset email require all three `EMAIL_DELIVERY_*` values. The
+delivery endpoint receives a bearer-authenticated JSON template request; no email
+delivery is simulated.
+
+## Authentication API
+
+The OpenAPI 3 contract is generated from controllers and is available at
+`/openapi` (interactive UI) and `/openapi-json` (machine-readable JSON).
+Phase 1B exposes CSRF issuance, registration, login, logout, password reset,
+session listing/revocation, organisation creation/listing/selection, membership,
+invitation, and role-change operations. Browser mutation requests first fetch
+`GET /auth/csrf`, retain `data.csrf_token` in memory, and send it as
+`x-csrf-token`; credentials are always cookie-based.
 
 ## API envelopes
 
@@ -195,7 +213,12 @@ set; otherwise the service generates a UUID.
 
 ## Quality gates
 
+After a clean checkout and dependency installation, generate the Prisma Client
+before running any type-aware validation:
+
 ```sh
+pnpm install --frozen-lockfile
+pnpm db:generate
 pnpm format:check
 pnpm lint
 pnpm typecheck

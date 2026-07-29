@@ -2,3 +2,31 @@ export { apiErrorSchema, apiResponseSchema, requestIdSchema } from "./api.js";
 export type { ApiErrorResponse, ApiResponse } from "./api.js";
 export { livenessSchema, readinessSchema } from "./health.js";
 export type { Liveness, Readiness } from "./health.js";
+export {
+  invitationAcceptSchema,
+  loginRequestSchema,
+  passwordResetConfirmSchema,
+  passwordResetRequestSchema,
+  registerRequestSchema,
+} from "./auth.js";
+export type {
+  InvitationAccept,
+  LoginRequest,
+  PasswordResetConfirm,
+  PasswordResetRequest,
+  RegisterRequest,
+} from "./auth.js";
+export {
+  changeMembershipRoleRequestSchema,
+  createInvitationRequestSchema,
+  createOrganisationRequestSchema,
+  organisationRoleSchema,
+  organisationTypeSchema,
+} from "./organisations.js";
+export type {
+  ChangeMembershipRoleRequest,
+  CreateInvitationRequest,
+  CreateOrganisationRequest,
+  OrganisationRole,
+  OrganisationType,
+} from "./organisations.js";

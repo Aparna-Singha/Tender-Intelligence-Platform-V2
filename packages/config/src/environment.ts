@@ -48,9 +48,69 @@ export const apiEnvironmentSchema = serviceBaseSchema
   .extend({
     API_HOST: nonEmptyStringSchema.default("0.0.0.0"),
     API_PORT: portSchema.default(4000),
+    AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(10),
+    AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(86_400)
+      .default(60),
+    COOKIE_SECRET: z.string().min(32),
+    EMAIL_DELIVERY_TOKEN: z.string().min(16).optional(),
+    EMAIL_DELIVERY_URL: urlSchema.optional(),
+    EMAIL_FROM: z.email().optional(),
+    INVITATION_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(2_592_000)
+      .default(604_800),
+    PASSWORD_RESET_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(300)
+      .max(86_400)
+      .default(3_600),
+    SESSION_COOKIE_SECURE: z.stringbool().default(true),
+    SESSION_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(900)
+      .max(2_592_000)
+      .default(604_800),
+    TRUST_PROXY: z.stringbool().default(false),
+    WEB_APP_URL: urlSchema,
+    WEB_ORIGIN: urlSchema,
   })
   .and(dataServicesSchema)
-  .and(objectStorageSchema);
+  .and(objectStorageSchema)
+  .superRefine((environment, context) => {
+    const deliveryValues = [
+      environment.EMAIL_DELIVERY_TOKEN,
+      environment.EMAIL_DELIVERY_URL,
+      environment.EMAIL_FROM,
+    ];
+    const configuredValues = deliveryValues.filter(
+      (value) => value !== undefined,
+    ).length;
+
+    if (configuredValues !== 0 && configuredValues !== deliveryValues.length) {
+      context.addIssue({
+        code: "custom",
+        message:
+          "EMAIL_DELIVERY_URL, EMAIL_DELIVERY_TOKEN, and EMAIL_FROM must be configured together",
+        path: ["EMAIL_DELIVERY_URL"],
+      });
+    }
+
+    if (environment.NODE_ENV === "production" && configuredValues === 0) {
+      context.addIssue({
+        code: "custom",
+        message: "Email delivery configuration is required in production",
+        path: ["EMAIL_DELIVERY_URL"],
+      });
+    }
+  });
 
 export const workerEnvironmentSchema = serviceBaseSchema
   .extend({

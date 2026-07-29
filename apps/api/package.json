@@ -23,13 +23,15 @@
     "@tender/config": "workspace:*",
     "@tender/contracts": "workspace:*",
     "@tender/database": "workspace:*",
+    "@tender/domain": "workspace:*",
     "@tender/observability": "workspace:*",
     "fastify": "5.10.0",
     "ioredis": "5.11.1",
     "nestjs-pino": "4.6.1",
     "pino": "10.3.1",
     "reflect-metadata": "0.2.2",
-    "rxjs": "7.8.2"
+    "rxjs": "7.8.2",
+    "zod": "4.4.3"
   },
   "devDependencies": {
     "@nestjs/testing": "11.1.28",

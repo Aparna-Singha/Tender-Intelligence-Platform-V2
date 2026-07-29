@@ -6,8 +6,8 @@ The platform must preserve organisation isolation, document confidentiality, dat
 integrity, traceability, service availability, and human control over high-stakes
 outcomes.
 
-This is an initial threat model. It must be reviewed before implementation and
-production launch.
+This threat model includes the Phase 1B identity controls. It must be reviewed
+again before production launch.
 
 ## Protected assets
 
@@ -33,14 +33,33 @@ production launch.
 
 ## Identity and authorization
 
-Authentication design will be selected in an implementation ADR. Authorization is
+Authentication uses opaque, database-backed sessions as recorded in
+[ADR 0007](adr/0007-database-sessions-and-csrf.md). Only a digest is persisted.
+The session cookie is HttpOnly, Secure in production, and SameSite=Strict. Unsafe
+requests require the configured Origin and a signed double-submit CSRF token.
+Passwords use scrypt. Authentication throttles are atomic in Redis and fail closed.
+
+Authorization is
 enforced on every server-side operation using both actor and organisation context.
 Object IDs are not authorization. Sensitive actions require recent authentication
 or step-up controls when justified.
 
+Routes deny access unless explicitly marked public, authenticated, or assigned an
+organisation permission. The API derives user and session from the cookie and then
+loads membership from PostgreSQL. Submitted `user_id`, `profile_id`, or
+`organisation_id` values never establish authority. Platform administrator is not
+an implicit tenant role. Owner is the only role that can change member roles; no
+actor can change their own membership or assign Owner/Platform Administrator
+through this API.
+
 Membership invitations, role changes, support access, export, deletion, and security
 configuration changes generate audit events. Automated tests must exercise horizontal
 and vertical privilege escalation attempts.
+
+Phase 1B audit events cover successful and failed login, logout, organisation
+creation, invitation creation/acceptance, role change, session revocation, and
+password reset completion. Audit metadata contains hashes rather than raw attempted
+emails or network identifiers where applicable.
 
 ## Data protection
 
