@@ -60,6 +60,18 @@ Status: implemented on the Phase 6 feature branch.
 - evidence comparison is deferred to Phase 7 and missing-document checks to Phase 8;
 - final readiness, eligibility, RAG, drafting, export, and submission remain absent.
 
+## Phase 7: Controlled evidence comparison
+
+Status: implemented on the Phase 7 feature branch.
+
+- current Phase 5 extraction, completed EARLY risk run, and human `CONTINUE` gate;
+- immutable relational company-evidence snapshots;
+- versioned manual company facts and exact human-captured citations;
+- conservative deterministic proposals and append-only human decisions;
+- invalidation on authoritative input changes and an operational Evidence Matrix;
+- Phase 8 checklist, Phase 9 RAG, drafting, readiness, export, scraping, and
+  submission remain deferred.
+
 In progress; Phase 4 establishes ingestion only.
 
 - Phase 1B complete on its feature branch: account, database session,

@@ -85,6 +85,27 @@ export {
   riskReviewSchema,
   startRiskAnalysisSchema,
 } from "./risk-analysis.js";
+export {
+  assessmentFilterSchema,
+  assessmentReviewSchema,
+  createCompanyCitationSchema,
+  createEvidenceFactSchema,
+  createEvidenceFactVersionSchema,
+  eligibilityStateSchema,
+  evidenceFactReviewSchema,
+  evidenceFactValueSchema,
+  evidenceValueTypeSchema,
+  linkAssessmentEvidenceSchema,
+  startEligibilityAssessmentSchema,
+} from "./evidence-assessment.js";
+export type {
+  AssessmentFilter,
+  AssessmentReviewRequest,
+  CreateCompanyCitationRequest,
+  CreateEvidenceFactRequest,
+  EvidenceFactReviewRequest,
+  LinkAssessmentEvidenceRequest,
+} from "./evidence-assessment.js";
 export type {
   PursuitDecisionRequest,
   RiskFindingFilter,

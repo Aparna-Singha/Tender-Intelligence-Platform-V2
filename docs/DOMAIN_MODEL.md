@@ -186,3 +186,11 @@ review state. `RiskFindingCitation` reuses exact extraction citations.
 `RiskFindingReview` preserves human disposition history. `EarlyPursuitDecision`
 records human-only CONTINUE/HOLD/STOP choices and supersession. No record is an
 eligibility assessment or legal conclusion.
+
+## Controlled company-evidence assessment
+
+Phase 7 represents company evidence through `CompanyEvidenceFact`, immutable
+`CompanyEvidenceFactVersion`, human-captured `CompanyEvidenceCitation`, relational
+`EligibilityInputSnapshot` children, historical `EligibilityAssessmentRun`,
+requirement-level `EligibilityAssessment`, evidence links, and append-only reviews.
+The original machine proposal is never overwritten by a human final state.

@@ -265,3 +265,12 @@ CONTINUE/HOLD/STOP decision; extraction changes invalidate current results; tena
 scope is enforced; and quality gates pass. Evidence comparison, missing documents,
 eligibility, final readiness, RAG, drafting, export, scraping, and submission remain
 absent.
+
+## Phase 7: Controlled evidence comparison
+
+Phase 7 requires the exact active extraction, a current completed EARLY risk run,
+and a current human `CONTINUE`; a relational immutable evidence snapshot; a cited
+assessment for each included requirement; conservative machine-only proposals;
+direct company provenance for `VERIFIED`; append-only human finalisation; tenant
+isolation; invalidation on authoritative input change; and an operational Evidence
+Matrix. Missing-document checklists and RAG remain unimplemented.

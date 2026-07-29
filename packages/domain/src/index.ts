@@ -59,6 +59,20 @@ export {
   RISK_RULE_VERSION,
   riskCategories,
 } from "./risk-analysis.js";
+export {
+  canHumanFinaliseVerified,
+  EVIDENCE_COMPARISON_POLICY_VERSION,
+  EVIDENCE_NORMALISATION_POLICY_VERSION,
+  eligibilityStates,
+  proposeEligibilityAssessment,
+} from "./evidence-assessment.js";
+export type {
+  AssessmentProposal,
+  ComparisonEvidence,
+  ComparisonRequirement,
+  EligibilityState,
+  MachineProposedState,
+} from "./evidence-assessment.js";
 export type {
   RiskCategory,
   RiskConfidence,

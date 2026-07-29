@@ -214,6 +214,37 @@ export class OnboardingService {
         },
       });
       if (step >= 2 && step <= 7) {
+        const invalidatedAt = new Date();
+        await transaction.eligibilityAssessmentRun.updateMany({
+          data: {
+            currentStage: "INVALIDATED",
+            invalidatedAt,
+            publicMessage: "Company profile evidence changed",
+            status: "INVALIDATED",
+          },
+          where: {
+            organisationId,
+            status: {
+              in: [
+                "QUEUED",
+                "SNAPSHOTTING",
+                "MATCHING",
+                "VALIDATING",
+                "COMPLETE",
+              ],
+            },
+          },
+        });
+        await transaction.eligibilityAssessment.updateMany({
+          data: { invalidatedAt },
+          where: { invalidatedAt: null, organisationId },
+        });
+        await transaction.tenderVersion.updateMany({
+          data: { activeEligibilityAssessmentRunId: null },
+          where: {
+            activeEligibilityAssessmentRun: { organisationId },
+          },
+        });
         await transaction.auditEvent.create({
           data: {
             actorUserId: userId,

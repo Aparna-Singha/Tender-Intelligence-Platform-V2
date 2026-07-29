@@ -156,8 +156,44 @@ export class RiskAnalysisProcessor {
         where: { id: run.id },
       });
       await transaction.tenderVersion.update({
-        data: { activeEarlyRiskRunId: run.id },
+        data: {
+          activeEarlyRiskRunId: run.id,
+          activeEligibilityAssessmentRunId: null,
+        },
         where: { id: run.tenderVersionId },
+      });
+      const invalidatedAt = new Date();
+      await transaction.eligibilityAssessmentRun.updateMany({
+        data: {
+          currentStage: "INVALIDATED",
+          invalidatedAt,
+          publicMessage:
+            "A newer EARLY risk run requires fresh evidence comparison",
+          status: "INVALIDATED",
+        },
+        where: {
+          riskAnalysisRunId: { not: run.id },
+          status: {
+            in: [
+              "QUEUED",
+              "SNAPSHOTTING",
+              "MATCHING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
+          tenderVersionId: run.tenderVersionId,
+        },
+      });
+      await transaction.eligibilityAssessment.updateMany({
+        data: { invalidatedAt },
+        where: {
+          assessmentRun: {
+            riskAnalysisRunId: { not: run.id },
+            tenderVersionId: run.tenderVersionId,
+          },
+          invalidatedAt: null,
+        },
       });
       await transaction.auditEvent.create({
         data: {

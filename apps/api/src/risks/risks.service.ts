@@ -346,6 +346,42 @@ export class RisksService {
           data: { supersededAt: new Date() },
           where: { id: prior.id },
         });
+      if (prior !== null) {
+        const invalidatedAt = new Date();
+        await transaction.eligibilityAssessmentRun.updateMany({
+          data: {
+            currentStage: "INVALIDATED",
+            invalidatedAt,
+            publicMessage: "The human pursuit decision changed",
+            status: "INVALIDATED",
+          },
+          where: {
+            pursuitDecisionId: prior.id,
+            status: {
+              in: [
+                "QUEUED",
+                "SNAPSHOTTING",
+                "MATCHING",
+                "VALIDATING",
+                "COMPLETE",
+              ],
+            },
+          },
+        });
+        await transaction.eligibilityAssessment.updateMany({
+          data: { invalidatedAt },
+          where: {
+            assessmentRun: { pursuitDecisionId: prior.id },
+            invalidatedAt: null,
+          },
+        });
+        await transaction.tenderVersion.updateMany({
+          data: { activeEligibilityAssessmentRunId: null },
+          where: {
+            activeEligibilityAssessmentRun: { pursuitDecisionId: prior.id },
+          },
+        });
+      }
       const decision = await transaction.earlyPursuitDecision.create({
         data: {
           acknowledgedLimitations: input.acknowledged_limitations,

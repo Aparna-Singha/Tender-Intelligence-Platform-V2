@@ -1,5 +1,18 @@
 # Tender Intelligence Platform
 
+Phase 7 adds controlled requirement-to-company-evidence comparison. After a
+completed cited EARLY risk analysis and an authorised human `CONTINUE`, the API
+captures an immutable company-evidence snapshot and queues deterministic
+requirement assessments. The tender workspace exposes an Evidence Matrix with
+source citations, conservative proposals, uncertainty, conflicts, review state,
+history, and invalidation. See [the evidence policy](docs/EVIDENCE_POLICY.md) and
+[comparison policy](docs/COMPARISON_POLICY.md).
+
+This is not a global eligibility decision or a guarantee of bid success.
+Company-document OCR/extraction, missing-document checklists, RAG/chatbot,
+drafting, readiness audit, export, scraping, and submission are not implemented
+in this phase.
+
 Tender Intelligence Platform is an independent AI-assisted tender intelligence and
 bid-readiness platform for Indian MSMEs, tender teams, and tender consultants. It is
 intended to help teams understand tender requirements, compare them with company

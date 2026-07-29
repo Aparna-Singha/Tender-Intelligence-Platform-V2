@@ -152,6 +152,7 @@ export class DocumentProcessor {
         where: { id: version.documentId },
       }),
     ]);
+    await this.invalidateAssessments(data.organisationId);
     if (signal?.aborted === true) {
       await this.database.$transaction([
         this.database.document.update({
@@ -196,6 +197,12 @@ export class DocumentProcessor {
         where: { id: documentId },
       }),
     ]);
+    const document = await this.database.document.findUnique({
+      select: { organisationId: true },
+      where: { id: documentId },
+    });
+    if (document !== null)
+      await this.invalidateAssessments(document.organisationId);
   }
 
   private async deleteDocument(data: DocumentJob): Promise<void> {
@@ -229,5 +236,40 @@ export class DocumentProcessor {
       data: { deletedAt: new Date() },
       where: { id: document.id },
     });
+    await this.invalidateAssessments(data.organisationId);
+  }
+
+  private async invalidateAssessments(organisationId: string): Promise<void> {
+    const invalidatedAt = new Date();
+    await this.database.$transaction([
+      this.database.eligibilityAssessmentRun.updateMany({
+        data: {
+          currentStage: "INVALIDATED",
+          invalidatedAt,
+          publicMessage: "Company document evidence changed",
+          status: "INVALIDATED",
+        },
+        where: {
+          organisationId,
+          status: {
+            in: [
+              "QUEUED",
+              "SNAPSHOTTING",
+              "MATCHING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
+        },
+      }),
+      this.database.eligibilityAssessment.updateMany({
+        data: { invalidatedAt },
+        where: { invalidatedAt: null, organisationId },
+      }),
+      this.database.tenderVersion.updateMany({
+        data: { activeEligibilityAssessmentRunId: null },
+        where: { activeEligibilityAssessmentRun: { organisationId } },
+      }),
+    ]);
   }
 }

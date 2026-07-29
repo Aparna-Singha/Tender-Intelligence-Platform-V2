@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { apiRequest } from "../lib/api";
 import { ExtractionWorkspace } from "./extraction-workspace";
 import { RiskWorkspace } from "./risk-workspace";
+import { EvidenceMatrix } from "./evidence-matrix";
 
 interface Workspace {
   buyer: string;
@@ -321,18 +322,21 @@ export function TenderWorkspace({
             versionId={workspace.versions[0].id}
           />
         )}
-        {[
-          "Evidence matrix",
-          "Missing documents",
-          "Chatbot",
-          "Draft",
-          "Readiness audit",
-        ].map((section) => (
-          <section key={section}>
-            <h2>{section}</h2>
-            <p>Not implemented in this phase.</p>
-          </section>
-        ))}
+        {workspace?.versions[0]?.id !== undefined && (
+          <EvidenceMatrix
+            organisationId={organisationId}
+            tenderId={tenderId}
+            versionId={workspace.versions[0].id}
+          />
+        )}
+        {["Missing documents", "Chatbot", "Draft", "Readiness audit"].map(
+          (section) => (
+            <section key={section}>
+              <h2>{section}</h2>
+              <p>Not implemented in this phase.</p>
+            </section>
+          ),
+        )}
       </div>
     </main>
   );
