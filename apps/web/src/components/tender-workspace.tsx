@@ -6,6 +6,12 @@ import { apiRequest } from "../lib/api";
 
 interface Workspace {
   buyer: string;
+  corrigenda: readonly {
+    description: string;
+    id: string;
+    identifier: string;
+    publicationDate: string | null;
+  }[];
   demonstration_label?: string;
   id: string;
   lifecycleStatus: string;
@@ -28,6 +34,7 @@ interface Workspace {
       displayFilename: string;
       id: string;
       role: string;
+      sha256: string;
       status: string;
     }[];
     id: string;
@@ -89,48 +96,94 @@ export function TenderWorkspace({
     if (workspace === null) return;
     const form = event.currentTarget;
     const values = new FormData(form);
-    const file = values.get("file");
+    const files = values
+      .getAll("file")
+      .filter(
+        (value): value is File => value instanceof File && value.size > 0,
+      );
+    const role = values.get("role");
     const version = workspace.versions[0];
-    if (!(file instanceof File) || file.size === 0 || version === undefined)
+    if (files.length === 0 || version === undefined || typeof role !== "string")
       return;
+    if (role === "CORRIGENDUM" && files.length !== 1) {
+      setMessage(
+        "Upload one corrigendum at a time to preserve version history.",
+      );
+      return;
+    }
     setMessage("Preparing secure direct upload…");
     try {
-      const checksum = await sha256(file);
-      const session = await apiRequest<UploadSession>(
-        `/organisations/${organisationId}/tenders/${tenderId}/versions/${version.id}/upload-sessions`,
-        {
-          body: JSON.stringify({
-            checksum_sha256: checksum,
-            filename: file.name,
-            mime_type: file.type,
-            role: values.get("role"),
-            size_bytes: file.size,
-          }),
-          method: "POST",
-        },
-      );
-      const response = await fetch(session.upload_url, {
-        body: file,
-        headers: {
-          "content-type": file.type,
-          "x-amz-meta-sha256": checksum,
-        },
-        method: "PUT",
-      });
-      if (!response.ok) throw new Error("Object upload failed");
-      await apiRequest(
-        `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
-        {
-          body: JSON.stringify({ checksum_sha256: checksum }),
-          method: "POST",
-        },
-      );
+      for (const [index, file] of files.entries()) {
+        setMessage(`Uploading source ${index + 1} of ${files.length}…`);
+        const checksum = await sha256(file);
+        let targetVersionId = version.id;
+        if (role === "CORRIGENDUM") {
+          const identifier = values.get("corrigendum_identifier");
+          const description = values.get("corrigendum_description");
+          if (
+            typeof identifier !== "string" ||
+            identifier.length === 0 ||
+            typeof description !== "string" ||
+            description.length === 0
+          )
+            throw new Error("Corrigendum metadata is required");
+          const result = await apiRequest<{ version_id: string }>(
+            `/organisations/${organisationId}/tenders/${tenderId}/corrigenda`,
+            {
+              body: JSON.stringify({
+                checksum_sha256: checksum,
+                description,
+                identifier,
+              }),
+              method: "POST",
+            },
+          );
+          targetVersionId = result.version_id;
+        }
+        const session = await apiRequest<UploadSession>(
+          `/organisations/${organisationId}/tenders/${tenderId}/versions/${targetVersionId}/upload-sessions`,
+          {
+            body: JSON.stringify({
+              checksum_sha256: checksum,
+              filename: file.name,
+              mime_type: file.type,
+              role,
+              size_bytes: file.size,
+            }),
+            method: "POST",
+          },
+        );
+        const response = await fetch(session.upload_url, {
+          body: file,
+          headers: {
+            "content-type": file.type,
+            "x-amz-meta-sha256": checksum,
+          },
+          method: "PUT",
+        });
+        if (!response.ok) throw new Error("Object upload failed");
+        await apiRequest(
+          `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
+          {
+            body: JSON.stringify({ checksum_sha256: checksum }),
+            method: "POST",
+          },
+        );
+      }
       form.reset();
       setMessage("Upload accepted. Security processing is in progress.");
       await load();
     } catch {
       setMessage("Upload rejected. Check the file type, size, and contents.");
     }
+  }
+
+  async function download(documentId: string): Promise<void> {
+    const result = await apiRequest<{ download_url: string }>(
+      `/organisations/${organisationId}/tenders/${tenderId}/documents/${documentId}/download`,
+      { method: "POST" },
+    );
+    window.location.assign(result.download_url);
   }
 
   return (
@@ -171,12 +224,25 @@ export function TenderWorkspace({
                 </option>
                 <option value="FORM">Form</option>
                 <option value="DECLARATION">Declaration</option>
+                <option value="CORRIGENDUM">Corrigendum</option>
+                <option value="AMENDMENT">Amendment</option>
+                <option value="CLARIFICATION">Buyer clarification</option>
+                <option value="SUPPORTING">Supporting document</option>
               </select>
+            </label>
+            <label>
+              Corrigendum identifier (required for corrigendum role)
+              <input name="corrigendum_identifier" />
+            </label>
+            <label>
+              Corrigendum description (required for corrigendum role)
+              <input name="corrigendum_description" />
             </label>
             <label>
               PDF, ZIP, XLSX, DOCX, or CSV (maximum 25 MiB)
               <input
                 accept=".pdf,.zip,.xlsx,.docx,.csv"
+                multiple
                 name="file"
                 required
                 type="file"
@@ -208,7 +274,14 @@ export function TenderWorkspace({
                 {version.documents.map((document) => (
                   <p key={document.id}>
                     {document.displayFilename} · {document.role} ·{" "}
-                    {document.status}
+                    {document.status} · SHA-256 {document.sha256.slice(0, 12)}…
+                    <button
+                      disabled={document.status !== "READY"}
+                      onClick={() => void download(document.id)}
+                      type="button"
+                    >
+                      Download
+                    </button>
                   </p>
                 ))}
               </article>
@@ -220,6 +293,15 @@ export function TenderWorkspace({
           {workspace?.processingJobs.map((job) => (
             <p key={job.id}>
               {job.state} · {job.progressPercentage}% · {job.publicMessage}
+            </p>
+          ))}
+          <h3>Corrigendum history</h3>
+          {workspace?.corrigenda.length === 0 && (
+            <p>No corrigenda have been recorded.</p>
+          )}
+          {workspace?.corrigenda.map((corrigendum) => (
+            <p key={corrigendum.id}>
+              {corrigendum.identifier} · {corrigendum.description}
             </p>
           ))}
         </section>
