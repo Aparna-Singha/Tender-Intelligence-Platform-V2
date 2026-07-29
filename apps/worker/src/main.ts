@@ -31,6 +31,11 @@ import {
 } from "./checklist-generation-processor.js";
 import { GeminiGateway } from "./ai-provider.js";
 import { isRagJob, RagProcessor, type RagJob } from "./rag-processor.js";
+import {
+  DraftGenerationProcessor,
+  isDraftGenerationJob,
+  type DraftGenerationJob,
+} from "./draft-generation-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -88,6 +93,16 @@ async function bootstrap(): Promise<void> {
     environment.GEMINI_EMBEDDING_MODEL,
   );
   const ragProcessor = new RagProcessor(database, gemini, gemini);
+  const draftGateway = new GeminiGateway(
+    environment.GEMINI_API_KEY,
+    environment.DRAFT_MODEL,
+    environment.GEMINI_EMBEDDING_MODEL,
+  );
+  const draftGenerationProcessor = new DraftGenerationProcessor(
+    database,
+    gemini,
+    draftGateway,
+  );
   const documentWorker = new Worker<
     | DocumentJob
     | TenderDocumentJob
@@ -96,6 +111,7 @@ async function bootstrap(): Promise<void> {
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
     | RagJob
+    | DraftGenerationJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -148,6 +164,14 @@ async function bootstrap(): Promise<void> {
           ragProcessor.process(data, signal),
         );
       }
+      if (job.name === "generate-fact-constrained-draft") {
+        if (!isDraftGenerationJob(job.data))
+          throw new Error("Invalid draft generation job");
+        const data = job.data;
+        return runWithTimeout(environment.DRAFT_JOB_TIMEOUT_MS, (signal) =>
+          draftGenerationProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -181,6 +205,15 @@ async function bootstrap(): Promise<void> {
       isRagJob(job.data)
     )
       void ragProcessor.fail(job.data, error);
+    if (
+      job?.name === "generate-fact-constrained-draft" &&
+      isDraftGenerationJob(job.data)
+    )
+      void draftGenerationProcessor.fail(
+        job.data.draftGenerationRunId,
+        job.data.organisationId,
+        error,
+      );
     if (
       job?.name === "generate-missing-action-checklist" &&
       isChecklistGenerationJob(job.data)
@@ -271,7 +304,8 @@ function isTenderDocumentJob(
     | RiskAnalysisJob
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
-    | RagJob,
+    | RagJob
+    | DraftGenerationJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
@@ -284,7 +318,8 @@ function isCompanyDocumentJob(
     | RiskAnalysisJob
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
-    | RagJob,
+    | RagJob
+    | DraftGenerationJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
@@ -297,7 +332,8 @@ function isExtractionJob(
     | RiskAnalysisJob
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
-    | RagJob,
+    | RagJob
+    | DraftGenerationJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
@@ -310,7 +346,8 @@ function isRiskAnalysisJob(
     | RiskAnalysisJob
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
-    | RagJob,
+    | RagJob
+    | DraftGenerationJob,
 ): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }

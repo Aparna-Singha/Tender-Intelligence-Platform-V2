@@ -107,6 +107,26 @@ enum AuditEventType {
   CHECKLIST_ACTION_DENIED
   RAG_INDEX_STARTED
   RAG_CONVERSATION_CREATED
+  DRAFT_GENERATION_STARTED
+  DRAFT_GENERATION_CANCELLED
+  DRAFT_GENERATION_RETRIED
+  DRAFT_GENERATION_COMPLETED
+  DRAFT_GENERATION_INVALIDATED
+  DRAFT_CREATED
+  DRAFT_VERSION_CREATED
+  DRAFT_SECTION_EDITED
+  DRAFT_HUMAN_INPUT_CREATED
+  DRAFT_HUMAN_INPUT_REVIEWED
+  DRAFT_PLACEHOLDER_RESOLVED
+  DRAFT_PLACEHOLDER_REOPENED
+  DRAFT_REVIEW_STARTED
+  DRAFT_CHANGES_REQUESTED
+  DRAFT_VERSION_APPROVED
+  DRAFT_VERSION_REJECTED
+  DRAFT_VERSION_REOPENED
+  DRAFT_ARCHIVED
+  DRAFT_DELETED
+  DRAFT_ACCESS_DENIED
 }
 
 enum RiskAnalysisGate {
@@ -621,6 +641,142 @@ enum RagAnswerRunStatus {
 enum RagFeedbackRating {
   HELPFUL
   NOT_HELPFUL
+}
+
+enum DraftType {
+  REQUIREMENT_RESPONSE
+  TECHNICAL_RESPONSE
+  ELIGIBILITY_RESPONSE
+  COMPANY_PROFILE_RESPONSE
+  EXPERIENCE_RESPONSE
+  CERTIFICATION_RESPONSE
+  OEM_AUTHORISATION_RESPONSE
+  DELIVERY_AND_SUPPORT_RESPONSE
+  DECLARATION_RESPONSE
+  CLARIFICATION_AND_DEVIATION_RESPONSE
+  CONSOLIDATED_FIRST_DRAFT
+}
+
+enum DraftGenerationStatus {
+  QUEUED
+  SNAPSHOTTING
+  PLANNING
+  RETRIEVING
+  GENERATING
+  VALIDATING
+  COMPLETE
+  FAILED
+  CANCELLED
+  INVALIDATED
+}
+
+enum DraftLifecycle {
+  ACTIVE
+  ARCHIVED
+  DELETED
+  INVALIDATED
+}
+
+enum DraftReviewState {
+  NOT_REVIEWED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  REJECTED
+  SUPERSEDED
+  INVALIDATED
+}
+
+enum DraftContentOrigin {
+  GENERATED
+  HUMAN_EDITED
+  TEMPLATE
+  PLACEHOLDER
+}
+
+enum DraftClaimClass {
+  TENDER_SOURCE_STATEMENT
+  APPROVED_COMPANY_FACT
+  HUMAN_AUTHORED_COMMITMENT
+  DERIVED_ASSESSMENT_REFERENCE
+  RISK_OR_CHECKLIST_WARNING
+  INFERENCE_REQUIRING_REVIEW
+  PLACEHOLDER
+}
+
+enum DraftSupportState {
+  SUPPORTED
+  UNSUPPORTED
+  CONFLICTING
+  EXPIRED
+  HUMAN_REVIEW_REQUIRED
+}
+
+enum DraftPlaceholderType {
+  MISSING_APPROVED_COMPANY_FACT
+  MISSING_DOCUMENT_EVIDENCE
+  UNRESOLVED_CONFLICT
+  HUMAN_REVIEW_REQUIRED
+  TECHNICAL_INPUT_REQUIRED
+  COMMERCIAL_INPUT_REQUIRED
+  SIGNATORY_INPUT_REQUIRED
+  CLARIFICATION_REQUIRED
+  SOURCE_EXTRACTION_UNAVAILABLE
+  EXPIRED_EVIDENCE
+  UNSUPPORTED_COMMITMENT
+  OTHER
+}
+
+enum DraftPlaceholderResolutionState {
+  OPEN
+  RESOLVED
+  REOPENED
+  INVALIDATED
+}
+
+enum DraftHumanInputClass {
+  WRITING_PREFERENCE
+  TECHNICAL_RESPONSE
+  DELIVERY_COMMITMENT
+  COMMERCIAL_INPUT
+  SIGNATORY_INPUT
+  DECLARATION_INPUT
+  CLARIFICATION_RESPONSE
+  OTHER
+}
+
+enum DraftHumanInputReviewState {
+  PENDING
+  APPROVED
+  REJECTED
+  SUPERSEDED
+  INVALIDATED
+}
+
+enum DraftReviewAction {
+  START_REVIEW
+  COMMENT
+  REQUEST_CHANGES
+  ACCEPT_SECTION
+  REJECT_SECTION
+  LINK_SOURCE
+  RESOLVE_PLACEHOLDER
+  REOPEN_PLACEHOLDER
+  APPROVE_VERSION
+  REJECT_VERSION
+  REOPEN_VERSION
+}
+
+enum DraftSnapshotSourceKind {
+  EXTRACTION_CITATION
+  STRUCTURED_REQUIREMENT
+  RISK_FINDING
+  ELIGIBILITY_ASSESSMENT
+  COMPANY_EVIDENCE_FACT_VERSION
+  COMPANY_EVIDENCE_CITATION
+  CHECKLIST_ITEM
+  RAG_CHUNK
+  HUMAN_INPUT
 }
 
 model User {
@@ -2409,4 +2565,345 @@ model RagFeedback {
   @@unique([answerRunId, submittedByUserId])
   @@index([organisationId, tenderId, createdAt])
   @@map("rag_feedback")
+}
+
+model DraftTemplate {
+  id                String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId    String?   @map("organisation_id") @db.Uuid
+  name              String    @db.VarChar(160)
+  draftType         DraftType @map("draft_type")
+  createdByUserId   String    @map("created_by_user_id") @db.Uuid
+  activeVersionId   String?   @map("active_version_id") @db.Uuid
+  retiredAt         DateTime? @map("retired_at") @db.Timestamptz(3)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+  versions          DraftTemplateVersion[]
+
+  @@index([organisationId, draftType, retiredAt])
+  @@map("draft_templates")
+}
+
+model DraftTemplateVersion {
+  id                    String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  templateId            String        @map("template_id") @db.Uuid
+  versionNumber         Int           @map("version_number")
+  sections              Json
+  requiredReviewRole    Role          @map("required_review_role")
+  templatePolicyVersion String        @map("template_policy_version") @db.VarChar(80)
+  sourceFingerprint     String        @map("source_fingerprint") @db.Char(64)
+  createdByUserId       String        @map("created_by_user_id") @db.Uuid
+  activatedAt           DateTime?     @map("activated_at") @db.Timestamptz(3)
+  retiredAt             DateTime?     @map("retired_at") @db.Timestamptz(3)
+  createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  template              DraftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([templateId, versionNumber])
+  @@index([templateId, activatedAt, retiredAt])
+  @@map("draft_template_versions")
+}
+
+model DraftGenerationRun {
+  id                       String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String                @map("organisation_id") @db.Uuid
+  tenderId                 String                @map("tender_id") @db.Uuid
+  tenderVersionId          String                @map("tender_version_id") @db.Uuid
+  extractionRunId          String                @map("extraction_run_id") @db.Uuid
+  riskAnalysisRunId        String                @map("risk_analysis_run_id") @db.Uuid
+  pursuitDecisionId        String                @map("pursuit_decision_id") @db.Uuid
+  assessmentRunId          String                @map("assessment_run_id") @db.Uuid
+  evidenceSnapshotId       String                @map("evidence_snapshot_id") @db.Uuid
+  checklistGenerationRunId String                @map("checklist_generation_run_id") @db.Uuid
+  ragIndexRunId            String                @map("rag_index_run_id") @db.Uuid
+  templateVersionId        String                @map("template_version_id") @db.Uuid
+  inputSnapshotId          String?               @unique @map("input_snapshot_id") @db.Uuid
+  draftId                  String?               @map("draft_id") @db.Uuid
+  draftType                DraftType             @map("draft_type")
+  title                    String                @db.VarChar(200)
+  sourceMode               RagSourceMode         @map("source_mode")
+  status                   DraftGenerationStatus @default(QUEUED)
+  provider                 String                @db.VarChar(80)
+  model                    String                @db.VarChar(160)
+  promptPolicyVersion      String                @map("prompt_policy_version") @db.VarChar(80)
+  retrievalPolicyVersion   String                @map("retrieval_policy_version") @db.VarChar(80)
+  templatePolicyVersion    String                @map("template_policy_version") @db.VarChar(80)
+  draftingPolicyVersion    String                @map("drafting_policy_version") @db.VarChar(80)
+  sourceFingerprint        String                @map("source_fingerprint") @db.Char(64)
+  idempotencyKey           String                @unique @map("idempotency_key") @db.VarChar(255)
+  trigger                  String                @db.VarChar(40)
+  progressPercentage       Int                   @default(0) @map("progress_percentage")
+  currentStage             String                @default("Queued") @map("current_stage") @db.VarChar(120)
+  eventSequence            Int                   @default(1) @map("event_sequence")
+  sectionCount             Int                   @default(0) @map("section_count")
+  validatedClaimCount      Int                   @default(0) @map("validated_claim_count")
+  placeholderCount         Int                   @default(0) @map("placeholder_count")
+  citationCount            Int                   @default(0) @map("citation_count")
+  retryCount               Int                   @default(0) @map("retry_count")
+  requestedByUserId        String                @map("requested_by_user_id") @db.Uuid
+  cancellationRequestedAt  DateTime?             @map("cancellation_requested_at") @db.Timestamptz(3)
+  safeFailureCode          String?               @map("safe_failure_code") @db.VarChar(80)
+  planningLatencyMs        Int?                  @map("planning_latency_ms")
+  retrievalLatencyMs       Int?                  @map("retrieval_latency_ms")
+  generationLatencyMs      Int?                  @map("generation_latency_ms")
+  validationLatencyMs      Int?                  @map("validation_latency_ms")
+  totalLatencyMs           Int?                  @map("total_latency_ms")
+  startedAt                DateTime?             @map("started_at") @db.Timestamptz(3)
+  completedAt              DateTime?             @map("completed_at") @db.Timestamptz(3)
+  invalidatedAt            DateTime?             @map("invalidated_at") @db.Timestamptz(3)
+  invalidationReason       String?               @map("invalidation_reason") @db.VarChar(240)
+  createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
+  inputSnapshot            DraftInputSnapshot?
+
+  @@index([organisationId, tenderId, tenderVersionId, status, createdAt])
+  @@index([organisationId, sourceFingerprint, draftType])
+  @@map("draft_generation_runs")
+}
+
+model DraftInputSnapshot {
+  id                       String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId           String             @map("organisation_id") @db.Uuid
+  tenderId                 String             @map("tender_id") @db.Uuid
+  tenderVersionId          String             @map("tender_version_id") @db.Uuid
+  extractionRunId          String             @map("extraction_run_id") @db.Uuid
+  riskAnalysisRunId        String             @map("risk_analysis_run_id") @db.Uuid
+  pursuitDecisionId        String             @map("pursuit_decision_id") @db.Uuid
+  assessmentRunId          String             @map("assessment_run_id") @db.Uuid
+  evidenceSnapshotId       String             @map("evidence_snapshot_id") @db.Uuid
+  checklistGenerationRunId String             @map("checklist_generation_run_id") @db.Uuid
+  ragIndexRunId            String             @map("rag_index_run_id") @db.Uuid
+  templateVersionId        String             @map("template_version_id") @db.Uuid
+  generationRunId          String             @unique @map("generation_run_id") @db.Uuid
+  sourceMode               RagSourceMode      @map("source_mode")
+  draftType                DraftType          @map("draft_type")
+  provider                 String             @db.VarChar(80)
+  model                    String             @db.VarChar(160)
+  sourceFingerprint        String             @map("source_fingerprint") @db.Char(64)
+  promptPolicyVersion      String             @map("prompt_policy_version") @db.VarChar(80)
+  retrievalPolicyVersion   String             @map("retrieval_policy_version") @db.VarChar(80)
+  templatePolicyVersion    String             @map("template_policy_version") @db.VarChar(80)
+  draftingPolicyVersion    String             @map("drafting_policy_version") @db.VarChar(80)
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  generationRun            DraftGenerationRun @relation(fields: [generationRunId], references: [id], onDelete: Cascade)
+  sources                  DraftInputSnapshotSource[]
+
+  @@index([organisationId, tenderId, sourceFingerprint])
+  @@map("draft_input_snapshots")
+}
+
+model DraftInputSnapshotSource {
+  id                    String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId            String                  @map("snapshot_id") @db.Uuid
+  organisationId        String                  @map("organisation_id") @db.Uuid
+  tenderId              String                  @map("tender_id") @db.Uuid
+  sourceKind            DraftSnapshotSourceKind @map("source_kind")
+  sourceRecordId        String                  @map("source_record_id") @db.Uuid
+  sourceVersion         String                  @map("source_version") @db.VarChar(160)
+  sourceChecksum        String?                 @map("source_checksum") @db.Char(64)
+  extractionCitationId  String?                 @map("extraction_citation_id") @db.Uuid
+  evidenceFactVersionId String?                 @map("evidence_fact_version_id") @db.Uuid
+  evidenceCitationId    String?                 @map("evidence_citation_id") @db.Uuid
+  humanInputId          String?                 @map("human_input_id") @db.Uuid
+  createdAt             DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+  snapshot              DraftInputSnapshot      @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@unique([snapshotId, sourceKind, sourceRecordId])
+  @@index([organisationId, tenderId, sourceKind])
+  @@map("draft_input_snapshot_sources")
+}
+
+model Draft {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId   String         @map("organisation_id") @db.Uuid
+  tenderId         String         @map("tender_id") @db.Uuid
+  draftType        DraftType      @map("draft_type")
+  title            String         @db.VarChar(200)
+  lifecycle        DraftLifecycle @default(ACTIVE)
+  currentVersionId String?        @map("current_version_id") @db.Uuid
+  createdByUserId  String         @map("created_by_user_id") @db.Uuid
+  archivedAt       DateTime?      @map("archived_at") @db.Timestamptz(3)
+  deletedAt        DateTime?      @map("deleted_at") @db.Timestamptz(3)
+  retentionUntil   DateTime?      @map("retention_until") @db.Timestamptz(3)
+  createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+  versions         DraftVersion[]
+
+  @@index([organisationId, tenderId, lifecycle, updatedAt])
+  @@map("drafts")
+}
+
+model DraftVersion {
+  id                    String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftId               String           @map("draft_id") @db.Uuid
+  organisationId        String           @map("organisation_id") @db.Uuid
+  tenderId              String           @map("tender_id") @db.Uuid
+  tenderVersionId       String           @map("tender_version_id") @db.Uuid
+  versionNumber         Int              @map("version_number")
+  generationRunId       String?          @map("generation_run_id") @db.Uuid
+  parentVersionId       String?          @map("parent_version_id") @db.Uuid
+  inputSnapshotId       String           @map("input_snapshot_id") @db.Uuid
+  templateVersionId     String           @map("template_version_id") @db.Uuid
+  sourceFingerprint     String           @map("source_fingerprint") @db.Char(64)
+  provider              String?          @db.VarChar(80)
+  model                 String?          @db.VarChar(160)
+  reviewState           DraftReviewState @default(NOT_REVIEWED) @map("review_state")
+  createdByUserId       String           @map("created_by_user_id") @db.Uuid
+  changeSummary         String?          @map("change_summary") @db.VarChar(1000)
+  approvedByUserId      String?          @map("approved_by_user_id") @db.Uuid
+  approvedAt            DateTime?        @map("approved_at") @db.Timestamptz(3)
+  approvalRationale     String?          @map("approval_rationale") @db.VarChar(2000)
+  invalidatedAt         DateTime?        @map("invalidated_at") @db.Timestamptz(3)
+  invalidationReason    String?          @map("invalidation_reason") @db.VarChar(240)
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  draft                 Draft            @relation(fields: [draftId], references: [id], onDelete: Cascade)
+  sections              DraftSection[]
+  reviews               DraftReview[]
+  reviewEvents          DraftReviewEvent[]
+
+  @@unique([draftId, versionNumber])
+  @@index([organisationId, tenderId, draftId, reviewState])
+  @@map("draft_versions")
+}
+
+model DraftSection {
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  draftVersionId   String             @map("draft_version_id") @db.Uuid
+  sectionKey       String             @map("section_key") @db.VarChar(120)
+  heading          String             @db.VarChar(240)
+  sectionOrder     Int                @map("section_order")
+  content          String             @db.Text
+  contentOrigin    DraftContentOrigin @map("content_origin")
+  requirementIds   String[]           @default([]) @map("requirement_ids") @db.Uuid
+  reviewState      DraftReviewState   @default(NOT_REVIEWED) @map("review_state")
+  createdAt        DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  draftVersion     DraftVersion       @relation(fields: [draftVersionId], references: [id], onDelete: Cascade)
+  claims           DraftClaim[]
+  placeholders     DraftPlaceholder[]
+
+  @@unique([draftVersionId, sectionKey])
+  @@index([draftVersionId, sectionOrder])
+  @@map("draft_sections")
+}
+
+model DraftClaim {
+  id                    String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  sectionId             String            @map("section_id") @db.Uuid
+  claimText             String            @map("claim_text") @db.VarChar(2000)
+  claimClass            DraftClaimClass   @map("claim_class")
+  material              Boolean           @default(true)
+  supportState          DraftSupportState @map("support_state")
+  evidenceFactVersionId String?           @map("evidence_fact_version_id") @db.Uuid
+  humanInputId          String?           @map("human_input_id") @db.Uuid
+  reviewState           DraftReviewState  @default(NOT_REVIEWED) @map("review_state")
+  invalidatedAt         DateTime?         @map("invalidated_at") @db.Timestamptz(3)
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  section               DraftSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  citations             DraftClaimCitation[]
+
+  @@index([sectionId, claimClass, supportState])
+  @@map("draft_claims")
+}
+
+model DraftClaimCitation {
+  id                   String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  claimId              String       @map("claim_id") @db.Uuid
+  ragChunkId           String?      @map("rag_chunk_id") @db.Uuid
+  extractionCitationId String?      @map("extraction_citation_id") @db.Uuid
+  evidenceCitationId   String?      @map("evidence_citation_id") @db.Uuid
+  handle               String       @db.VarChar(32)
+  documentName         String       @map("document_name") @db.VarChar(255)
+  pageNumber           Int?         @map("page_number")
+  clauseLabel          String?      @map("clause_label") @db.VarChar(240)
+  excerpt              String       @db.VarChar(1000)
+  sourceChecksum       String       @map("source_checksum") @db.Char(64)
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  claim                DraftClaim   @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  @@unique([claimId, handle])
+  @@index([ragChunkId])
+  @@map("draft_claim_citations")
+}
+
+model DraftPlaceholder {
+  id                      String                          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId          String                          @map("organisation_id") @db.Uuid
+  tenderId                String                          @map("tender_id") @db.Uuid
+  draftVersionId          String                          @map("draft_version_id") @db.Uuid
+  sectionId               String                          @map("section_id") @db.Uuid
+  placeholderType         DraftPlaceholderType            @map("placeholder_type")
+  markerText              String                          @map("marker_text") @db.VarChar(1000)
+  explanation             String                          @db.VarChar(2000)
+  structuredRequirementId String?                         @map("structured_requirement_id") @db.Uuid
+  assessmentId            String?                         @map("assessment_id") @db.Uuid
+  checklistItemId         String?                         @map("checklist_item_id") @db.Uuid
+  material                Boolean                         @default(true)
+  approvalBlocking        Boolean                         @default(true) @map("approval_blocking")
+  resolutionState         DraftPlaceholderResolutionState @default(OPEN) @map("resolution_state")
+  resolvedByUserId        String?                         @map("resolved_by_user_id") @db.Uuid
+  resolutionRationale     String?                         @map("resolution_rationale") @db.VarChar(2000)
+  resolvedAt              DateTime?                       @map("resolved_at") @db.Timestamptz(3)
+  createdAt               DateTime                        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt               DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(3)
+  section                 DraftSection                    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, tenderId, draftVersionId, resolutionState])
+  @@map("draft_placeholders")
+}
+
+model DraftHumanInput {
+  id                    String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId        String                     @map("organisation_id") @db.Uuid
+  tenderId              String                     @map("tender_id") @db.Uuid
+  inputClass            DraftHumanInputClass       @map("input_class")
+  value                 String                     @db.VarChar(4000)
+  sectionKey            String?                    @map("section_key") @db.VarChar(120)
+  structuredRequirementId String?                  @map("structured_requirement_id") @db.Uuid
+  provenanceDescription String                     @map("provenance_description") @db.VarChar(1000)
+  reviewState           DraftHumanInputReviewState @default(PENDING) @map("review_state")
+  createdByUserId       String                     @map("created_by_user_id") @db.Uuid
+  reviewedByUserId      String?                    @map("reviewed_by_user_id") @db.Uuid
+  reviewRationale       String?                    @map("review_rationale") @db.VarChar(2000)
+  reviewedAt            DateTime?                  @map("reviewed_at") @db.Timestamptz(3)
+  invalidatedAt         DateTime?                  @map("invalidated_at") @db.Timestamptz(3)
+  supersededById        String?                    @map("superseded_by_id") @db.Uuid
+  createdAt             DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organisationId, tenderId, inputClass, reviewState])
+  @@map("draft_human_inputs")
+}
+
+model DraftReview {
+  id               String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId   String           @map("organisation_id") @db.Uuid
+  tenderId         String           @map("tender_id") @db.Uuid
+  draftVersionId   String           @map("draft_version_id") @db.Uuid
+  state            DraftReviewState @default(IN_REVIEW)
+  startedByUserId  String           @map("started_by_user_id") @db.Uuid
+  assignedUserId   String?          @map("assigned_user_id") @db.Uuid
+  startedAt        DateTime         @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt      DateTime?        @map("completed_at") @db.Timestamptz(3)
+  draftVersion     DraftVersion     @relation(fields: [draftVersionId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, tenderId, draftVersionId, state])
+  @@map("draft_reviews")
+}
+
+model DraftReviewEvent {
+  id               String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId   String            @map("organisation_id") @db.Uuid
+  tenderId         String            @map("tender_id") @db.Uuid
+  draftVersionId   String            @map("draft_version_id") @db.Uuid
+  sectionId        String?           @map("section_id") @db.Uuid
+  action           DraftReviewAction
+  priorState       DraftReviewState? @map("prior_state")
+  newState         DraftReviewState? @map("new_state")
+  rationale        String            @db.VarChar(2000)
+  actorUserId      String            @map("actor_user_id") @db.Uuid
+  sourceFingerprint String           @map("source_fingerprint") @db.Char(64)
+  eventSequence    Int               @map("event_sequence")
+  createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
+  draftVersion     DraftVersion      @relation(fields: [draftVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([draftVersionId, eventSequence])
+  @@index([organisationId, tenderId, draftVersionId, createdAt])
+  @@map("draft_review_events")
 }

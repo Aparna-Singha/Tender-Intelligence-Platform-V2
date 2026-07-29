@@ -5,6 +5,7 @@ export { PrismaDatabaseHealth } from "./database-health.js";
 export type { DatabaseHealth } from "./database-health.js";
 export {
   AuditEventType,
+  DraftType,
   InvitationStatus,
   OnboardingStatus,
   OrganisationType,

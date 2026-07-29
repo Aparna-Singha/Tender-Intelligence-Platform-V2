@@ -302,3 +302,19 @@ Release evaluation requires at least 95% citation resolution, 90% claim entailme
 95% unanswerable refusal, and 100% cross-tenant and cross-tender isolation. Results
 may be claimed only when provider-backed infrastructure tests run. Drafting,
 readiness, export, scraping, submission, and autonomous bidding remain absent.
+
+## Phase 10: Fact-constrained tender drafting
+
+Phase 10 requires a current Phase 5 extraction, Phase 6 risk and human `CONTINUE`,
+Phase 7 assessment and evidence snapshot, Phase 8 checklist, and Phase 9 index.
+Generation captures an immutable relational source snapshot; hard tenant filters
+precede retrieval; material tender statements use verified citations; company
+assertions use accepted current evidence versions; chat answers are excluded; and
+unsupported or conflicting content stays visible.
+
+Generated and human-edited versions are immutable and require separate human
+review. Approval is permissioned, audited, rationale-bearing, separated from the
+author, blocked by stale sources, unsupported claims, conflicts, commitments, or
+material placeholders, and means only approval for Phase 11 review. Quality gates,
+migration validation, security inspection, and documentation must pass. Final
+readiness, the second risk analysis, export, scraping, and submission remain absent.

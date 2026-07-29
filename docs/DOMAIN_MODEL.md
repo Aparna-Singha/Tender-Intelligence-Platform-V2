@@ -223,3 +223,18 @@ checksum.
 retrieval. History is not evidence. Answers may be insufficient, require review,
 fail, or become invalid; they cannot decide eligibility, draft, approve, export,
 or submit.
+
+## Fact-constrained draft
+
+`DraftGenerationRun` and `DraftInputSnapshot` bind generation to exact current
+Phase 5–9 records and versioned policies. `DraftTemplateVersion` controls section
+shape. `Draft` points to an immutable `DraftVersion`; sections contain classified
+claims, exact citations, and visible placeholders. `DraftHumanInput` separates
+writing preferences from reviewed commitments. `DraftReview` and
+`DraftReviewEvent` preserve human-only review history.
+
+Generated content is never authoritative merely because a model produced it.
+Company assertions reference the accepted evidence-fact version; material tender
+statements require exact source citations. Edits create child versions and never
+inherit approval. Invalidated versions remain historical and cannot be approved.
+See [Draft Policy](DRAFT_POLICY.md).

@@ -16,6 +16,7 @@ import { RisksModule } from "./risks/risks.module.js";
 import { EligibilityModule } from "./eligibility/eligibility.module.js";
 import { ChecklistsModule } from "./checklists/checklists.module.js";
 import { RagModule } from "./rag/rag.module.js";
+import { DraftsModule } from "./drafts/drafts.module.js";
 import {
   AccessGuard,
   CsrfGuard,
@@ -58,6 +59,7 @@ import { RateLimitService } from "./common/rate-limit.service.js";
     EligibilityModule,
     ChecklistsModule,
     RagModule,
+    DraftsModule,
   ],
   providers: [
     RateLimitService,

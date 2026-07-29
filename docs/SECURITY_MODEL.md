@@ -217,3 +217,18 @@ approval, or submission tool. Unknown citation handles, invalid output, provider
 failure, and embedding mismatch fail closed. Logs, queues, SSE, metrics, and errors
 exclude questions, answers, prompts, passages, and embeddings. Provider privacy and
 regional-processing approval remain production blockers.
+
+## Phase 10 drafting isolation
+
+Draft endpoints derive actor and organisation from the secure session and repeat
+organisation/tender scope on reads, mutations, template access, evidence use,
+review, and SSE. Platform administrators receive no implicit tenant membership.
+Opaque jobs reload PostgreSQL authority and require a current unsuperseded
+`CONTINUE` before generation and persistence.
+
+Retrieval is bounded and pre-filtered by organisation, tender, tender version,
+active index, and snapshotted source IDs. Chat answers never enter the snapshot.
+Retrieved text, templates, and human input are inert; the provider has no tools,
+internet, approval, export, or submission capability. Unknown handles, unsupported
+company facts, cancellation, stale sources, and provider errors fail closed.
+Telemetry excludes source, prompt, draft, and human-input bodies.

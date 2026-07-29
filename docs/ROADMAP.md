@@ -110,6 +110,18 @@ The measurable exit conditions are in
 
 ## Later candidates
 
+## Phase 10: Fact-constrained tender drafting
+
+Status: implemented on the Phase 10 feature branch.
+
+- immutable snapshots of exact current Phase 5–9 inputs and policy versions;
+- controlled templates, claim classes, exact citations, and visible placeholders;
+- provider-neutral bounded generation with no fake fallback;
+- immutable human revisions, append-oriented review, human-only approval, and
+  fail-closed invalidation;
+- final readiness, the second risk analysis, export, scraping, and submission
+  remain deferred.
+
 ## Phase 9: Tenant-isolated cited tender chatbot
 
 Status: implemented on the Phase 9 feature branch.

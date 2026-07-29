@@ -19,6 +19,7 @@ decisions, their context, alternatives, and trade-offs.
 | [0010](0010-immutable-controlled-evidence-assessments.md) | Immutable controlled evidence assessments         | Accepted |
 | [0011](0011-immutable-source-grounded-checklists.md)      | Immutable source-grounded action checklists       | Accepted |
 | [0012](0012-tenant-isolated-hybrid-rag.md)                | Tenant-isolated hybrid cited RAG                  | Accepted |
+| [0013](0013-fact-constrained-immutable-drafting.md)       | Fact-constrained immutable drafting               | Accepted |
 
 ## Process
 
