@@ -213,7 +213,12 @@ set; otherwise the service generates a UUID.
 
 ## Quality gates
 
+After a clean checkout and dependency installation, generate the Prisma Client
+before running any type-aware validation:
+
 ```sh
+pnpm install --frozen-lockfile
+pnpm db:generate
 pnpm format:check
 pnpm lint
 pnpm typecheck
