@@ -14,6 +14,9 @@ const validEnvironment = {
   S3_BUCKET: "local-bucket",
   S3_ACCESS_KEY_ID: "local-user",
   S3_SECRET_ACCESS_KEY: "local-password",
+  COOKIE_SECRET: "local-cookie-secret-that-is-at-least-32-characters",
+  WEB_APP_URL: "http://localhost:3000",
+  WEB_ORIGIN: "http://localhost:3000",
 } satisfies NodeJS.ProcessEnv;
 
 describe("parseEnvironment", () => {
@@ -58,5 +61,23 @@ describe("parseEnvironment", () => {
         DATABASE_URL: "mysql://localhost/database",
       }),
     ).toThrow("DATABASE_URL must use PostgreSQL");
+  });
+
+  it("requires complete email delivery configuration", () => {
+    expect(() =>
+      parseEnvironment("api", apiEnvironmentSchema, {
+        ...validEnvironment,
+        EMAIL_DELIVERY_URL: "https://email.example.test/deliver",
+      }),
+    ).toThrow("must be configured together");
+  });
+
+  it("requires secure delivery configuration in production", () => {
+    expect(() =>
+      parseEnvironment("api", apiEnvironmentSchema, {
+        ...validEnvironment,
+        NODE_ENV: "production",
+      }),
+    ).toThrow("required in production");
   });
 });

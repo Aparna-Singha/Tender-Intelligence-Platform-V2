@@ -137,3 +137,33 @@ Phase 1A is accepted when:
 - web, API, and worker production Dockerfiles run as non-root users;
 - no authentication, tender business behavior, fake response, or persistent
   process-memory store is introduced.
+
+## Phase 1B: Identity and organisation foundation
+
+Phase 1B is accepted when:
+
+- the requested identity, session, organisation, invitation, audit, onboarding
+  progress, and company profile tables are created by a versioned migration;
+- session and one-time token secrets are persisted only as digests, passwords are
+  scrypt-hashed, and revoked sessions fail on their next request;
+- browser authentication uses HttpOnly, SameSite=Strict cookies that are Secure in
+  production, with no access or refresh token in localStorage;
+- every unsafe browser request requires the exact configured Origin and a valid
+  signed double-submit CSRF token;
+- every route is explicitly public, authenticated, or organisation-authorised, with
+  no implicit access and no implicit tenant access for Platform Administrator;
+- cross-organisation selectors and altered request IDs cannot override the
+  server-derived user and membership;
+- self-promotion, Owner assignment, and Platform Administrator assignment through
+  organisation membership endpoints are denied;
+- registration, login, failed login, logout, organisation creation, invitation,
+  role change, password reset, and session revocation behaviors create the
+  documented audit events;
+- authentication endpoint limits are atomic in Redis and fail closed;
+- public errors do not disclose account existence, authorization state, or internal
+  exception details;
+- the generated OpenAPI contract and README accurately document the available
+  endpoints and configuration;
+- security unit tests, formatting, Markdown lint, ESLint, strict type-checking,
+  tests, and all three production builds pass;
+- no tender features or onboarding business questions are introduced.

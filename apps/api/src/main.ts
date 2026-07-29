@@ -31,7 +31,7 @@ async function bootstrap(): Promise<void> {
   const adapter = new FastifyAdapter({
     genReqId: (request: IncomingMessage) =>
       resolveRequestId(request.headers[startupEnvironment.REQUEST_ID_HEADER]),
-    trustProxy: false,
+    trustProxy: startupEnvironment.TRUST_PROXY,
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -50,11 +50,18 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(new ApiResponseInterceptor());
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
+  app.enableCors({
+    credentials: true,
+    origin: environment.WEB_ORIGIN,
+  });
 
   const openApiConfig = new DocumentBuilder()
     .setTitle("Tender Intelligence Platform API")
-    .setDescription("Platform infrastructure API. No business APIs exist yet.")
-    .setVersion("0.1.0")
+    .setDescription(
+      "Authentication and organisation API for Tender Intelligence Platform.",
+    )
+    .setVersion("0.2.0")
+    .addCookieAuth("tip_session", { in: "cookie", type: "apiKey" }, "session")
     .build();
   SwaggerModule.setup(
     "openapi",

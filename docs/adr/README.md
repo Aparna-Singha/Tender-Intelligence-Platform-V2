@@ -13,6 +13,7 @@ decisions, their context, alternatives, and trade-offs.
 | [0004](0004-human-in-the-loop-ai.md)          | Keep high-stakes AI workflows human-controlled    | Accepted |
 | [0005](0005-private-object-storage.md)        | Store document binaries in private object storage | Accepted |
 | [0006](0006-prisma-postgresql-orm.md)         | Use Prisma with the PostgreSQL driver adapter     | Accepted |
+| [0007](0007-database-sessions-and-csrf.md)    | Use database sessions and double-submit CSRF      | Accepted |
 
 ## Process
 

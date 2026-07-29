@@ -2,8 +2,8 @@
 
 ## Status and constraints
 
-This document records the approved target direction and the Phase 1A platform
-foundation.
+This document records the approved target direction and the Phase 1B identity and
+organisation foundation.
 
 The initial system is a TypeScript monorepo and modular monolith:
 
@@ -81,6 +81,14 @@ Each module owns its policies and persistence access. Transport handlers validat
 input and delegate to application services. Domain logic does not import framework,
 database, object-storage, queue, or LLM SDK details. Cross-module communication uses
 explicit interfaces and domain events where appropriate.
+
+Phase 1B implements identity/access and organisation modules. Controllers validate
+Zod contracts, application services coordinate Prisma transactions and delivery
+ports, and framework-independent role policy remains in `@tender/domain`. Global
+guards enforce Redis rate limits, CSRF, authentication, then tenant permissions.
+PostgreSQL stores users, session digests, organisations, memberships, invitations,
+password reset digests, onboarding progress shells, company profile shells, and
+audits.
 
 ## Data ownership
 

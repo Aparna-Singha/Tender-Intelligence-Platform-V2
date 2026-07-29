@@ -30,7 +30,9 @@ Status: implemented on the Phase 1A feature branch.
 
 Planned, not implemented.
 
-- account, organisation, membership, and progressive onboarding foundations;
+- Phase 1B complete on its feature branch: account, database session,
+  organisation, membership, invitation, and authorisation foundations;
+- progressive onboarding questions remain planned;
 - private reusable company-document upload;
 - manual tender PDF, ZIP/annexure, corrigendum, source URL, fixture, and admin import
   paths;

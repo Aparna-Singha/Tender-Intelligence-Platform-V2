@@ -75,6 +75,9 @@ importers:
       '@tender/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@tender/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@tender/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -96,6 +99,9 @@ importers:
       rxjs:
         specifier: 7.8.2
         version: 7.8.2
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@nestjs/testing':
         specifier: 11.1.28

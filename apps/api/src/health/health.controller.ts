@@ -4,8 +4,10 @@ import type { Liveness, Readiness } from "@tender/contracts";
 import type { FastifyReply } from "fastify";
 
 import { HealthService } from "./health.service.js";
+import { Public } from "../common/access-control.js";
 
 @ApiTags("platform")
+@Public()
 @Controller()
 export class HealthController {
   public constructor(private readonly healthService: HealthService) {}

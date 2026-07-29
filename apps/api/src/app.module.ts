@@ -1,10 +1,19 @@
 import { Module } from "@nestjs/common";
+import { APP_GUARD } from "@nestjs/core";
 import type { ApiEnvironment } from "@tender/config";
 import { LoggerModule } from "nestjs-pino";
 
 import { HealthModule } from "./health/health.module.js";
 import { InfrastructureModule } from "./infrastructure.module.js";
 import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
+import { AuthModule } from "./auth/auth.module.js";
+import { OrganisationsModule } from "./organisations/organisations.module.js";
+import {
+  AccessGuard,
+  CsrfGuard,
+  RateLimitGuard,
+} from "./common/security.guards.js";
+import { RateLimitService } from "./common/rate-limit.service.js";
 
 @Module({
   imports: [
@@ -31,6 +40,14 @@ import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
       }),
     }),
     HealthModule,
+    AuthModule,
+    OrganisationsModule,
+  ],
+  providers: [
+    RateLimitService,
+    { provide: APP_GUARD, useClass: RateLimitGuard },
+    { provide: APP_GUARD, useClass: CsrfGuard },
+    { provide: APP_GUARD, useClass: AccessGuard },
   ],
 })
 export class AppModule {}
