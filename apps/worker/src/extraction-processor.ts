@@ -430,6 +430,23 @@ export class ExtractionProcessor {
           invalidatedAt: null,
         },
       });
+      await transaction.checklistGenerationRun.updateMany({
+        data: {
+          activatedAt: null,
+          currentStage: "INVALIDATED",
+          invalidatedAt: assessmentInvalidatedAt,
+          publicMessage: "A newer extraction requires a fresh checklist",
+          status: "INVALIDATED",
+        },
+        where: { invalidatedAt: null, tenderVersionId },
+      });
+      await transaction.checklistItem.updateMany({
+        data: {
+          invalidatedAt: assessmentInvalidatedAt,
+          status: "INVALIDATED",
+        },
+        where: { invalidatedAt: null, tenderVersionId },
+      });
     });
   }
 

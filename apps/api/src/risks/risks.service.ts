@@ -381,6 +381,26 @@ export class RisksService {
             activeEligibilityAssessmentRun: { pursuitDecisionId: prior.id },
           },
         });
+        await transaction.checklistGenerationRun.updateMany({
+          data: {
+            activatedAt: null,
+            currentStage: "INVALIDATED",
+            invalidatedAt,
+            publicMessage: "The human pursuit decision changed",
+            status: "INVALIDATED",
+          },
+          where: {
+            invalidatedAt: null,
+            pursuitDecisionId: prior.id,
+          },
+        });
+        await transaction.checklistItem.updateMany({
+          data: { invalidatedAt, status: "INVALIDATED" },
+          where: {
+            generationRun: { pursuitDecisionId: prior.id },
+            invalidatedAt: null,
+          },
+        });
       }
       const decision = await transaction.earlyPursuitDecision.create({
         data: {

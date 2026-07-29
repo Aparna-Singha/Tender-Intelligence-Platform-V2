@@ -274,3 +274,17 @@ assessment for each included requirement; conservative machine-only proposals;
 direct company provenance for `VERIFIED`; append-only human finalisation; tenant
 isolation; invalidation on authoritative input change; and an operational Evidence
 Matrix. Missing-document checklists and RAG remain unimplemented.
+
+## Phase 8: Missing evidence and action checklist
+
+Phase 8 requires the exact current completed Phase 7 run and immutable evidence
+snapshot; generates controlled source-grounded actions without re-deciding
+eligibility; distinguishes missing documents, structured evidence, review, expiry,
+conflict, clarification, and reassessment; preserves assessment, requirement, and
+citation provenance; uses versioned priority, date, and conservative deduplication
+policies; keeps machine proposals separate from append-only human actions; prevents
+workers and uploads from resolving work; invalidates stale results; enforces tenant
+scope and same-tenant assignment; exposes an accessible operational web checklist;
+and passes contracts, domain, API, worker, migration, security, formatting, lint,
+strict type-check, test, and production build gates. Phase 9 RAG, drafting, final
+readiness, export, scraping, submission, and external reminders remain absent.

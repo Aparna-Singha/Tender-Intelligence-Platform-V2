@@ -66,6 +66,21 @@ export {
   eligibilityStates,
   proposeEligibilityAssessment,
 } from "./evidence-assessment.js";
+export {
+  canTransitionChecklistItem,
+  CHECKLIST_DATE_POLICY_VERSION,
+  CHECKLIST_DEDUPLICATION_POLICY_VERSION,
+  CHECKLIST_POLICY_VERSION,
+  CHECKLIST_PRIORITY_POLICY_VERSION,
+  checklistItemTypes,
+  proposeChecklistItem,
+} from "./checklist-policy.js";
+export type {
+  ChecklistAssessmentInput,
+  ChecklistItemType,
+  ChecklistPriority,
+  ChecklistProposal,
+} from "./checklist-policy.js";
 export type {
   AssessmentProposal,
   ComparisonEvidence,

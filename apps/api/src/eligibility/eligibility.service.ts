@@ -817,7 +817,7 @@ export class EligibilityService {
       throw new UnprocessableEntityException(
         "A detailed human rationale is required",
       );
-    return this.database.$transaction(async (transaction) => {
+    const review = await this.database.$transaction(async (transaction) => {
       const aggregate = await transaction.eligibilityAssessmentReview.aggregate(
         {
           _max: { reviewVersion: true },
@@ -874,6 +874,8 @@ export class EligibilityService {
       });
       return review;
     });
+    await this.invalidateChecklistRuns(organisationId, runId);
+    return review;
   }
 
   public async linkEvidence(
@@ -943,6 +945,7 @@ export class EligibilityService {
         subjectType: "eligibility_assessment",
       },
     });
+    await this.invalidateChecklistRuns(organisationId, runId);
     return link;
   }
 
@@ -979,6 +982,7 @@ export class EligibilityService {
         subjectType: "eligibility_assessment",
       },
     });
+    await this.invalidateChecklistRuns(organisationId, runId);
     return { unlinked: true };
   }
 
@@ -1018,6 +1022,50 @@ export class EligibilityService {
       this.database.eligibilityAssessment.updateMany({
         data: { invalidatedAt: now },
         where: { invalidatedAt: null, organisationId },
+      }),
+      this.database.checklistGenerationRun.updateMany({
+        data: {
+          activatedAt: null,
+          currentStage: "INVALIDATED",
+          invalidatedAt: now,
+          publicMessage: "Authoritative company evidence changed",
+          status: "INVALIDATED",
+        },
+        where: { invalidatedAt: null, organisationId },
+      }),
+      this.database.checklistItem.updateMany({
+        data: { invalidatedAt: now, status: "INVALIDATED" },
+        where: { invalidatedAt: null, organisationId },
+      }),
+    ]);
+  }
+
+  private async invalidateChecklistRuns(
+    organisationId: string,
+    assessmentRunId: string,
+  ): Promise<void> {
+    const invalidatedAt = new Date();
+    await this.database.$transaction([
+      this.database.checklistGenerationRun.updateMany({
+        data: {
+          activatedAt: null,
+          currentStage: "INVALIDATED",
+          invalidatedAt,
+          publicMessage: "The Phase 7 assessment changed",
+          status: "INVALIDATED",
+        },
+        where: {
+          assessmentRunId,
+          invalidatedAt: null,
+          organisationId,
+        },
+      }),
+      this.database.checklistItem.updateMany({
+        data: { invalidatedAt, status: "INVALIDATED" },
+        where: {
+          generationRun: { assessmentRunId, organisationId },
+          invalidatedAt: null,
+        },
       }),
     ]);
   }

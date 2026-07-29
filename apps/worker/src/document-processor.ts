@@ -270,6 +270,20 @@ export class DocumentProcessor {
         data: { activeEligibilityAssessmentRunId: null },
         where: { activeEligibilityAssessmentRun: { organisationId } },
       }),
+      this.database.checklistGenerationRun.updateMany({
+        data: {
+          activatedAt: null,
+          currentStage: "INVALIDATED",
+          invalidatedAt,
+          publicMessage: "Authoritative company document evidence changed",
+          status: "INVALIDATED",
+        },
+        where: { invalidatedAt: null, organisationId },
+      }),
+      this.database.checklistItem.updateMany({
+        data: { invalidatedAt, status: "INVALIDATED" },
+        where: { invalidatedAt: null, organisationId },
+      }),
     ]);
   }
 }

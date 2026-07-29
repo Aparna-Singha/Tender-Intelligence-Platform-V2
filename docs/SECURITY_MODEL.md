@@ -192,3 +192,15 @@ facts, citations, links, reviews, SSE, and signed source opening. Browser IDs ar
 selectors, never authority. Queue messages and progress events contain safe IDs,
 counts, stages, and versions only. Tender wording, profile values, document
 excerpts, private keys, and signed URLs are excluded from logs and events.
+
+## Phase 8 checklist isolation
+
+Checklist generation and every run, item, assignment, source, history, and SSE query
+repeat organisation and tender scope. Assignees must be active members of the same
+organisation. Browser IDs remain selectors, never authority. Workers reload the
+active Phase 7 run and exact snapshot before committing, process opaque queue
+identifiers with bounded retries, concurrency, and time, and cannot resolve or
+dismiss items. Filenames, tender text, evidence excerpts, and notes remain inert
+untrusted data; Phase 8 has no URL fetching, model or tool execution, permission
+change, notification, export, or submission capability. Safe telemetry excludes
+company and tender content.

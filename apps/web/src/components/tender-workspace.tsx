@@ -6,6 +6,7 @@ import { apiRequest } from "../lib/api";
 import { ExtractionWorkspace } from "./extraction-workspace";
 import { RiskWorkspace } from "./risk-workspace";
 import { EvidenceMatrix } from "./evidence-matrix";
+import { ActionChecklist } from "./action-checklist";
 
 interface Workspace {
   buyer: string;
@@ -329,14 +330,19 @@ export function TenderWorkspace({
             versionId={workspace.versions[0].id}
           />
         )}
-        {["Missing documents", "Chatbot", "Draft", "Readiness audit"].map(
-          (section) => (
-            <section key={section}>
-              <h2>{section}</h2>
-              <p>Not implemented in this phase.</p>
-            </section>
-          ),
+        {workspace?.versions[0]?.id !== undefined && (
+          <ActionChecklist
+            organisationId={organisationId}
+            tenderId={tenderId}
+            versionId={workspace.versions[0].id}
+          />
         )}
+        {["Chatbot", "Draft", "Readiness audit", "Export"].map((section) => (
+          <section key={section}>
+            <h2>{section}</h2>
+            <p>Not implemented in this phase.</p>
+          </section>
+        ))}
       </div>
     </main>
   );

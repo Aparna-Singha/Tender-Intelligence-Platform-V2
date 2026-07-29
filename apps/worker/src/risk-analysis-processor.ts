@@ -195,6 +195,28 @@ export class RiskAnalysisProcessor {
           invalidatedAt: null,
         },
       });
+      await transaction.checklistGenerationRun.updateMany({
+        data: {
+          activatedAt: null,
+          currentStage: "INVALIDATED",
+          invalidatedAt,
+          publicMessage: "A newer risk analysis requires a fresh checklist",
+          status: "INVALIDATED",
+        },
+        where: {
+          invalidatedAt: null,
+          organisationId: run.organisationId,
+          tenderVersionId: run.tenderVersionId,
+        },
+      });
+      await transaction.checklistItem.updateMany({
+        data: { invalidatedAt, status: "INVALIDATED" },
+        where: {
+          invalidatedAt: null,
+          organisationId: run.organisationId,
+          tenderVersionId: run.tenderVersionId,
+        },
+      });
       await transaction.auditEvent.create({
         data: {
           actorUserId: run.requestedByUserId,
