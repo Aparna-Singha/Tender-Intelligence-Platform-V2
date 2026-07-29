@@ -94,6 +94,10 @@ export const apiEnvironmentSchema = serviceBaseSchema
       .min(30)
       .max(300)
       .default(60),
+    RAG_PROVIDER: nonEmptyStringSchema.default("gemini"),
+    RAG_CHAT_MODEL: nonEmptyStringSchema.default("gemini-2.5-flash"),
+    RAG_EMBEDDING_MODEL: nonEmptyStringSchema.default("gemini-embedding-001"),
+    RAG_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(30),
   })
   .and(dataServicesSchema)
   .and(objectStorageSchema)
@@ -144,6 +148,17 @@ export const workerEnvironmentSchema = serviceBaseSchema
       .min(10_000)
       .max(900_000)
       .default(300_000),
+    RAG_JOB_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(10_000)
+      .max(900_000)
+      .default(180_000),
+    GEMINI_API_KEY: z.string().trim().min(16).optional(),
+    GEMINI_CHAT_MODEL: nonEmptyStringSchema.default("gemini-2.5-flash"),
+    GEMINI_EMBEDDING_MODEL: nonEmptyStringSchema.default(
+      "gemini-embedding-001",
+    ),
   })
   .and(dataServicesSchema)
   .and(objectStorageSchema);

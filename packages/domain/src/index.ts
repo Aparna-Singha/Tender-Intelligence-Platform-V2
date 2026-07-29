@@ -46,6 +46,32 @@ export {
   validateZipEntries,
 } from "./tender-source.js";
 export {
+  createStructureAwareChunks,
+  isPromptInjectionText,
+  reciprocalRankFusion,
+  RAG_ANSWER_POLICY_VERSION,
+  RAG_CANDIDATE_LIMIT,
+  RAG_CHUNK_POLICY_VERSION,
+  RAG_CONTEXT_LIMIT,
+  RAG_EMBEDDING_DIMENSIONS,
+  RAG_FUSION_POLICY_VERSION,
+  RAG_MAX_CHUNK_CHARACTERS,
+  RAG_MAX_QUESTION_CHARACTERS,
+  RAG_RETRIEVAL_POLICY_VERSION,
+  ragSourceClasses,
+  ragSourceModes,
+  sourceClassesForMode,
+  verifyCitationHandles,
+} from "./rag-policy.js";
+export type {
+  ChunkSource,
+  CitationHandle,
+  RagSourceClass,
+  RagSourceMode,
+  RetrievalRank,
+  StructureAwareChunk,
+} from "./rag-policy.js";
+export {
   classifySections,
   extractDeterministicFields,
   extractDeterministicRequirements,

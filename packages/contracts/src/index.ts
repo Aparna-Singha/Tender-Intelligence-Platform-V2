@@ -24,6 +24,21 @@ export {
   organisationTypeSchema,
 } from "./organisations.js";
 export {
+  askRagQuestionSchema,
+  createRagConversationSchema,
+  ragFeedbackSchema,
+  ragPaginationSchema,
+  ragSourceModeSchema,
+  startRagIndexSchema,
+} from "./rag.js";
+export type {
+  AskRagQuestionRequest,
+  CreateRagConversationRequest,
+  RagFeedbackRequest,
+  RagSourceMode,
+  StartRagIndexRequest,
+} from "./rag.js";
+export {
   completeUploadSchema,
   createUploadSessionSchema,
   documentCategories,

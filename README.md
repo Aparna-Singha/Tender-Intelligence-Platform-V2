@@ -316,3 +316,29 @@ Phase 8 adds the source-grounded checklist described in the
 assessment and immutable evidence snapshot. Checklist workflow progress is not an
 eligibility or bid-readiness score, and uploading a file does not prove compliance
 or resolve an item.
+
+## Phase 9 cited tender chatbot
+
+The tender workspace supports an authorised, tender-scoped evidence chatbot.
+Create a current index, select a source mode, create a conversation, and ask a
+question. `TENDER_ONLY` is the default. Company-evidence modes require the
+dedicated organisation permission. Every follow-up performs fresh PostgreSQL
+full-text and pgvector retrieval with tenant filters before ranking.
+
+Configure Gemini only in the untracked `.env`:
+
+```dotenv
+GEMINI_API_KEY=your-local-secret
+GEMINI_CHAT_MODEL=gemini-2.5-flash
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
+RAG_PROVIDER=gemini
+RAG_CHAT_MODEL=gemini-2.5-flash
+RAG_EMBEDDING_MODEL=gemini-embedding-001
+RAG_JOB_TIMEOUT_MS=180000
+RAG_RATE_LIMIT_MAX=30
+```
+
+Without `GEMINI_API_KEY`, jobs fail clearly with no fake provider or answer.
+Provider privacy terms require approval before production. The chatbot has no
+internet, tools, legal advice, drafting, readiness, export, scraping, or submission.
+Draft and Readiness Audit remain “Not implemented in this phase.”
