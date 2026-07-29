@@ -37,6 +37,17 @@ Status: implemented on the Phase 4 feature branch.
   authorised signed downloads;
 - no parsing, risk analysis, matching, RAG, drafting, or export.
 
+## Phase 5: Tender parsing and structured requirement extraction
+
+Status: implemented on the Phase 5 feature branch.
+
+- bounded deterministic PDF, DOCX, XLSX, CSV, and approved ZIP-member parsing;
+- immutable extraction runs, source fingerprints, citations, quality issues,
+  review history, filtering, and progress updates;
+- scanned pages explicitly report `OCR_UNAVAILABLE`;
+- no company comparison, eligibility decision, risk analysis, RAG, drafting,
+  scraping, automatic submission, or other future-phase behavior.
+
 ## Milestone 1: Secure manual-ingestion vertical slice
 
 In progress; Phase 4 establishes ingestion only.

@@ -11,6 +11,10 @@ import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
 import { runWithTimeout } from "./job-timeout.js";
 import { TenderProcessor, type TenderDocumentJob } from "./tender-processor.js";
+import {
+  ExtractionProcessor,
+  type ExtractionJob,
+} from "./extraction-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -52,7 +56,14 @@ async function bootstrap(): Promise<void> {
     environment.S3_BUCKET,
     new ClamAvScanner(environment.CLAMAV_HOST, environment.CLAMAV_PORT),
   );
-  const documentWorker = new Worker<DocumentJob | TenderDocumentJob>(
+  const extractionProcessor = new ExtractionProcessor(
+    database,
+    storage,
+    environment.S3_BUCKET,
+  );
+  const documentWorker = new Worker<
+    DocumentJob | TenderDocumentJob | ExtractionJob
+  >(
     environment.QUEUE_NAME,
     async (job) => {
       if (job.name === "process-tender-document") {
@@ -62,6 +73,15 @@ async function bootstrap(): Promise<void> {
         return runWithTimeout(
           environment.DOCUMENT_JOB_TIMEOUT_MS,
           async (signal) => tenderProcessor.process(data, signal),
+        );
+      }
+      if (job.name === "extract-tender-version") {
+        if (!isExtractionJob(job.data))
+          throw new Error("Invalid extraction job");
+        const data = job.data;
+        return runWithTimeout(
+          environment.EXTRACTION_JOB_TIMEOUT_MS,
+          async (signal) => extractionProcessor.process(data, signal),
         );
       }
       if (!isCompanyDocumentJob(job.data))
@@ -154,15 +174,21 @@ async function bootstrap(): Promise<void> {
 }
 
 function isTenderDocumentJob(
-  value: DocumentJob | TenderDocumentJob,
+  value: DocumentJob | TenderDocumentJob | ExtractionJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
 
 function isCompanyDocumentJob(
-  value: DocumentJob | TenderDocumentJob,
+  value: DocumentJob | TenderDocumentJob | ExtractionJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
+}
+
+function isExtractionJob(
+  value: DocumentJob | TenderDocumentJob | ExtractionJob,
+): value is ExtractionJob {
+  return "extractionRunId" in value && "requestId" in value;
 }
 
 void bootstrap().catch((error: unknown) => {

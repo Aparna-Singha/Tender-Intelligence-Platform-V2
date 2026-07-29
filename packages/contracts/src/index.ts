@@ -64,6 +64,21 @@ export {
   userContextStepSchema,
   workflowStepSchema,
 } from "./onboarding.js";
+export {
+  extractionConfidences,
+  extractionPaginationSchema,
+  extractionReviewStates,
+  extractionRunStatuses,
+  requirementFilterSchema,
+  reviewExtractionSchema,
+  startExtractionSchema,
+} from "./extraction.js";
+export type {
+  ExtractionPagination,
+  RequirementFilter,
+  ReviewExtractionRequest,
+  StartExtractionRequest,
+} from "./extraction.js";
 export type {
   BusinessIdentityStep,
   CapabilitiesStep,

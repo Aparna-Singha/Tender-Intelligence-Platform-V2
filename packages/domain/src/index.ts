@@ -45,6 +45,33 @@ export {
   ManualUploadAdapter,
   validateZipEntries,
 } from "./tender-source.js";
+export {
+  classifySections,
+  extractDeterministicFields,
+  extractDeterministicRequirements,
+  PARSER_POLICY_VERSION,
+  STRUCTURING_POLICY_VERSION,
+  validateCitation,
+} from "./extraction.js";
+export type {
+  ClassifiedSectionCandidate,
+  Confidence,
+  ExtractedFieldCandidate,
+  ExtractionIssueCandidate,
+  NormalizedBlockType,
+  OcrEngine,
+  OcrPageInput,
+  OcrPageOutput,
+  ParsedBlock,
+  ParsedDocument,
+  ParsedTable,
+  ParsedTableCell,
+  ParsedUnit,
+  RequirementCandidate,
+  SourceAnchor,
+  SourceFormat,
+  TenderDocumentParser,
+} from "./extraction.js";
 export type {
   NormalizedTenderSource,
   TenderSourceAdapter,

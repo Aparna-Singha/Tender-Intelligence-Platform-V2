@@ -233,3 +233,24 @@ Phase 4 is accepted when:
   pass;
 - parsing, AI, matching, eligibility, RAG, drafting, readiness, export, scraping,
   and submission are absent.
+
+## Phase 5: Tender parsing and structured requirement extraction
+
+Phase 5 is accepted when:
+
+- supported ready sources produce a separately tracked immutable extraction run;
+- PDF pages, DOCX structure, XLSX/CSV cells, and approved ZIP members are parsed
+  with resource bounds and no active content execution;
+- every persisted important field and requirement has a validated source citation;
+- repeated equivalent starts reuse work while explicit retries create historical
+  runs;
+- tenant checks protect all reads, reviews, retries, cancellations, events, and
+  source access;
+- ambiguous, malformed, unsupported, low-text, and scanned inputs are visible
+  without invented content, and absent OCR is labelled `OCR_UNAVAILABLE`;
+- the web exposes fields, requirements, sources, quality, history, filters,
+  progress, and append-only reviews;
+- automated domain, parser, migration, API/security, and repository quality gates
+  pass;
+- company comparison, eligibility decisions, risk analysis, RAG, drafting,
+  scraping, and automatic submission remain absent.
