@@ -5,13 +5,14 @@ decisions, their context, alternatives, and trade-offs.
 
 ## Index
 
-| ADR | Decision | Status |
-| --- | --- | --- |
-| [0001](0001-modular-monolith.md) | Use a modular monolith initially | Accepted |
-| [0002](0002-postgresql-source-of-truth.md) | Use PostgreSQL as the source of truth | Accepted |
-| [0003](0003-manual-tender-ingestion-first.md) | Start with manual tender ingestion | Accepted |
-| [0004](0004-human-in-the-loop-ai.md) | Keep high-stakes AI workflows human-controlled | Accepted |
-| [0005](0005-private-object-storage.md) | Store document binaries in private object storage | Accepted |
+| ADR                                           | Decision                                          | Status   |
+| --------------------------------------------- | ------------------------------------------------- | -------- |
+| [0001](0001-modular-monolith.md)              | Use a modular monolith initially                  | Accepted |
+| [0002](0002-postgresql-source-of-truth.md)    | Use PostgreSQL as the source of truth             | Accepted |
+| [0003](0003-manual-tender-ingestion-first.md) | Start with manual tender ingestion                | Accepted |
+| [0004](0004-human-in-the-loop-ai.md)          | Keep high-stakes AI workflows human-controlled    | Accepted |
+| [0005](0005-private-object-storage.md)        | Store document binaries in private object storage | Accepted |
+| [0006](0006-prisma-postgresql-orm.md)         | Use Prisma with the PostgreSQL driver adapter     | Accepted |
 
 ## Process
 

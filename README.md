@@ -13,8 +13,9 @@ evidence, prepare reviewable drafts, and complete a human-controlled readiness a
 
 ## Repository status
 
-This repository currently contains the product documentation and engineering
-contract only. Application code has intentionally not been initialized.
+Phase 1A establishes the production monorepo, API and worker process foundations,
+local infrastructure, shared packages, tests, and CI. Authentication and tender
+business features are intentionally not implemented.
 
 ## Product principles
 
@@ -40,16 +41,180 @@ contract only. Application code has intentionally not been initialized.
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
-## Planned technical direction
+## Workspace
 
-The approved direction is a strict TypeScript monorepo with a Next.js web
-application, a modular TypeScript API built on a production framework with Fastify
-support, background workers and queues, PostgreSQL, private S3-compatible object
-storage, Redis, PostgreSQL full-text search, pgvector, OpenAPI, observability, tests,
-and CI. Gemini is the first planned LLM provider behind a provider-neutral gateway.
+```text
+apps/
+  web/       Next.js App Router application
+  api/       NestJS API on Fastify
+  worker/    Independent BullMQ worker host and health server
+packages/
+  config/          Environment validation
+  contracts/       Runtime and TypeScript API contracts
+  database/        Prisma and PostgreSQL adapter
+  domain/          Framework-independent domain primitives
+  observability/   Structured logging
+  ui/              Shared UI primitives
+  testing/         Shared test utilities
+infrastructure/
+  docker/     Production Dockerfiles
+  scripts/    Local infrastructure and health scripts
+```
 
-No application dependencies, runtime services, or environment variables are defined
-in this documentation phase.
+PostgreSQL is authoritative. Redis is used for ephemeral coordination and BullMQ,
+and MinIO provides private S3-compatible object storage locally. No service treats
+process memory as persistent storage.
+
+## Prerequisites
+
+- Node.js 22.18 or newer;
+- Corepack;
+- Docker Engine with Docker Compose v2;
+- Git.
+
+The repository pins pnpm through the `packageManager` field.
+
+## Local setup
+
+1. Clone and enter the repository:
+
+   ```sh
+   git clone https://github.com/Aparna-Singha/Tender-Intelligence-Platform-V2.git
+   cd Tender-Intelligence-Platform-V2
+   ```
+
+2. Enable the pinned package manager:
+
+   ```sh
+   corepack enable
+   pnpm --version
+   ```
+
+3. Create local configuration:
+
+   ```sh
+   cp .env.example .env
+   ```
+
+   Replace every `replace-with-local-*` value in `.env`. Keep the PostgreSQL values
+   in `DATABASE_URL` aligned with `POSTGRES_USER` and `POSTGRES_PASSWORD`, and keep
+   the S3 access keys aligned with the MinIO root credentials. These values are for
+   local development only.
+
+4. Install dependencies:
+
+   ```sh
+   pnpm install --frozen-lockfile
+   ```
+
+5. Start PostgreSQL, Redis, and MinIO:
+
+   ```sh
+   pnpm dev:infra
+   ```
+
+   To wait for all infrastructure health checks and initialize the private MinIO
+   bucket, use:
+
+   ```sh
+   ./infrastructure/scripts/start-local.sh
+   ```
+
+6. Apply database migrations:
+
+   ```sh
+   pnpm db:migrate:deploy
+   ```
+
+7. Start the web, API, and worker processes:
+
+   ```sh
+   pnpm dev
+   ```
+
+The services are then available at:
+
+| Service          | URL                             |
+| ---------------- | ------------------------------- |
+| Web              | `http://localhost:3000`         |
+| API liveness     | `http://localhost:4000/health`  |
+| API readiness    | `http://localhost:4000/ready`   |
+| OpenAPI UI       | `http://localhost:4000/openapi` |
+| Worker liveness  | `http://localhost:4001/health`  |
+| Worker readiness | `http://localhost:4001/ready`   |
+| MinIO API        | `http://localhost:9000`         |
+| MinIO console    | `http://localhost:9001`         |
+
+Run all health checks with:
+
+```sh
+./infrastructure/scripts/check-health.sh
+```
+
+Stop local infrastructure without deleting its named volumes:
+
+```sh
+pnpm dev:infra:down
+```
+
+## Environment configuration
+
+All applications fail fast on invalid environment values through
+`@tender/config`. `.env.example` documents the complete Phase 1A local contract.
+Real credentials and production configuration must come from an approved secret
+manager and must not be committed.
+
+Next.js only receives `NEXT_PUBLIC_API_URL`. Server credentials must never use a
+`NEXT_PUBLIC_` prefix.
+
+## API envelopes
+
+Successful API responses use:
+
+```json
+{
+  "data": {},
+  "request_id": "..."
+}
+```
+
+Errors use safe public messages:
+
+```json
+{
+  "error": {
+    "code": "MACHINE_READABLE_CODE",
+    "message": "Safe public message"
+  },
+  "request_id": "..."
+}
+```
+
+Incoming request IDs are accepted only when they match the bounded safe character
+set; otherwise the service generates a UUID.
+
+## Quality gates
+
+```sh
+pnpm format:check
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+## Container builds
+
+Run these commands from the repository root:
+
+```sh
+docker build -f infrastructure/docker/web.Dockerfile -t tender-web .
+docker build -f infrastructure/docker/api.Dockerfile -t tender-api .
+docker build -f infrastructure/docker/worker.Dockerfile -t tender-worker .
+```
+
+Runtime containers require the environment values documented in `.env.example`.
+The Dockerfiles do not copy `.env` files into images.
 
 ## Contributing
 

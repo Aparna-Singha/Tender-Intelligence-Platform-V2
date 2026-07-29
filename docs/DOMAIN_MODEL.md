@@ -13,27 +13,27 @@
 
 ## Core concepts
 
-| Concept | Meaning |
-| --- | --- |
-| User | An authenticated person with a platform identity |
-| Organisation | A tenant boundary for people, evidence, tenders, and exports |
-| Membership | A user's role and status within an organisation |
-| Company profile | Versioned structured facts asserted by the organisation |
-| Company document | A private reusable evidence file and its processing state |
-| Evidence item | A cited fact extracted from or manually linked to company evidence |
-| Tender | The organisation's workspace for one procurement opportunity |
-| Tender document | A versioned tender PDF, annexure, ZIP member, or corrigendum |
-| Source reference | Official URL and manual provenance metadata |
-| Requirement | A structured obligation, criterion, date, or requested submission |
-| Finding | A cited risk, ambiguity, conflict, or material observation |
-| Eligibility assessment | Requirement-to-evidence evaluation in a controlled state |
-| Checklist item | Missing document, action, review, or resolution required |
-| Conversation | Tender-scoped RAG interaction visible to authorized members |
-| Draft | A versioned, fact-constrained generated or edited artifact |
-| Review | Human disposition of a finding, assessment, or draft version |
-| Readiness audit | Point-in-time final evaluation, including the second risk analysis |
-| Export package | Immutable manifest of approved review artifacts |
-| Audit event | Append-oriented security and business action record |
+| Concept                | Meaning                                                            |
+| ---------------------- | ------------------------------------------------------------------ |
+| User                   | An authenticated person with a platform identity                   |
+| Organisation           | A tenant boundary for people, evidence, tenders, and exports       |
+| Membership             | A user's role and status within an organisation                    |
+| Company profile        | Versioned structured facts asserted by the organisation            |
+| Company document       | A private reusable evidence file and its processing state          |
+| Evidence item          | A cited fact extracted from or manually linked to company evidence |
+| Tender                 | The organisation's workspace for one procurement opportunity       |
+| Tender document        | A versioned tender PDF, annexure, ZIP member, or corrigendum       |
+| Source reference       | Official URL and manual provenance metadata                        |
+| Requirement            | A structured obligation, criterion, date, or requested submission  |
+| Finding                | A cited risk, ambiguity, conflict, or material observation         |
+| Eligibility assessment | Requirement-to-evidence evaluation in a controlled state           |
+| Checklist item         | Missing document, action, review, or resolution required           |
+| Conversation           | Tender-scoped RAG interaction visible to authorized members        |
+| Draft                  | A versioned, fact-constrained generated or edited artifact         |
+| Review                 | Human disposition of a finding, assessment, or draft version       |
+| Readiness audit        | Point-in-time final evaluation, including the second risk analysis |
+| Export package         | Immutable manifest of approved review artifacts                    |
+| Audit event            | Append-oriented security and business action record                |
 
 ## Roles
 
@@ -79,14 +79,14 @@ unsupported or human-review-required rather than fabricating a citation.
 
 ## Eligibility assessment states
 
-| State | Meaning | Minimum behavior |
-| --- | --- | --- |
-| `verified` | Current approved evidence directly supports the requirement | Cite tender requirement and company evidence |
-| `likely_met` | Evidence suggests a match but needs confirmation | Explain uncertainty and request review |
-| `missing` | Required support is absent or expired | Add or link a checklist item |
-| `conflict` | Evidence contradicts the requirement or other evidence | Block silent resolution and require review |
-| `not_applicable` | Requirement does not apply, with a recorded rationale | Require rationale and appropriate approval |
-| `human_review_required` | Ambiguity or stakes prevent a safe automated state | Route to an authorized reviewer |
+| State                   | Meaning                                                     | Minimum behavior                             |
+| ----------------------- | ----------------------------------------------------------- | -------------------------------------------- |
+| `verified`              | Current approved evidence directly supports the requirement | Cite tender requirement and company evidence |
+| `likely_met`            | Evidence suggests a match but needs confirmation            | Explain uncertainty and request review       |
+| `missing`               | Required support is absent or expired                       | Add or link a checklist item                 |
+| `conflict`              | Evidence contradicts the requirement or other evidence      | Block silent resolution and require review   |
+| `not_applicable`        | Requirement does not apply, with a recorded rationale       | Require rationale and appropriate approval   |
+| `human_review_required` | Ambiguity or stakes prevent a safe automated state          | Route to an authorized reviewer              |
 
 State changes retain actor, timestamp, rationale, input versions, and previous state.
 AI may propose a state but cannot finalize `verified`, `not_applicable`, or resolve a

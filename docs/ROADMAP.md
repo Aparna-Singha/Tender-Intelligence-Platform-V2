@@ -5,13 +5,26 @@ milestone needs its own approved scope and acceptance criteria.
 
 ## Milestone 0: Documentation and engineering contract
 
-Status: current phase.
+Status: established as the repository baseline.
 
 - establish product boundaries, non-affiliation language, and user roles;
 - document the initial journey, domain model, architecture, security, and RAG rules;
 - record foundational ADRs;
 - define measurable first-milestone acceptance criteria;
 - do not initialize application code.
+
+## Phase 1A: Production monorepo and local infrastructure
+
+Status: implemented on the Phase 1A feature branch.
+
+- pnpm and Turborepo workspace with strict shared TypeScript configuration;
+- Next.js web shell, NestJS API on Fastify, and independent worker host;
+- PostgreSQL with Prisma migrations, Redis with BullMQ, and local private MinIO;
+- validated environment contract, structured logging, request IDs, API envelopes,
+  liveness, readiness, and graceful shutdown;
+- Dockerfiles, Docker Compose, automated tests, CI, dependency review, and secret
+  scanning;
+- no authentication or tender business features.
 
 ## Milestone 1: Secure manual-ingestion vertical slice
 

@@ -1,0 +1,42 @@
+{
+  "name": "tender-intelligence-platform",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Production monorepo foundation for Tender Intelligence Platform",
+  "license": "UNLICENSED",
+  "packageManager": "pnpm@11.17.0",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "scripts": {
+    "build": "dotenv -e .env -- turbo run build",
+    "clean": "turbo run clean && rm -rf .turbo coverage",
+    "db:generate": "dotenv -e .env -- pnpm --filter @tender/database db:generate",
+    "db:migrate": "dotenv -e .env -- pnpm --filter @tender/database db:migrate",
+    "db:migrate:deploy": "dotenv -e .env -- pnpm --filter @tender/database db:migrate:deploy",
+    "dev": "dotenv -e .env -- turbo run dev --parallel",
+    "dev:api": "dotenv -e .env -- pnpm --filter @tender/api dev",
+    "dev:infra": "docker compose up -d",
+    "dev:infra:down": "docker compose down",
+    "dev:web": "dotenv -e .env -- pnpm --filter @tender/web dev",
+    "dev:worker": "dotenv -e .env -- pnpm --filter @tender/worker dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "dotenv -e .env -- turbo run lint && markdownlint-cli2 '**/*.md'",
+    "test": "dotenv -e .env -- turbo run test",
+    "typecheck": "dotenv -e .env -- turbo run typecheck"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.10.13",
+    "dotenv-cli": "11.0.0",
+    "eslint": "10.0.2",
+    "eslint-config-prettier": "10.1.8",
+    "markdownlint-cli2": "0.23.2",
+    "prettier": "3.9.0",
+    "turbo": "2.10.7",
+    "typescript": "5.9.3",
+    "typescript-eslint": "8.57.0",
+    "vitest": "4.1.0"
+  }
+}

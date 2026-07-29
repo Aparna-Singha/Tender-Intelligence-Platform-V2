@@ -2,24 +2,26 @@
 
 ## Status and constraints
 
-This document records the approved target direction. No application code or
-infrastructure is initialized in the documentation phase.
+This document records the approved target direction and the Phase 1A platform
+foundation.
 
 The initial system is a TypeScript monorepo and modular monolith:
 
 - Next.js web application;
-- modular TypeScript API using a production framework with Fastify support;
-- queue-backed background workers;
+- modular NestJS API using its Fastify adapter;
+- BullMQ queue-backed background worker processes;
 - PostgreSQL as the source of truth;
 - private S3-compatible object storage;
 - Redis for ephemeral coordination, cache, and queue support;
 - PostgreSQL full-text search and pgvector for initial retrieval;
 - provider-neutral LLM gateway, with Gemini as the first provider;
-- OpenAPI, structured logging, metrics, distributed tracing, automated tests, and CI.
+- Prisma ORM with the PostgreSQL driver adapter and versioned migrations;
+- Zod environment and contract validation;
+- Pino structured logging;
+- OpenAPI, metrics, distributed tracing, automated tests, and CI.
 
-The specific API framework and queue implementation will be selected in a later,
-explicit implementation phase. This phase does not create dependencies or imply a
-running integration.
+Metrics and distributed tracing instrumentation remain a later infrastructure phase;
+the module boundary and structured logging foundation exist now.
 
 ## High-level architecture
 
@@ -120,6 +122,10 @@ and model calls without recording sensitive document content.
 ## Deployment direction
 
 Deployments should promote immutable artifacts through isolated environments.
+Phase 1A includes separate production Dockerfiles for the web, API, and worker, plus
+Docker Compose for local PostgreSQL, Redis, and MinIO. Compose credentials are
+provided only through a developer-owned `.env` file.
+
 Infrastructure configuration, secrets management, backups, recovery objectives,
 retention, and regional data requirements will be decided before production. These
 are unresolved operational decisions, not completed capabilities.

@@ -114,3 +114,26 @@ known limitations, security review, data-retention decision, provider data-handl
 approval, recovery objectives, and accountable human sign-off. A failed mandatory
 criterion blocks release or requires a documented, time-bound risk acceptance by an
 authorized owner.
+
+## Phase 1A: Platform foundation
+
+Phase 1A is accepted when:
+
+- the required `apps`, `packages`, and `infrastructure` workspace structure exists;
+- strict TypeScript, ESLint, Prettier, Vitest, Turborepo, and pnpm are reproducible
+  from the lockfile;
+- PostgreSQL, Redis, and private MinIO services have persistent local volumes and
+  health checks;
+- API and worker liveness responses use the standard success envelope;
+- readiness checks exercise real PostgreSQL, Redis, queue, and applicable object
+  storage dependencies;
+- invalid environment values fail startup without logging secret values;
+- unsafe request IDs are replaced, unexpected exceptions use safe error envelopes,
+  and sensitive logging fields are redacted;
+- API and worker shutdown close listeners and external clients;
+- Prisma migrations are versioned and production deployment uses `migrate deploy`;
+- CI checks formatting, linting, strict type-checking, tests, and builds;
+- dependency review and secret scanning workflows exist;
+- web, API, and worker production Dockerfiles run as non-root users;
+- no authentication, tender business behavior, fake response, or persistent
+  process-memory store is introduced.

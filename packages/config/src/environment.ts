@@ -1,0 +1,100 @@
+import { z } from "zod";
+
+const nodeEnvironmentSchema = z.enum(["development", "test", "production"]);
+const logLevelSchema = z.enum([
+  "fatal",
+  "error",
+  "warn",
+  "info",
+  "debug",
+  "trace",
+  "silent",
+]);
+const portSchema = z.coerce.number().int().min(1).max(65_535);
+const nonEmptyStringSchema = z.string().trim().min(1);
+const urlSchema = z.url();
+
+const serviceBaseSchema = z.object({
+  NODE_ENV: nodeEnvironmentSchema.default("development"),
+  LOG_LEVEL: logLevelSchema.default("info"),
+  REQUEST_ID_HEADER: z
+    .string()
+    .trim()
+    .regex(/^[a-z0-9-]+$/)
+    .default("x-request-id"),
+});
+
+const dataServicesSchema = z.object({
+  DATABASE_URL: z
+    .string()
+    .trim()
+    .startsWith("postgresql://", "DATABASE_URL must use PostgreSQL"),
+  REDIS_URL: z
+    .string()
+    .trim()
+    .startsWith("redis://", "REDIS_URL must use Redis"),
+});
+
+const objectStorageSchema = z.object({
+  S3_ENDPOINT: urlSchema,
+  S3_REGION: nonEmptyStringSchema,
+  S3_BUCKET: nonEmptyStringSchema,
+  S3_ACCESS_KEY_ID: nonEmptyStringSchema,
+  S3_SECRET_ACCESS_KEY: nonEmptyStringSchema,
+  S3_FORCE_PATH_STYLE: z.stringbool().default(true),
+});
+
+export const apiEnvironmentSchema = serviceBaseSchema
+  .extend({
+    API_HOST: nonEmptyStringSchema.default("0.0.0.0"),
+    API_PORT: portSchema.default(4000),
+  })
+  .and(dataServicesSchema)
+  .and(objectStorageSchema);
+
+export const workerEnvironmentSchema = serviceBaseSchema
+  .extend({
+    WORKER_HEALTH_HOST: nonEmptyStringSchema.default("0.0.0.0"),
+    WORKER_HEALTH_PORT: portSchema.default(4001),
+    QUEUE_NAME: nonEmptyStringSchema.default("platform-jobs"),
+  })
+  .and(dataServicesSchema);
+
+export const webEnvironmentSchema = z.object({
+  NODE_ENV: nodeEnvironmentSchema.default("development"),
+  NEXT_PUBLIC_API_URL: urlSchema,
+  WEB_PORT: portSchema.default(3000),
+});
+
+export type ApiEnvironment = z.infer<typeof apiEnvironmentSchema>;
+export type WorkerEnvironment = z.infer<typeof workerEnvironmentSchema>;
+export type WebEnvironment = z.infer<typeof webEnvironmentSchema>;
+
+export class EnvironmentValidationError extends Error {
+  public constructor(
+    public readonly scope: string,
+    public readonly issues: readonly string[],
+  ) {
+    super(`Invalid ${scope} environment:\n${issues.join("\n")}`);
+    this.name = "EnvironmentValidationError";
+  }
+}
+
+export function parseEnvironment<T>(
+  scope: string,
+  schema: z.ZodType<T>,
+  input: NodeJS.ProcessEnv,
+): T {
+  const result = schema.safeParse(input);
+
+  if (result.success) {
+    return result.data;
+  }
+
+  const issues = result.error.issues.map((issue) => {
+    const path = issue.path.length > 0 ? issue.path.join(".") : "environment";
+    return `${path}: ${issue.message}`;
+  });
+
+  throw new EnvironmentValidationError(scope, issues);
+}

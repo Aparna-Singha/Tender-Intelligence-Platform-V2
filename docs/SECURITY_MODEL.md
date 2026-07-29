@@ -20,16 +20,16 @@ production launch.
 
 ## Trust boundaries and threats
 
-| Boundary | Representative threats | Required controls |
-| --- | --- | --- |
-| Browser to API | Session theft, CSRF, injection, broken access control | Secure session design, CSRF protection, validation, authorization, rate limiting |
-| Organisation boundary | IDOR, cross-tenant search or cache leakage | Server-side tenant scoping, policy tests, scoped cache keys, deny by default |
-| Upload to processing | Malware, decompression bombs, spoofed files, parser exploits | Size/type limits, quarantine, scanning, safe extraction, sandboxing, timeouts |
-| API to storage | Public objects, guessed keys, overbroad credentials | Private buckets, opaque keys, least privilege, short-lived signed URLs |
-| Queue and workers | Forged jobs, replay, poisoned payloads | Authenticated transport, minimal payloads, idempotency, schema validation |
-| Retrieval to LLM | Prompt injection, data exfiltration, cross-tenant context | Authorized retrieval, content isolation, instruction hierarchy, output validation |
-| Staff operations | Privilege abuse, accidental disclosure | Separate admin plane, just-in-time access, audit logs, approval and alerts |
-| Dependencies and CI | Supply-chain compromise, secret leakage | Lockfiles, review, scanning, protected CI secrets, provenance and patching |
+| Boundary              | Representative threats                                       | Required controls                                                                 |
+| --------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| Browser to API        | Session theft, CSRF, injection, broken access control        | Secure session design, CSRF protection, validation, authorization, rate limiting  |
+| Organisation boundary | IDOR, cross-tenant search or cache leakage                   | Server-side tenant scoping, policy tests, scoped cache keys, deny by default      |
+| Upload to processing  | Malware, decompression bombs, spoofed files, parser exploits | Size/type limits, quarantine, scanning, safe extraction, sandboxing, timeouts     |
+| API to storage        | Public objects, guessed keys, overbroad credentials          | Private buckets, opaque keys, least privilege, short-lived signed URLs            |
+| Queue and workers     | Forged jobs, replay, poisoned payloads                       | Authenticated transport, minimal payloads, idempotency, schema validation         |
+| Retrieval to LLM      | Prompt injection, data exfiltration, cross-tenant context    | Authorized retrieval, content isolation, instruction hierarchy, output validation |
+| Staff operations      | Privilege abuse, accidental disclosure                       | Separate admin plane, just-in-time access, audit logs, approval and alerts        |
+| Dependencies and CI   | Supply-chain compromise, secret leakage                      | Lockfiles, review, scanning, protected CI secrets, provenance and patching        |
 
 ## Identity and authorization
 

@@ -15,13 +15,13 @@ commercial, technical, or legal judgment.
 
 ## Product users
 
-| User | Primary responsibility |
-| --- | --- |
-| MSME owner/admin | Owns the organisation workspace, membership, and company profile |
-| Tender executive | Ingests tenders, maps evidence, and prepares drafts |
-| Tender consultant | Supports authorized client organisations and tender work |
-| Reviewer/approver | Reviews findings, exceptions, drafts, and readiness |
-| Platform administrator | Operates the platform without assuming customer authority |
+| User                   | Primary responsibility                                           |
+| ---------------------- | ---------------------------------------------------------------- |
+| MSME owner/admin       | Owns the organisation workspace, membership, and company profile |
+| Tender executive       | Ingests tenders, maps evidence, and prepares drafts              |
+| Tender consultant      | Supports authorized client organisations and tender work         |
+| Reviewer/approver      | Reviews findings, exceptions, drafts, and readiness              |
+| Platform administrator | Operates the platform without assuming customer authority        |
 
 Permissions will be explicit, organisation-scoped, and least-privilege. Consultant
 access must be granted per organisation; platform administration must be audited and

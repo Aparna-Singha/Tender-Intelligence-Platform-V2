@@ -1,7 +1,6 @@
 # Contributing
 
-Thank you for contributing to Tender Intelligence Platform. The repository is
-currently in a documentation-first phase.
+Thank you for contributing to Tender Intelligence Platform.
 
 ## Before starting
 
@@ -34,8 +33,8 @@ Run repository-provided commands for:
 - production builds;
 - internal documentation link validation.
 
-Because application tooling is not initialized in the documentation phase, use the
-available Markdown checker and link validator and record exactly what ran.
+Use the root pnpm scripts documented in [README.md](README.md). Do not weaken a
+quality gate to make a change pass.
 
 ## Pull requests
 
