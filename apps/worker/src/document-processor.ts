@@ -5,7 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { PrismaClient } from "@tender/database";
-import { isAllowedMimeExtension } from "@tender/domain";
+import { isAllowedMimeExtension, MAX_UPLOAD_BYTES } from "@tender/domain";
 import type { Job } from "bullmq";
 import { fileTypeFromBuffer } from "file-type";
 import { createHash } from "node:crypto";
@@ -24,7 +24,10 @@ export class DocumentProcessor {
     private readonly scanner: MalwareScanner,
   ) {}
 
-  public async process(job: Job<DocumentJob>): Promise<void> {
+  public async process(
+    job: Job<DocumentJob>,
+    signal?: AbortSignal,
+  ): Promise<void> {
     if (job.name === "delete-company-document") {
       await this.deleteDocument(job.data);
       return;
@@ -49,10 +52,17 @@ export class DocumentProcessor {
         Key: version.quarantineObjectKey,
       }),
     );
-    if (object.Body === undefined) throw new Error("Uploaded object is empty");
+    if (
+      object.Body === undefined ||
+      object.ContentLength !== Number(version.sizeBytes) ||
+      object.ContentLength > MAX_UPLOAD_BYTES
+    )
+      throw new Error("Uploaded object exceeds its bounded size");
     const content = await object.Body.transformToByteArray();
+    signal?.throwIfAborted();
     const checksum = createHash("sha256").update(content).digest("hex");
     const detected = await fileTypeFromBuffer(content);
+    signal?.throwIfAborted();
     if (
       checksum !== version.sha256 ||
       content.byteLength !== Number(version.sizeBytes) ||
@@ -69,6 +79,7 @@ export class DocumentProcessor {
       return;
     }
     const scan = await this.scanner.scan(content);
+    signal?.throwIfAborted();
     if (scan.status === "INFECTED") {
       await this.reject(
         version.documentId,
@@ -89,6 +100,7 @@ export class DocumentProcessor {
       data: { status: "PROCESSING" },
       where: { id: version.documentId },
     });
+    signal?.throwIfAborted();
     const approvedKey = `approved/${job.data.organisationId}/${version.id}`;
     await this.storage.send(
       new CopyObjectCommand({
@@ -98,12 +110,14 @@ export class DocumentProcessor {
         MetadataDirective: "COPY",
       }),
     );
+    signal?.throwIfAborted();
     await this.storage.send(
       new DeleteObjectCommand({
         Bucket: this.bucket,
         Key: version.quarantineObjectKey,
       }),
     );
+    signal?.throwIfAborted();
     await this.database.$transaction([
       this.database.documentVersion.update({
         data: {
@@ -138,6 +152,23 @@ export class DocumentProcessor {
         where: { id: version.documentId },
       }),
     ]);
+    if (signal?.aborted === true) {
+      await this.database.$transaction([
+        this.database.document.update({
+          data: { currentVersionId: null, status: "FAILED" },
+          where: { id: version.documentId },
+        }),
+        this.database.documentExtraction.update({
+          data: {
+            completedAt: new Date(),
+            failureCode: "JOB_TIMEOUT",
+            status: "FAILED",
+          },
+          where: { documentVersionId: version.id },
+        }),
+      ]);
+      signal.throwIfAborted();
+    }
   }
 
   private async reject(

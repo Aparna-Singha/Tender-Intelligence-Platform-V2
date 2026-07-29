@@ -9,6 +9,7 @@ import { createHealthServer } from "./health-server.js";
 import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
+import { runWithTimeout } from "./job-timeout.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -46,7 +47,10 @@ async function bootstrap(): Promise<void> {
   );
   const documentWorker = new Worker<DocumentJob>(
     environment.QUEUE_NAME,
-    async (job) => processor.process(job),
+    async (job) =>
+      runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async (signal) =>
+        processor.process(job, signal),
+      ),
     { connection: redis, concurrency: 2 },
   );
   documentWorker.on("failed", (job, error) => {
@@ -54,6 +58,26 @@ async function bootstrap(): Promise<void> {
       { errorType: error.name, jobId: job?.id, jobName: job?.name },
       "Document job failed",
     );
+    if (job?.name === "process-company-document") {
+      void database.document
+        .updateMany({
+          data: { status: "FAILED" },
+          where: {
+            status: { in: ["UPLOADED", "SCANNING", "PROCESSING"] },
+            versions: { some: { id: job.data.documentVersionId } },
+          },
+        })
+        .catch((failure: unknown) => {
+          logger.error(
+            {
+              errorType:
+                failure instanceof Error ? failure.name : "UnknownError",
+              jobId: job.id,
+            },
+            "Could not persist document job failure",
+          );
+        });
+    }
   });
   const readiness = new WorkerReadiness({ database, queue, redis });
   const server = createHealthServer({

@@ -109,6 +109,10 @@ MIME against the allowlisted extension before malware scanning. Scanner errors f
 closed in quarantine. Rejected and quarantined objects never receive signed
 downloads. Document bytes, signed URLs, checksums, and extracted contents are
 excluded from logs. Archive upload is deliberately excluded from this vault phase.
+Workers process at most two document jobs concurrently and enforce an abort-aware
+60-second default deadline. The worker rechecks the object-reported byte count
+before its bounded read, and checks cancellation after type detection, scanning,
+and storage operations so timed-out work cannot later mark a document `READY`.
 
 ## AI-specific controls
 

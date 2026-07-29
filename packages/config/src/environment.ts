@@ -132,6 +132,12 @@ export const workerEnvironmentSchema = serviceBaseSchema
     QUEUE_NAME: nonEmptyStringSchema.default("platform-jobs"),
     CLAMAV_HOST: nonEmptyStringSchema,
     CLAMAV_PORT: portSchema.default(3310),
+    DOCUMENT_JOB_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(1_000)
+      .max(300_000)
+      .default(60_000),
   })
   .and(dataServicesSchema)
   .and(objectStorageSchema);
