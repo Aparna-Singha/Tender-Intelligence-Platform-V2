@@ -1,0 +1,27 @@
+# Architecture Decision Records
+
+Architecture Decision Records (ADRs) capture consequential technical and product
+decisions, their context, alternatives, and trade-offs.
+
+## Index
+
+| ADR | Decision | Status |
+| --- | --- | --- |
+| [0001](0001-modular-monolith.md) | Use a modular monolith initially | Accepted |
+| [0002](0002-postgresql-source-of-truth.md) | Use PostgreSQL as the source of truth | Accepted |
+| [0003](0003-manual-tender-ingestion-first.md) | Start with manual tender ingestion | Accepted |
+| [0004](0004-human-in-the-loop-ai.md) | Keep high-stakes AI workflows human-controlled | Accepted |
+| [0005](0005-private-object-storage.md) | Store document binaries in private object storage | Accepted |
+
+## Process
+
+Create an ADR when a decision affects multiple modules, security or privacy posture,
+operational ownership, a public contract, or is expensive to reverse.
+
+Use the next four-digit sequence number. Include title, status, date, context,
+decision, consequences, alternatives, and follow-up constraints. Accepted ADRs are
+immutable historical records: supersede one with a new ADR and link both rather than
+rewriting the old decision.
+
+Proposed ADRs require relevant engineering, product, and security review. Dates use
+ISO 8601.
