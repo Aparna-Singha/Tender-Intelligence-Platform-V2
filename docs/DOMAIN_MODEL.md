@@ -167,3 +167,13 @@ idempotency-keyed asynchronous lifecycle record.
 Curated fixtures always carry “Demonstration tender — not live procurement
 information.” Phase 4 ends at `SOURCE_READY`; no state implies successful parsing,
 eligibility, analysis, or bid readiness.
+
+## Tender extraction
+
+Phase 5 adds `ExtractionRun`, `ExtractionRunDocument`, `ExtractedUnit`,
+`ExtractedBlock`, `ExtractedTable`, `ExtractedTableCell`, `ClassifiedSection`,
+`ExtractedTenderField`, `StructuredRequirement`, `ExtractionCitation`,
+`ExtractionIssue`, and `ExtractionReview`. Runs move through `QUEUED`, `PARSING`,
+`STRUCTURING`, and `COMPLETE`, or terminal `FAILED`, `CANCELLED`, and `INVALIDATED`
+states. Results are immutable. Review records preserve corrections separately, and
+the active completed run is only a pointer on a tender version.

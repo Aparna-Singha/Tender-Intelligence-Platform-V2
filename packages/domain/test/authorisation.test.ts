@@ -55,5 +55,12 @@ describe("organisation authorisation policy", () => {
       false,
     );
     expect(hasPermission("ADMIN", "TENDER_ADMIN_IMPORT")).toBe(true);
+    expect(hasPermission("REVIEWER", "TENDER_EXTRACTION_READ")).toBe(true);
+    expect(hasPermission("REVIEWER", "TENDER_EXTRACTION_REVIEW")).toBe(true);
+    expect(hasPermission("REVIEWER", "TENDER_EXTRACTION_START")).toBe(false);
+    expect(
+      hasPermission("TENDER_EXECUTIVE", "TENDER_EXTRACTION_ADMIN_RETRY"),
+    ).toBe(false);
+    expect(hasPermission("ADMIN", "TENDER_EXTRACTION_ADMIN_RETRY")).toBe(true);
   });
 });

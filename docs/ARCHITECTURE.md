@@ -173,3 +173,14 @@ are unresolved operational decisions, not completed capabilities.
 
 See [Architecture Decision Records](adr/README.md) for accepted foundational
 decisions.
+
+## Phase 5 extraction pipeline
+
+After `SOURCE_READY`, the API creates an organisation-scoped immutable extraction
+run containing an exact source fingerprint and opaque identifiers only. The worker
+reads approved private objects through bounded format adapters, normalises source
+units and blocks, applies deterministic section and requirement rules, validates
+citations, and commits results atomically before activating the run. Progress uses
+bounded server-sent events with polling fallback. Parser and OCR contracts live in
+the domain layer; no OCR adapter is configured, so scanned pages honestly report
+`OCR_UNAVAILABLE`.

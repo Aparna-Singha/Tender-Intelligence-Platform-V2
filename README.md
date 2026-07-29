@@ -186,6 +186,14 @@ directly between the browser and private MinIO storage and are never persisted t
 the API or worker filesystem.
 
 Phase 4 tender-source binaries follow the same private direct-upload pipeline.
+
+Phase 5 adds deterministic tender extraction after source processing. A tender
+workspace can start a run and inspect status, quality issues, cited source fields,
+and structured requirements. Extraction is evidence capture only: it does not
+decide eligibility, compare company evidence, assess risk, or draft a bid. PDF,
+DOCX, XLSX, CSV, and approved ZIP members are supported with bounded worker
+processing. Scanned pages are labelled `OCR_UNAVAILABLE` because no OCR engine is
+configured in this phase.
 Accepted source formats are PDF, ZIP, XLSX, DOCX, and CSV up to 25 MiB. ZIP
 inspection rejects traversal, nested archives, excessive members, expanded-size
 limits, and suspicious compression ratios before malware scanning.

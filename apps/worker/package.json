@@ -21,8 +21,10 @@
     "@tender/observability": "workspace:*",
     "bullmq": "5.81.2",
     "fastify": "5.10.0",
+    "fflate": "0.8.3",
     "file-type": "21.3.2",
     "ioredis": "5.11.1",
+    "pdfjs-dist": "6.1.200",
     "pino": "10.3.1"
   },
   "devDependencies": {

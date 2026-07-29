@@ -166,3 +166,13 @@ Maintain privately accessible procedures for triage, containment, evidence
 preservation, credential rotation, customer and regulatory assessment, recovery, and
 post-incident review. Public vulnerability reporting guidance is in
 [`SECURITY.md`](../SECURITY.md).
+
+## Tender parser isolation
+
+Phase 5 parsers enforce bounded object reads, page/sheet/row/cell/archive limits,
+job timeouts, and queue concurrency. OOXML rejects document type declarations;
+spreadsheet formulas remain neutralised, untrusted text. ZIP traversal, nested
+archives, and decompression bombs remain prohibited. Every query carries the
+authenticated organisation scope and source downloads are re-authorised. Raw
+source content is excluded from queue payloads and logs. Citation validation fails
+closed before a run can become complete.

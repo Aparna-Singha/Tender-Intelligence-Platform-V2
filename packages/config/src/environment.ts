@@ -138,6 +138,12 @@ export const workerEnvironmentSchema = serviceBaseSchema
       .min(1_000)
       .max(300_000)
       .default(60_000),
+    EXTRACTION_JOB_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(10_000)
+      .max(900_000)
+      .default(300_000),
   })
   .and(dataServicesSchema)
   .and(objectStorageSchema);

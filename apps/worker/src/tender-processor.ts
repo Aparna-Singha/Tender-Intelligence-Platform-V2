@@ -177,7 +177,7 @@ export class TenderProcessor {
         progressPercentage: progress,
         publicMessage: message,
         startedAt: new Date(),
-        state: stage === "SCANNING" ? "SCANNING" : "PARSING",
+        state: "SCANNING",
       },
       where: { id: jobId },
     });

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { apiRequest } from "../lib/api";
+import { ExtractionWorkspace } from "./extraction-workspace";
 
 interface Workspace {
   buyer: string;
@@ -305,10 +306,15 @@ export function TenderWorkspace({
             </p>
           ))}
         </section>
+        {workspace?.versions[0]?.id !== undefined && (
+          <ExtractionWorkspace
+            organisationId={organisationId}
+            tenderId={tenderId}
+            versionId={workspace.versions[0].id}
+          />
+        )}
         {[
-          "Summary",
           "Risks",
-          "Requirements",
           "Evidence matrix",
           "Missing documents",
           "Chatbot",
