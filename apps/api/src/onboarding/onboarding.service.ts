@@ -85,14 +85,17 @@ export class OnboardingService {
     step: OnboardingStep,
     payload: unknown,
     requestId: string,
+    complete = true,
   ): Promise<OnboardingResponse> {
-    const schema = onboardingStepPayloadSchemas[step];
+    const schema = complete
+      ? onboardingStepPayloadSchemas[step]
+      : onboardingStepPayloadSchemas[step].partial();
     const parsed = schema.safeParse(payload);
     if (!parsed.success) throw new BadRequestException();
     const values = Object.entries(parsed.data);
 
     await this.database.$transaction(async (transaction) => {
-      if (step === 5) {
+      if (step === 5 && "turnover_by_financial_year" in parsed.data) {
         const turnover = parsed.data as {
           turnover_by_financial_year: {
             amount_inr: number;
@@ -113,7 +116,7 @@ export class OnboardingService {
           });
         }
       }
-      if (step === 6) {
+      if (step === 6 && "documents" in parsed.data) {
         const inventory = parsed.data as {
           documents: {
             expected_expiry?: string;
@@ -180,15 +183,19 @@ export class OnboardingService {
         update: {},
         where: { organisationId_userId: { organisationId, userId } },
       });
-      const completedSteps = [
-        ...new Set([...progress.completedSteps, step]),
-      ].sort();
+      const completedSteps = complete
+        ? [...new Set([...progress.completedSteps, step])].sort()
+        : progress.completedSteps;
       await transaction.onboardingProgress.update({
         data: {
-          completedAt: step === 8 ? new Date() : null,
+          completedAt: complete && step === 8 ? new Date() : null,
           completedSteps,
-          currentStep: step === 8 ? 8 : Math.min(step + 1, 8),
-          status: step === 8 ? "COMPLETED" : "IN_PROGRESS",
+          currentStep: complete
+            ? step === 8
+              ? 8
+              : Math.min(step + 1, 8)
+            : step,
+          status: complete && step === 8 ? "COMPLETED" : "IN_PROGRESS",
         },
         where: { id: progress.id },
       });
@@ -196,7 +203,9 @@ export class OnboardingService {
         data: {
           actorUserId: userId,
           eventType:
-            step === 8 ? "ONBOARDING_COMPLETED" : "ONBOARDING_STEP_SAVED",
+            complete && step === 8
+              ? "ONBOARDING_COMPLETED"
+              : "ONBOARDING_STEP_SAVED",
           metadata: { changed_fields: values.map(([key]) => key), step },
           organisationId,
           outcome: "SUCCESS",

@@ -6,6 +6,7 @@ import {
   Param,
   ParseIntPipe,
   Put,
+  Query,
   Req,
 } from "@nestjs/common";
 import {
@@ -60,6 +61,7 @@ export class OnboardingController {
     @Param("organisationId") organisationId: string,
     @Param("step", ParseIntPipe) step: OnboardingStep,
     @Body() payload: unknown,
+    @Query("complete") complete: string | undefined,
     @Req() request: AuthenticatedRequest,
   ): Promise<OnboardingResponse> {
     if (step < 1 || step > 8) throw new BadRequestException();
@@ -69,6 +71,7 @@ export class OnboardingController {
       step,
       payload,
       request.id,
+      complete !== "false",
     );
   }
 

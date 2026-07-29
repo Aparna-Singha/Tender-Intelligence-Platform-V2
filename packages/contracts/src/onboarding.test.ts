@@ -30,6 +30,18 @@ describe("onboarding validation", () => {
     ).toBe(true);
   });
 
+  it("validates partial autosave values without requiring a completed step", () => {
+    expect(
+      onboardingStepPayloadSchemas[2]
+        .partial()
+        .safeParse({ legal_name: "Synthetic Draft Enterprise" }).success,
+    ).toBe(true);
+    expect(
+      onboardingStepPayloadSchemas[2].partial().safeParse({ pan: "NOT-A-PAN" })
+        .success,
+    ).toBe(false);
+  });
+
   it("rejects an inverted tender value range", () => {
     expect(
       tenderPreferencesStepSchema.safeParse({

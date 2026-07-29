@@ -448,7 +448,7 @@ export function OnboardingWizard({
     setMessage("Saving…");
     try {
       const saved = await apiRequest<ResumeResponse>(
-        `/organisations/${organisationId}/onboarding/steps/${step}`,
+        `/organisations/${organisationId}/onboarding/steps/${step}?complete=${continueNext}`,
         { body: JSON.stringify(payload), method: "PUT" },
       );
       setValues(saved.values);
