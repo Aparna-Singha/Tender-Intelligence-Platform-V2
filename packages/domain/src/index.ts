@@ -53,6 +53,20 @@ export {
   STRUCTURING_POLICY_VERSION,
   validateCitation,
 } from "./extraction.js";
+export {
+  analyseEarlyTenderRisk,
+  EARLY_RISK_POLICY_VERSION,
+  RISK_RULE_VERSION,
+  riskCategories,
+} from "./risk-analysis.js";
+export type {
+  RiskCategory,
+  RiskConfidence,
+  RiskFindingCandidate,
+  RiskMateriality,
+  RiskRuleInput,
+  RiskSeverity,
+} from "./risk-analysis.js";
 export type {
   ClassifiedSectionCandidate,
   Confidence,

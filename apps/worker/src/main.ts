@@ -15,6 +15,10 @@ import {
   ExtractionProcessor,
   type ExtractionJob,
 } from "./extraction-processor.js";
+import {
+  RiskAnalysisProcessor,
+  type RiskAnalysisJob,
+} from "./risk-analysis-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -61,8 +65,9 @@ async function bootstrap(): Promise<void> {
     storage,
     environment.S3_BUCKET,
   );
+  const riskAnalysisProcessor = new RiskAnalysisProcessor(database);
   const documentWorker = new Worker<
-    DocumentJob | TenderDocumentJob | ExtractionJob
+    DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -84,6 +89,14 @@ async function bootstrap(): Promise<void> {
           async (signal) => extractionProcessor.process(data, signal),
         );
       }
+      if (job.name === "analyse-early-tender-risk") {
+        if (!isRiskAnalysisJob(job.data))
+          throw new Error("Invalid risk analysis job");
+        const data = job.data;
+        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+          riskAnalysisProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -99,6 +112,11 @@ async function bootstrap(): Promise<void> {
       { errorType: error.name, jobId: job?.id, jobName: job?.name },
       "Document job failed",
     );
+    if (
+      job?.name === "analyse-early-tender-risk" &&
+      isRiskAnalysisJob(job.data)
+    )
+      void riskAnalysisProcessor.fail(job.data.riskAnalysisRunId, error.name);
     if (
       job?.name === "process-company-document" &&
       isCompanyDocumentJob(job.data)
@@ -174,21 +192,27 @@ async function bootstrap(): Promise<void> {
 }
 
 function isTenderDocumentJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob,
+  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
 
 function isCompanyDocumentJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob,
+  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
 
 function isExtractionJob(
-  value: DocumentJob | TenderDocumentJob | ExtractionJob,
+  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
+}
+
+function isRiskAnalysisJob(
+  value: DocumentJob | TenderDocumentJob | ExtractionJob | RiskAnalysisJob,
+): value is RiskAnalysisJob {
+  return "riskAnalysisRunId" in value && "requestId" in value;
 }
 
 void bootstrap().catch((error: unknown) => {

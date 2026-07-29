@@ -176,3 +176,11 @@ archives, and decompression bombs remain prohibited. Every query carries the
 authenticated organisation scope and source downloads are re-authorised. Raw
 source content is excluded from queue payloads and logs. Citation validation fails
 closed before a run can become complete.
+
+## Early risk-analysis isolation
+
+Risk jobs carry opaque IDs and reload extraction data with organisation, tender,
+version, and run scope. Rules never access company-profile or company-vault tables.
+Tender instructions remain inert data; there is no URL fetch, model, tool, approval,
+export, or submission capability. Citation ownership, extraction identity, excerpt,
+and checksum are validated before completion.
