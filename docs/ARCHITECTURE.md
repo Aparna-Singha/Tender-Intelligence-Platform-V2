@@ -203,3 +203,18 @@ The worker reloads and re-authorises inputs, creates one conservative assessment
 per cited requirement, validates evidence links, and atomically activates a
 completed run. See [the comparison policy](COMPARISON_POLICY.md) and
 [ADR 0010](adr/0010-immutable-controlled-evidence-assessments.md).
+
+## Phase 8 action checklist
+
+Phase 8 adds a checklist module inside the modular monolith and a deterministic
+opaque-ID worker. The API gates generation on the current extraction, EARLY risk
+run, human `CONTINUE`, active Phase 7 run, and immutable evidence snapshot. The
+worker reloads tenant-scoped relational assessments, generates controlled proposals,
+deduplicates conservatively, validates requirement and citation provenance, and
+atomically activates one completed generation. PostgreSQL owns runs, items, links,
+and append-oriented history; Redis is non-authoritative.
+
+Machine proposal fields are immutable and separate from human workflow fields.
+Resolution checks current Phase 7 provenance, so a document upload alone cannot
+prove compliance. See [Checklist Policy](CHECKLIST_POLICY.md) and
+[ADR 0011](adr/0011-immutable-source-grounded-checklists.md).

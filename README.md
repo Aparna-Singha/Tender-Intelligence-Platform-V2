@@ -308,3 +308,11 @@ with exact citations, append-only human reviews, and human-only CONTINUE/HOLD/ST
 decisions. It does not determine eligibility, compare company evidence, provide
 legal advice, guarantee detection, or implement final-readiness analysis. See the
 [risk policy](docs/RISK_POLICY.md).
+
+## Phase 8 missing evidence and action checklist
+
+Phase 8 adds the source-grounded checklist described in the
+[Checklist Policy](docs/CHECKLIST_POLICY.md). It requires the exact current Phase 7
+assessment and immutable evidence snapshot. Checklist workflow progress is not an
+eligibility or bid-readiness score, and uploading a file does not prove compliance
+or resolve an item.

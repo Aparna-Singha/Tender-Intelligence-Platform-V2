@@ -194,3 +194,18 @@ Phase 7 represents company evidence through `CompanyEvidenceFact`, immutable
 `EligibilityInputSnapshot` children, historical `EligibilityAssessmentRun`,
 requirement-level `EligibilityAssessment`, evidence links, and append-only reviews.
 The original machine proposal is never overwritten by a human final state.
+
+## Missing evidence and action checklist
+
+`ChecklistGenerationRun` targets the exact active Phase 7 run and evidence snapshot.
+`ChecklistItem` preserves immutable proposed fields separately from human title,
+description, priority, assignment, due date, and status. Relational links retain all
+source assessments, structured requirements, and tender/company citations.
+`ChecklistItemHistory` appends every human transition.
+
+Items move through `OPEN`, `IN_PROGRESS`, `BLOCKED`,
+`READY_FOR_REASSESSMENT`, `RESOLVED`, `DISMISSED`, `SUPERSEDED`, and
+`INVALIDATED`. Upload alone cannot resolve an item. Resolution normally requires a
+fresh or reviewed Phase 7 result showing the underlying gap is no longer unresolved.
+Checklist workflow progress is not eligibility, bid readiness, or success
+probability.

@@ -24,6 +24,11 @@ import {
   isEvidenceAssessmentJob,
   type EvidenceAssessmentJob,
 } from "./evidence-assessment-processor.js";
+import {
+  ChecklistGenerationProcessor,
+  isChecklistGenerationJob,
+  type ChecklistGenerationJob,
+} from "./checklist-generation-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -72,12 +77,16 @@ async function bootstrap(): Promise<void> {
   );
   const riskAnalysisProcessor = new RiskAnalysisProcessor(database);
   const evidenceAssessmentProcessor = new EvidenceAssessmentProcessor(database);
+  const checklistGenerationProcessor = new ChecklistGenerationProcessor(
+    database,
+  );
   const documentWorker = new Worker<
     | DocumentJob
     | TenderDocumentJob
     | ExtractionJob
     | RiskAnalysisJob
     | EvidenceAssessmentJob
+    | ChecklistGenerationJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -115,6 +124,14 @@ async function bootstrap(): Promise<void> {
           evidenceAssessmentProcessor.process(data, signal),
         );
       }
+      if (job.name === "generate-missing-action-checklist") {
+        if (!isChecklistGenerationJob(job.data))
+          throw new Error("Invalid checklist generation job");
+        const data = job.data;
+        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+          checklistGenerationProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -141,6 +158,14 @@ async function bootstrap(): Promise<void> {
     )
       void evidenceAssessmentProcessor.fail(
         job.data.assessmentRunId,
+        error.name,
+      );
+    if (
+      job?.name === "generate-missing-action-checklist" &&
+      isChecklistGenerationJob(job.data)
+    )
+      void checklistGenerationProcessor.fail(
+        job.data.checklistRunId,
         error.name,
       );
     if (
@@ -223,7 +248,8 @@ function isTenderDocumentJob(
     | TenderDocumentJob
     | ExtractionJob
     | RiskAnalysisJob
-    | EvidenceAssessmentJob,
+    | EvidenceAssessmentJob
+    | ChecklistGenerationJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
@@ -234,7 +260,8 @@ function isCompanyDocumentJob(
     | TenderDocumentJob
     | ExtractionJob
     | RiskAnalysisJob
-    | EvidenceAssessmentJob,
+    | EvidenceAssessmentJob
+    | ChecklistGenerationJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
@@ -245,7 +272,8 @@ function isExtractionJob(
     | TenderDocumentJob
     | ExtractionJob
     | RiskAnalysisJob
-    | EvidenceAssessmentJob,
+    | EvidenceAssessmentJob
+    | ChecklistGenerationJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
@@ -256,7 +284,8 @@ function isRiskAnalysisJob(
     | TenderDocumentJob
     | ExtractionJob
     | RiskAnalysisJob
-    | EvidenceAssessmentJob,
+    | EvidenceAssessmentJob
+    | ChecklistGenerationJob,
 ): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }

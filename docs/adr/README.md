@@ -17,6 +17,7 @@ decisions, their context, alternatives, and trade-offs.
 | [0008](0008-deterministic-immutable-tender-extraction.md) | Deterministic immutable tender extraction         | Accepted |
 | [0009](0009-deterministic-early-risk-gate.md)             | Deterministic cited early-risk gate               | Accepted |
 | [0010](0010-immutable-controlled-evidence-assessments.md) | Immutable controlled evidence assessments         | Accepted |
+| [0011](0011-immutable-source-grounded-checklists.md)      | Immutable source-grounded action checklists       | Accepted |
 
 ## Process
 

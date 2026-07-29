@@ -72,6 +72,18 @@ Status: implemented on the Phase 7 feature branch.
 - Phase 8 checklist, Phase 9 RAG, drafting, readiness, export, scraping, and
   submission remain deferred.
 
+## Phase 8: Missing evidence, document and action checklist
+
+Status: implemented on the Phase 8 feature branch.
+
+- immutable generations against the exact active Phase 7 run and evidence snapshot;
+- source-grounded missing-evidence, review, conflict, renewal, and action taxonomy;
+- conservative deduplication, versioned priority/date policy, and append-only human
+  workflow history;
+- Phase 7-backed resolution and invalidation without treating upload as compliance;
+- Phase 9 RAG, chatbot, drafting, final readiness, export, scraping, submission, and
+  external notifications remain deferred.
+
 In progress; Phase 4 establishes ingestion only.
 
 - Phase 1B complete on its feature branch: account, database session,

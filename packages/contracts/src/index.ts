@@ -98,6 +98,18 @@ export {
   linkAssessmentEvidenceSchema,
   startEligibilityAssessmentSchema,
 } from "./evidence-assessment.js";
+export {
+  checklistFilterSchema,
+  checklistItemTypeSchema,
+  checklistPrioritySchema,
+  checklistStatusSchema,
+  startChecklistSchema,
+  updateChecklistItemSchema,
+} from "./checklist.js";
+export type {
+  ChecklistFilter,
+  UpdateChecklistItemRequest,
+} from "./checklist.js";
 export type {
   AssessmentFilter,
   AssessmentReviewRequest,
