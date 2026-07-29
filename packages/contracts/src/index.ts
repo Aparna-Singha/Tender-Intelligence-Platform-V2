@@ -24,6 +24,17 @@ export {
   organisationTypeSchema,
 } from "./organisations.js";
 export {
+  completeUploadSchema,
+  createUploadSessionSchema,
+  documentCategories,
+  documentCategorySchema,
+  documentFilterSchema,
+} from "./documents.js";
+export type {
+  CompleteUploadRequest,
+  CreateUploadSessionRequest,
+} from "./documents.js";
+export {
   businessIdentityStepSchema,
   capabilitiesStepSchema,
   documentReadinessStepSchema,

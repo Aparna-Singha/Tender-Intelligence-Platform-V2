@@ -21,6 +21,10 @@ export const permissions = [
   "COMPANY_PROFILE_UPDATE",
   "ONBOARDING_READ",
   "ONBOARDING_UPDATE",
+  "DOCUMENT_READ",
+  "DOCUMENT_UPLOAD",
+  "DOCUMENT_DELETE",
+  "DOCUMENT_VERIFY",
 ] as const;
 
 export type Permission = (typeof permissions)[number];
@@ -38,6 +42,10 @@ const permissionsByRole: Readonly<
     "COMPANY_PROFILE_UPDATE",
     "ONBOARDING_READ",
     "ONBOARDING_UPDATE",
+    "DOCUMENT_READ",
+    "DOCUMENT_UPLOAD",
+    "DOCUMENT_DELETE",
+    "DOCUMENT_VERIFY",
   ],
   TENDER_EXECUTIVE: [
     "ORGANISATION_READ",
@@ -45,6 +53,9 @@ const permissionsByRole: Readonly<
     "COMPANY_PROFILE_UPDATE",
     "ONBOARDING_READ",
     "ONBOARDING_UPDATE",
+    "DOCUMENT_READ",
+    "DOCUMENT_UPLOAD",
+    "DOCUMENT_DELETE",
   ],
   CONSULTANT: [
     "ORGANISATION_READ",
@@ -52,8 +63,16 @@ const permissionsByRole: Readonly<
     "COMPANY_PROFILE_UPDATE",
     "ONBOARDING_READ",
     "ONBOARDING_UPDATE",
+    "DOCUMENT_READ",
+    "DOCUMENT_UPLOAD",
   ],
-  REVIEWER: ["ORGANISATION_READ", "COMPANY_PROFILE_READ", "ONBOARDING_READ"],
+  REVIEWER: [
+    "ORGANISATION_READ",
+    "COMPANY_PROFILE_READ",
+    "ONBOARDING_READ",
+    "DOCUMENT_READ",
+    "DOCUMENT_VERIFY",
+  ],
 };
 
 export interface OrganisationPrincipal {

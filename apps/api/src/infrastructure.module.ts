@@ -12,22 +12,29 @@ import {
 } from "@tender/config";
 import { createPrismaClient, type PrismaClient } from "@tender/database";
 import { Redis } from "ioredis";
+import { Queue } from "bullmq";
 
 import {
   API_ENVIRONMENT,
   PRISMA_CLIENT,
   REDIS_CLIENT,
   S3_CLIENT,
+  JOB_QUEUE,
 } from "./infrastructure.tokens.js";
 
 class InfrastructureShutdown implements OnApplicationShutdown {
   public constructor(
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(JOB_QUEUE) private readonly queue: Queue,
   ) {}
 
   public async onApplicationShutdown(): Promise<void> {
-    await Promise.allSettled([this.database.$disconnect(), this.redis.quit()]);
+    await Promise.allSettled([
+      this.queue.close(),
+      this.database.$disconnect(),
+      this.redis.quit(),
+    ]);
   }
 }
 
@@ -38,6 +45,17 @@ class InfrastructureShutdown implements OnApplicationShutdown {
       provide: API_ENVIRONMENT,
       useFactory: (): ApiEnvironment =>
         parseEnvironment("api", apiEnvironmentSchema, process.env),
+    },
+    {
+      provide: JOB_QUEUE,
+      inject: [API_ENVIRONMENT],
+      useFactory: (environment: ApiEnvironment): Queue =>
+        new Queue(environment.QUEUE_NAME, {
+          connection: new Redis(environment.REDIS_URL, {
+            lazyConnect: true,
+            maxRetriesPerRequest: null,
+          }),
+        }),
     },
     {
       provide: PRISMA_CLIENT,
@@ -71,6 +89,6 @@ class InfrastructureShutdown implements OnApplicationShutdown {
     },
     InfrastructureShutdown,
   ],
-  exports: [API_ENVIRONMENT, PRISMA_CLIENT, REDIS_CLIENT, S3_CLIENT],
+  exports: [API_ENVIRONMENT, PRISMA_CLIENT, REDIS_CLIENT, S3_CLIENT, JOB_QUEUE],
 })
 export class InfrastructureModule {}

@@ -31,3 +31,10 @@ export type {
   Permission,
   Role,
 } from "./authorisation.js";
+export {
+  canDownloadDocument,
+  extensionFor,
+  isAllowedMimeExtension,
+  MAX_DOCUMENTS_PER_ORGANISATION,
+  MAX_UPLOAD_BYTES,
+} from "./document-policy.js";

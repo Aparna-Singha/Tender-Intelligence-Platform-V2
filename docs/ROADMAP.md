@@ -34,7 +34,9 @@ Planned, not implemented.
   organisation, membership, invitation, and authorisation foundations;
 - Phase 2 implemented on its feature branch: progressive onboarding, structured
   company profile, completion guidance, and role-aware dashboard recommendations;
-- private reusable company-document upload;
+- Phase 3 implemented on its feature branch: private reusable company-document
+  versions, quarantine upload, validation, malware scanning, approved private
+  storage, signed downloads, expiry, audit, retention, and deletion;
 - manual tender PDF, ZIP/annexure, corrigendum, source URL, fixture, and admin import
   paths;
 - safe asynchronous parsing and structured requirements;

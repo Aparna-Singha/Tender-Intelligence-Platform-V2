@@ -81,6 +81,19 @@ export const apiEnvironmentSchema = serviceBaseSchema
     TRUST_PROXY: z.stringbool().default(false),
     WEB_APP_URL: urlSchema,
     WEB_ORIGIN: urlSchema,
+    QUEUE_NAME: nonEmptyStringSchema.default("platform-jobs"),
+    DOCUMENT_UPLOAD_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(60)
+      .max(900)
+      .default(300),
+    DOCUMENT_DOWNLOAD_TTL_SECONDS: z.coerce
+      .number()
+      .int()
+      .min(30)
+      .max(300)
+      .default(60),
   })
   .and(dataServicesSchema)
   .and(objectStorageSchema)
@@ -117,8 +130,11 @@ export const workerEnvironmentSchema = serviceBaseSchema
     WORKER_HEALTH_HOST: nonEmptyStringSchema.default("0.0.0.0"),
     WORKER_HEALTH_PORT: portSchema.default(4001),
     QUEUE_NAME: nonEmptyStringSchema.default("platform-jobs"),
+    CLAMAV_HOST: nonEmptyStringSchema,
+    CLAMAV_PORT: portSchema.default(3310),
   })
-  .and(dataServicesSchema);
+  .and(dataServicesSchema)
+  .and(objectStorageSchema);
 
 export const webEnvironmentSchema = z.object({
   NODE_ENV: nodeEnvironmentSchema.default("development"),

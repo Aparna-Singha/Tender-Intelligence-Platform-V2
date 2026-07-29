@@ -82,6 +82,10 @@ export function Dashboard(): JSX.Element {
           <Link href={`/onboarding/${organisation.id}`}>
             Continue onboarding or edit profile
           </Link>
+          {" · "}
+          <Link href={`/documents/${organisation.id}`}>
+            Open document centre
+          </Link>
           <p>
             Dashboard mode:{" "}
             {guidance[organisation.id]?.display_mode ?? "BEGINNER"}

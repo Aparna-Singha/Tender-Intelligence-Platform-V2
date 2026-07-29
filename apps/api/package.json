@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1097.0",
+    "@aws-sdk/s3-request-presigner": "3.1097.0",
     "@fastify/helmet": "13.1.0",
     "@fastify/static": "9.3.0",
     "@nestjs/common": "11.1.28",
@@ -25,6 +26,7 @@
     "@tender/database": "workspace:*",
     "@tender/domain": "workspace:*",
     "@tender/observability": "workspace:*",
+    "bullmq": "5.81.2",
     "fastify": "5.10.0",
     "ioredis": "5.11.1",
     "nestjs-pino": "4.6.1",

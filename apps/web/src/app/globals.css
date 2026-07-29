@@ -57,3 +57,28 @@ p {
   color: #536158;
   font-size: 0.9rem;
 }
+
+label,
+form {
+  display: grid;
+  gap: 0.5rem;
+  margin-block: 1rem;
+}
+
+input,
+select,
+button {
+  padding: 0.65rem;
+}
+
+article {
+  margin-block: 1rem;
+  padding: 1rem;
+  border: 1px solid #d8ded9;
+  border-radius: 0.5rem;
+}
+
+.warning {
+  color: #8a4300;
+  font-weight: 700;
+}

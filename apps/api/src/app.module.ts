@@ -9,6 +9,7 @@ import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { OrganisationsModule } from "./organisations/organisations.module.js";
 import { OnboardingModule } from "./onboarding/onboarding.module.js";
+import { DocumentsModule } from "./documents/documents.module.js";
 import {
   AccessGuard,
   CsrfGuard,
@@ -44,6 +45,7 @@ import { RateLimitService } from "./common/rate-limit.service.js";
     AuthModule,
     OrganisationsModule,
     OnboardingModule,
+    DocumentsModule,
   ],
   providers: [
     RateLimitService,

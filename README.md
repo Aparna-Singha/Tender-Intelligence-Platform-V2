@@ -112,7 +112,7 @@ The repository pins pnpm through the `packageManager` field.
    pnpm install --frozen-lockfile
    ```
 
-5. Start PostgreSQL, Redis, and MinIO:
+5. Start PostgreSQL, Redis, MinIO, and the local ClamAV scanner:
 
    ```sh
    pnpm dev:infra
@@ -165,7 +165,7 @@ pnpm dev:infra:down
 ## Environment configuration
 
 All applications fail fast on invalid environment values through
-`@tender/config`. `.env.example` documents the complete Phase 1B local contract.
+`@tender/config`. `.env.example` documents the current local contract.
 Real credentials and production configuration must come from an approved secret
 manager and must not be committed.
 
@@ -178,6 +178,12 @@ origin. Registration and login work without notification delivery, but invitatio
 and usable password-reset email require all three `EMAIL_DELIVERY_*` values. The
 delivery endpoint receives a bearer-authenticated JSON template request; no email
 delivery is simulated.
+
+The document worker requires `CLAMAV_HOST` and `CLAMAV_PORT`. Upload and download
+URL lifetimes are bounded by `DOCUMENT_UPLOAD_TTL_SECONDS` (60–900) and
+`DOCUMENT_DOWNLOAD_TTL_SECONDS` (30–300). Company document binaries transfer
+directly between the browser and private MinIO storage and are never persisted to
+the API or worker filesystem.
 
 ## Authentication API
 

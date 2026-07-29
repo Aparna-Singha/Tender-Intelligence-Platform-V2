@@ -40,6 +40,56 @@ enum AuditEventType {
   ONBOARDING_STEP_SAVED
   ONBOARDING_COMPLETED
   COMPANY_PROFILE_UPDATED
+  DOCUMENT_UPLOAD_REQUESTED
+  DOCUMENT_UPLOAD_COMPLETED
+  DOCUMENT_DOWNLOADED
+  DOCUMENT_DELETED
+  DOCUMENT_VERSION_CREATED
+}
+
+enum DocumentCategory {
+  UDYAM
+  GST
+  PAN
+  CIN
+  AUDITED_FINANCIAL_STATEMENT
+  TURNOVER_CERTIFICATE
+  PURCHASE_ORDER
+  COMPLETION_CERTIFICATE
+  EXPERIENCE_CERTIFICATE
+  OEM_AUTHORISATION
+  ISO_CERTIFICATE
+  LICENCE
+  PRODUCT_DATASHEET
+  DECLARATION
+  BANK_DOCUMENT
+  OTHER
+}
+
+enum DocumentStatus {
+  UPLOADING
+  UPLOADED
+  SCANNING
+  QUARANTINED
+  PROCESSING
+  READY
+  REJECTED
+  FAILED
+  EXPIRED
+}
+
+enum DocumentVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  REJECTED
+  HUMAN_REVIEW_REQUIRED
+}
+
+enum UploadSessionStatus {
+  PENDING
+  COMPLETED
+  EXPIRED
+  CANCELLED
 }
 
 enum VerificationStatus {
@@ -87,6 +137,10 @@ model User {
   auditEvents         AuditEvent[]          @relation("AuditActor")
   onboardingProgress  OnboardingProgress[]
   updatedProfileValues CompanyProfileValue[] @relation("ProfileValueUpdater")
+  ownedDocuments       Document[]             @relation("DocumentOwner")
+  uploadedDocumentVersions DocumentVersion[]  @relation("DocumentVersionUploader")
+  documentVerifications DocumentVerification[] @relation("DocumentVerifier")
+  documentAccessEvents DocumentAccessEvent[]
 
   @@map("users")
 }
@@ -126,6 +180,9 @@ model Organisation {
   profileValues CompanyProfileValue[]
   turnoverRecords CompanyTurnover[]
   documentReadiness DocumentReadiness[]
+  documents       Document[]
+  uploadSessions  UploadSession[]
+  documentAccessEvents DocumentAccessEvent[]
 
   @@map("organisations")
 }
@@ -282,4 +339,116 @@ model DocumentReadiness {
 
   @@unique([organisationId, documentType])
   @@map("document_readiness")
+}
+
+model Document {
+  id                 String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String                     @map("organisation_id") @db.Uuid
+  ownerUserId        String                     @map("owner_user_id") @db.Uuid
+  category           DocumentCategory
+  displayName        String                     @map("display_name") @db.VarChar(255)
+  status             DocumentStatus             @default(UPLOADING)
+  verificationStatus DocumentVerificationStatus @default(UNVERIFIED) @map("verification_status")
+  expiryDate         DateTime?                  @map("expiry_date") @db.Date
+  currentVersionId   String?                    @unique @map("current_version_id") @db.Uuid
+  retentionUntil     DateTime?                  @map("retention_until") @db.Timestamptz(3)
+  deletionRequestedAt DateTime?                 @map("deletion_requested_at") @db.Timestamptz(3)
+  deletedAt          DateTime?                  @map("deleted_at") @db.Timestamptz(3)
+  createdAt          DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt          DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation       Organisation               @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  owner              User                       @relation("DocumentOwner", fields: [ownerUserId], references: [id], onDelete: Restrict)
+  currentVersion     DocumentVersion?           @relation("CurrentDocumentVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  versions           DocumentVersion[]          @relation("DocumentVersions")
+  verifications      DocumentVerification[]
+  accessEvents       DocumentAccessEvent[]
+
+  @@index([organisationId, category, status])
+  @@index([organisationId, expiryDate])
+  @@map("documents")
+}
+
+model DocumentVersion {
+  id                 String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId         String         @map("document_id") @db.Uuid
+  versionNumber      Int            @map("version_number")
+  originalFilename   String         @map("original_filename") @db.VarChar(255)
+  declaredMimeType   String         @map("declared_mime_type") @db.VarChar(120)
+  detectedMimeType   String?        @map("detected_mime_type") @db.VarChar(120)
+  extension          String         @db.VarChar(16)
+  sizeBytes          BigInt         @map("size_bytes")
+  sha256             String         @db.Char(64)
+  quarantineObjectKey String        @unique @map("quarantine_object_key") @db.VarChar(512)
+  approvedObjectKey  String?        @unique @map("approved_object_key") @db.VarChar(512)
+  uploadedByUserId   String         @map("uploaded_by_user_id") @db.Uuid
+  createdAt          DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  document           Document       @relation("DocumentVersions", fields: [documentId], references: [id], onDelete: Cascade)
+  currentForDocument Document?      @relation("CurrentDocumentVersion")
+  uploadedBy         User           @relation("DocumentVersionUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
+  uploadSession      UploadSession?
+  extraction         DocumentExtraction?
+
+  @@unique([documentId, versionNumber])
+  @@index([sha256])
+  @@map("document_versions")
+}
+
+model UploadSession {
+  id                 String              @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId     String              @map("organisation_id") @db.Uuid
+  documentVersionId  String              @unique @map("document_version_id") @db.Uuid
+  status             UploadSessionStatus @default(PENDING)
+  expiresAt          DateTime            @map("expires_at") @db.Timestamptz(3)
+  completedAt        DateTime?           @map("completed_at") @db.Timestamptz(3)
+  createdAt          DateTime            @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation       Organisation        @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  documentVersion    DocumentVersion     @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@index([organisationId, status, expiresAt])
+  @@map("upload_sessions")
+}
+
+model DocumentExtraction {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentVersionId String          @unique @map("document_version_id") @db.Uuid
+  status            DocumentStatus
+  metadata          Json?
+  failureCode       String?         @map("failure_code") @db.VarChar(80)
+  startedAt         DateTime?       @map("started_at") @db.Timestamptz(3)
+  completedAt       DateTime?       @map("completed_at") @db.Timestamptz(3)
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  documentVersion   DocumentVersion @relation(fields: [documentVersionId], references: [id], onDelete: Cascade)
+
+  @@map("document_extractions")
+}
+
+model DocumentVerification {
+  id             String                     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  documentId     String                     @map("document_id") @db.Uuid
+  status         DocumentVerificationStatus
+  rationale      String?                    @db.VarChar(1000)
+  verifiedByUserId String?                  @map("verified_by_user_id") @db.Uuid
+  createdAt      DateTime                   @default(now()) @map("created_at") @db.Timestamptz(3)
+  document       Document                   @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  verifiedBy     User?                      @relation("DocumentVerifier", fields: [verifiedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([documentId, createdAt])
+  @@map("document_verifications")
+}
+
+model DocumentAccessEvent {
+  id             String       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId String       @map("organisation_id") @db.Uuid
+  documentId     String       @map("document_id") @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  action         String       @db.VarChar(32)
+  outcome        String       @db.VarChar(32)
+  requestId      String?      @map("request_id") @db.VarChar(128)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation   Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  document       Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  @@index([organisationId, documentId, createdAt])
+  @@map("document_access_events")
 }
