@@ -26,9 +26,20 @@ Status: implemented on the Phase 1A feature branch.
   scanning;
 - no authentication or tender business features.
 
+## Phase 4: Secure manual tender ingestion
+
+Status: implemented on the Phase 4 feature branch.
+
+- organisation-private workspaces and immutable source versions;
+- manual, labelled curated demonstration, and controlled administrator sources;
+- private quarantine, ZIP policy, malware scanning, and approved storage;
+- corrigenda, duplicate controls, cancellable idempotent jobs, status events, and
+  authorised signed downloads;
+- no parsing, risk analysis, matching, RAG, drafting, or export.
+
 ## Milestone 1: Secure manual-ingestion vertical slice
 
-Planned, not implemented.
+In progress; Phase 4 establishes ingestion only.
 
 - Phase 1B complete on its feature branch: account, database session,
   organisation, membership, invitation, and authorisation foundations;

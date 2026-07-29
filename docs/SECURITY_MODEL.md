@@ -114,6 +114,14 @@ Workers process at most two document jobs concurrently and enforce an abort-awar
 before its bounded read, and checks cancellation after type detection, scanning,
 and storage operations so timed-out work cannot later mark a document `READY`.
 
+Tender sources reuse the private-storage and scanner controls. Queries repeat the
+organisation predicate after the permission guard, and only a `READY` source can
+receive a short-lived download. PDF, ZIP, XLSX, DOCX, and CSV are limited to 25
+MiB. ZIP metadata is inspected without extraction; traversal, nested archives,
+more than 200 entries, more than 100 MiB total expansion, entries above 50 MiB,
+and ratios above 100:1 fail closed. Cancellation is checked before promotion, and
+no failure path marks a document safe.
+
 ## AI-specific controls
 
 Tender text, company documents, URLs, OCR output, and retrieved passages are data,

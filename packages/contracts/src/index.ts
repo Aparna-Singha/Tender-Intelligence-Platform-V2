@@ -30,6 +30,23 @@ export {
   documentCategorySchema,
   documentFilterSchema,
 } from "./documents.js";
+export {
+  completeTenderUploadSchema,
+  createCorrigendumSchema,
+  createTenderSchema,
+  createTenderUploadSchema,
+  importTenderSchema,
+  tenderDocumentRoles,
+  tenderSourceTypes,
+  updateTenderSchema,
+} from "./tenders.js";
+export type {
+  CreateCorrigendumRequest,
+  CreateTenderRequest,
+  CreateTenderUploadRequest,
+  ImportTenderRequest,
+  UpdateTenderRequest,
+} from "./tenders.js";
 export type {
   CompleteUploadRequest,
   CreateUploadSessionRequest,

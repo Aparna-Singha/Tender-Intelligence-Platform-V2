@@ -10,6 +10,7 @@ import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
 import { runWithTimeout } from "./job-timeout.js";
+import { TenderProcessor, type TenderDocumentJob } from "./tender-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -45,12 +46,32 @@ async function bootstrap(): Promise<void> {
     environment.S3_BUCKET,
     new ClamAvScanner(environment.CLAMAV_HOST, environment.CLAMAV_PORT),
   );
-  const documentWorker = new Worker<DocumentJob>(
+  const tenderProcessor = new TenderProcessor(
+    database,
+    storage,
+    environment.S3_BUCKET,
+    new ClamAvScanner(environment.CLAMAV_HOST, environment.CLAMAV_PORT),
+  );
+  const documentWorker = new Worker<DocumentJob | TenderDocumentJob>(
     environment.QUEUE_NAME,
-    async (job) =>
-      runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async (signal) =>
-        processor.process(job, signal),
-      ),
+    async (job) => {
+      if (job.name === "process-tender-document") {
+        if (!isTenderDocumentJob(job.data))
+          throw new Error("Invalid tender document job");
+        const data = job.data;
+        return runWithTimeout(
+          environment.DOCUMENT_JOB_TIMEOUT_MS,
+          async (signal) => tenderProcessor.process(data, signal),
+        );
+      }
+      if (!isCompanyDocumentJob(job.data))
+        throw new Error("Invalid company document job");
+      const data = job.data;
+      return runWithTimeout(
+        environment.DOCUMENT_JOB_TIMEOUT_MS,
+        async (signal) => processor.process(job.name, data, signal),
+      );
+    },
     { connection: redis, concurrency: 2 },
   );
   documentWorker.on("failed", (job, error) => {
@@ -58,7 +79,10 @@ async function bootstrap(): Promise<void> {
       { errorType: error.name, jobId: job?.id, jobName: job?.name },
       "Document job failed",
     );
-    if (job?.name === "process-company-document") {
+    if (
+      job?.name === "process-company-document" &&
+      isCompanyDocumentJob(job.data)
+    ) {
       void database.document
         .updateMany({
           data: { status: "FAILED" },
@@ -127,6 +151,18 @@ async function bootstrap(): Promise<void> {
     },
     "Worker infrastructure and document consumer are ready",
   );
+}
+
+function isTenderDocumentJob(
+  value: DocumentJob | TenderDocumentJob,
+): value is TenderDocumentJob {
+  return "documentId" in value && "jobId" in value && "requestId" in value;
+}
+
+function isCompanyDocumentJob(
+  value: DocumentJob | TenderDocumentJob,
+): value is DocumentJob {
+  return "documentVersionId" in value;
 }
 
 void bootstrap().catch((error: unknown) => {

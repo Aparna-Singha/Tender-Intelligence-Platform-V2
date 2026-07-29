@@ -212,3 +212,24 @@ Phase 3 is accepted when:
 - required malicious upload and tenant-isolation tests and all repository quality
   gates pass;
 - no tender-upload behavior is introduced.
+
+## Phase 4: Secure manual tender ingestion
+
+Phase 4 is accepted when:
+
+- all tender records and downloads are organisation-scoped and cross-tenant
+  selectors reveal no resource;
+- manual, demonstration, and administrator adapters preserve provenance, with the
+  required visible non-live label on demonstrations;
+- only checksum-, type-, ZIP-policy-, and malware-validated sources become
+  `READY` in private approved storage;
+- completion and jobs are idempotent, duplicate attachments/corrigenda do not
+  create conflicting versions, and prior versions remain immutable;
+- bounded progress, failure, cancellation, timeout, and queue concurrency controls
+  cannot promote a failed or cancelled source;
+- the web supports workspaces, upload, versions, and processing status while every
+  future section says “Not implemented in this phase.”;
+- OpenAPI, migrations, security tests, all quality gates, and production builds
+  pass;
+- parsing, AI, matching, eligibility, RAG, drafting, readiness, export, scraping,
+  and submission are absent.
