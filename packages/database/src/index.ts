@@ -6,8 +6,12 @@ export type { DatabaseHealth } from "./database-health.js";
 export {
   AuditEventType,
   InvitationStatus,
+  OnboardingStatus,
   OrganisationType,
+  ProfileValueSource,
+  ProfileValueType,
   Role,
+  VerificationStatus,
 } from "@prisma/client";
 export type { Prisma, PrismaClient } from "@prisma/client";
 

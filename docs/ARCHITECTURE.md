@@ -2,8 +2,8 @@
 
 ## Status and constraints
 
-This document records the approved target direction and the Phase 1B identity and
-organisation foundation.
+This document records the approved target direction and the Phase 2 progressive
+onboarding and structured company-profile foundation.
 
 The initial system is a TypeScript monorepo and modular monolith:
 
@@ -89,6 +89,14 @@ guards enforce Redis rate limits, CSRF, authentication, then tenant permissions.
 PostgreSQL stores users, session digests, organisations, memberships, invitations,
 password reset digests, onboarding progress shells, company profile shells, and
 audits.
+
+Phase 2 adds an onboarding module without introducing a new service boundary. Eight
+step-specific Zod contracts validate autosaves. The application service translates
+validated values into typed profile-value columns, structured annual-turnover rows,
+structured document-readiness rows, and per-user onboarding progress. Profile
+completion, conditional requirements, display mode, and recommendations remain
+framework-independent domain policies. No company document binary is accepted in
+this phase; `evidence_document_id` is a nullable future reference only.
 
 ## Data ownership
 

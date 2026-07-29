@@ -32,7 +32,8 @@ Planned, not implemented.
 
 - Phase 1B complete on its feature branch: account, database session,
   organisation, membership, invitation, and authorisation foundations;
-- progressive onboarding questions remain planned;
+- Phase 2 implemented on its feature branch: progressive onboarding, structured
+  company profile, completion guidance, and role-aware dashboard recommendations;
 - private reusable company-document upload;
 - manual tender PDF, ZIP/annexure, corrigendum, source URL, fixture, and admin import
   paths;
