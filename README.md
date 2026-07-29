@@ -53,6 +53,7 @@ does not perform tender matching.
 - [Domain model](docs/DOMAIN_MODEL.md)
 - [Security model](docs/SECURITY_MODEL.md)
 - [RAG policy](docs/RAG_POLICY.md)
+- [Draft policy](docs/DRAFT_POLICY.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Acceptance criteria](docs/ACCEPTANCE_CRITERIA.md)
 - [Architecture decision records](docs/adr/README.md)
@@ -340,5 +341,24 @@ RAG_RATE_LIMIT_MAX=30
 
 Without `GEMINI_API_KEY`, jobs fail clearly with no fake provider or answer.
 Provider privacy terms require approval before production. The chatbot has no
-internet, tools, legal advice, drafting, readiness, export, scraping, or submission.
-Draft and Readiness Audit remain “Not implemented in this phase.”
+internet, tools, legal advice, readiness, export, scraping, or submission. Its
+answers are never drafting evidence.
+
+## Phase 10 fact-constrained drafting
+
+After the current Phase 5–9 prerequisites and a human `CONTINUE` exist, the Draft
+workspace can generate a controlled source-cited first draft. Configure narrative
+generation only in the untracked `.env`:
+
+```dotenv
+DRAFT_PROVIDER=gemini
+DRAFT_MODEL=gemini-2.5-flash
+DRAFT_JOB_TIMEOUT_MS=300000
+```
+
+`GEMINI_API_KEY` is shared with the existing provider-neutral gateway. Missing
+provider configuration fails explicitly; no fake draft is created. Drafts preserve
+exact source and policy versions, visible placeholders, immutable revisions, and
+mandatory independent human review. Approval is not readiness, compliance, export,
+or submission. Phase 11 readiness and the second risk analysis, Phase 12 export,
+public internet retrieval, scraping, and submission are not implemented.

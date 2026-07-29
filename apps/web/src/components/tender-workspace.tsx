@@ -8,6 +8,7 @@ import { RiskWorkspace } from "./risk-workspace";
 import { EvidenceMatrix } from "./evidence-matrix";
 import { ActionChecklist } from "./action-checklist";
 import { RagChatbot } from "./rag-chatbot";
+import { DraftWorkspace } from "./draft-workspace";
 
 interface Workspace {
   buyer: string;
@@ -345,7 +346,8 @@ export function TenderWorkspace({
             versionId={workspace.versions[0].id}
           />
         )}
-        {["Draft", "Readiness audit", "Export"].map((section) => (
+        <DraftWorkspace organisationId={organisationId} tenderId={tenderId} />
+        {["Readiness audit", "Export"].map((section) => (
           <section key={section}>
             <h2>{section}</h2>
             <p>Not implemented in this phase.</p>

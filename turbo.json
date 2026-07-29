@@ -39,7 +39,10 @@
     "RAG_PROVIDER",
     "RAG_CHAT_MODEL",
     "RAG_EMBEDDING_MODEL",
-    "RAG_RATE_LIMIT_MAX"
+    "RAG_RATE_LIMIT_MAX",
+    "DRAFT_JOB_TIMEOUT_MS",
+    "DRAFT_PROVIDER",
+    "DRAFT_MODEL"
   ],
   "tasks": {
     "build": {

@@ -97,4 +97,70 @@ describe("Gemini provider adapter", () => {
       ),
     ).rejects.toThrow("INVALID_PROVIDER_RESPONSE");
   });
+
+  it("generates only structured source-constrained draft sections", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      claims: [
+                        {
+                          claim: "The tender requires ISO 9001.",
+                          claim_class: "TENDER_SOURCE_STATEMENT",
+                          handles: ["C1"],
+                          material: true,
+                        },
+                      ],
+                      content: "The tender requires ISO 9001. [C1]",
+                      placeholders: [],
+                      section_key: "technical",
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    const generated = await gateway.generateDraftSection(
+      {
+        formattingGuidance: "Use concise prose.",
+        heading: "Technical",
+        instructions: null,
+        sectionKey: "technical",
+      },
+      [
+        {
+          handle: "C1",
+          sourceClass: "TENDER_SOURCE",
+          text: "ISO 9001 is mandatory.",
+        },
+      ],
+      new AbortController().signal,
+    );
+
+    expect(generated.claims[0]?.handles).toEqual(["C1"]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining(
+          "Do not approve, export, submit, decide eligibility",
+        ),
+      }),
+    );
+  });
 });

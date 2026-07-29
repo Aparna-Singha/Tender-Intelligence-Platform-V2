@@ -232,3 +232,19 @@ Retrieved text is inert data; structured output and application-issued citation
 handles are verified before completion. PostgreSQL owns indexes, conversations,
 messages, retrieval hits, citations, and feedback; Redis remains transport. See
 [ADR 0012](adr/0012-tenant-isolated-hybrid-rag.md).
+
+## Phase 10 fact-constrained drafting
+
+The drafting API validates and snapshots exact current Phase 5–9 authority before
+queuing an opaque BullMQ job. The worker repeats tenant, tender, version, source
+mode, and source-record filters inside PostgreSQL retrieval; uses the existing
+provider-neutral Gemini gateway; verifies structured claims and citation handles;
+and transactionally persists immutable drafts. PostgreSQL owns snapshots, runs,
+templates, versions, claims, citations, placeholders, human inputs, and review
+history. Redis is transport only.
+
+Generated and edited versions require independent human review. Stale inputs
+invalidate approval and the affected version while retaining history. No Phase 10
+component can perform readiness, export, internet retrieval, scraping, or
+submission. See [Draft Policy](DRAFT_POLICY.md) and
+[ADR 0013](adr/0013-fact-constrained-immutable-drafting.md).
