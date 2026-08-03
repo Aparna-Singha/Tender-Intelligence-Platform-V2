@@ -31,6 +31,7 @@ import {
   isUnsafeDraftInstruction,
   validateTemplateSections,
   visiblePlaceholder,
+  type OrganisationRole,
 } from "@tender/domain";
 import type { Queue } from "bullmq";
 import { randomUUID } from "node:crypto";
@@ -1215,7 +1216,8 @@ export class DraftsService {
     input: DraftReviewActionRequest,
     userId: string,
     requestId: string,
-    hasApprovalPermission: boolean,
+    actorRole: OrganisationRole,
+    actorHasApprovalPermission: boolean,
   ): Promise<unknown> {
     await this.invalidateStaleDraftVersions(organisationId, tenderId);
     const version = await this.database.draftVersion.findFirst({
@@ -1238,7 +1240,7 @@ export class DraftsService {
               approvalBlocking && resolutionState !== "RESOLVED",
           ),
         ).length,
-        hasApprovalPermission,
+        hasApprovalPermission: actorHasApprovalPermission,
         isCurrentVersion: version.draft.currentVersionId === version.id,
         rationale: input.rationale,
         sourcesCurrent,
@@ -1267,6 +1269,14 @@ export class DraftsService {
         throw new ConflictException(
           `Draft approval is blocked: ${blockers.join(",")}`,
         );
+      const template = await this.database.draftTemplateVersion.findUnique({
+        select: { requiredReviewRole: true },
+        where: { id: version.templateVersionId },
+      });
+      if (template?.requiredReviewRole !== actorRole)
+        throw new ForbiddenException(
+          "The configured draft review role is required for approval",
+        );
     }
     const nextState = reviewStateForAction(input.action);
     return this.database.$transaction(async (transaction) => {
@@ -1277,6 +1287,7 @@ export class DraftsService {
         data: {
           action: input.action,
           actorUserId: userId,
+          actorRoleAtAction: actorRole,
           draftVersionId: version.id,
           eventSequence: sequence + 1,
           newState: nextState,

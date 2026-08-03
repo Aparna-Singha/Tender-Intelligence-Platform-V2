@@ -55,4 +55,20 @@ describe("Phase 10 draft tenant boundaries", () => {
     expect(controller).not.toContain('@Post("export');
     expect(controller).not.toContain('@Post("submit');
   });
+
+  it("takes review authority from membership and persists role-at-action", () => {
+    const controller = readFileSync(
+      new URL("../src/drafts/drafts.controller.ts", import.meta.url),
+      "utf8",
+    );
+    const service = readFileSync(
+      new URL("../src/drafts/drafts.service.ts", import.meta.url),
+      "utf8",
+    );
+    expect(controller).toContain("request.organisationPrincipal.role");
+    expect(controller).not.toContain("body.actorRole");
+    expect(service).toContain("template?.requiredReviewRole !== actorRole");
+    expect(service).toContain("actorRoleAtAction: actorRole");
+    expect(service).toContain("versionCreatorUserId: version.createdByUserId");
+  });
 });

@@ -399,6 +399,8 @@ export class DraftsController {
     @Req() request: AuthenticatedRequest,
   ): Promise<unknown> {
     const input = draftReviewActionSchema.parse(body);
+    if (request.organisationPrincipal === undefined)
+      throw new ForbiddenException("Organisation membership is required");
     return this.drafts.review(
       organisationId,
       tenderId,
@@ -407,11 +409,8 @@ export class DraftsController {
       input,
       request.authenticatedUser.userId,
       request.id,
-      request.organisationPrincipal !== undefined &&
-        hasPermission(
-          request.organisationPrincipal.role,
-          "TENDER_DRAFT_APPROVE",
-        ),
+      request.organisationPrincipal.role,
+      hasPermission(request.organisationPrincipal.role, "TENDER_DRAFT_APPROVE"),
     );
   }
 
