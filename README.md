@@ -365,10 +365,11 @@ exact source and policy versions, visible placeholders, immutable revisions, and
 mandatory independent human review. Approval is not readiness, compliance, export,
 or submission.
 
-## Phase 11 final-readiness design
+## Phase 11 final readiness
 
-Phase 11 is designed but not yet implemented. Policy
-`final-readiness-deterministic-v1` will create a relational immutable snapshot of
+Phase 11 is implemented on its feature branch and awaits final local-stack and
+browser validation before release. Policy `final-readiness-deterministic-v1`
+creates a relational immutable snapshot of
 current Phase 5–10 authority, a separate linked `FINAL_READINESS` risk run, cited
 readiness findings, and an independent human disposition. Unresolved findings are
 audit inputs rather than automatic start failures. V1 requires one compliant

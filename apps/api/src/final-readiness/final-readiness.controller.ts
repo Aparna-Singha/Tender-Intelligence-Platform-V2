@@ -10,7 +10,7 @@ import {
   Query,
   Req,
 } from "@nestjs/common";
-import { ApiCookieAuth, ApiTags } from "@nestjs/swagger";
+import { ApiCookieAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
   cancelFinalReadinessSchema,
   createFinalReadinessDispositionSchema,
@@ -32,6 +32,9 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/preflight")
+  @ApiOperation({
+    summary: "Evaluate informational final-readiness prerequisites",
+  })
   public preflight(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -47,6 +50,7 @@ export class FinalReadinessController {
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_START")
   @Post("final-readiness")
   @HttpCode(202)
+  @ApiOperation({ summary: "Start a transactional final-readiness audit" })
   public start(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -65,6 +69,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("versions/:versionId/final-readiness/current")
+  @ApiOperation({ summary: "Read the current final-readiness run" })
   public current(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -75,6 +80,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("versions/:versionId/final-readiness")
+  @ApiOperation({ summary: "List historical final-readiness runs" })
   public history(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -91,6 +97,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/:runId")
+  @ApiOperation({ summary: "Read bounded final-readiness progress" })
   public run(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -101,6 +108,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/:runId/events")
+  @ApiOperation({ summary: "Read final-readiness run details" })
   public events(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -111,6 +119,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/:runId/findings")
+  @ApiOperation({ summary: "List final-readiness findings" })
   public findings(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -127,6 +136,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/:runId/findings/:findingId")
+  @ApiOperation({ summary: "Read one final-readiness finding" })
   public finding(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -138,6 +148,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/:runId/findings/:findingId/reviews")
+  @ApiOperation({ summary: "Read append-only finding review history" })
   public findingReviews(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -154,6 +165,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_FINDING_REVIEW")
   @Post("final-readiness/:runId/findings/:findingId/reviews")
+  @ApiOperation({ summary: "Append a final-readiness finding review" })
   public reviewFinding(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -175,6 +187,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_DISPOSITION_CREATE")
   @Post("final-readiness/:runId/decisions")
+  @ApiOperation({ summary: "Record an independent human final disposition" })
   public disposition(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -198,6 +211,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
   @Get("final-readiness/:runId/decisions")
+  @ApiOperation({ summary: "Read final disposition history" })
   public decisions(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -208,6 +222,7 @@ export class FinalReadinessController {
 
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_CANCEL")
   @Delete("final-readiness/:runId")
+  @ApiOperation({ summary: "Cancel an active final-readiness audit" })
   public cancel(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
@@ -229,6 +244,7 @@ export class FinalReadinessController {
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_RETRY")
   @Post("final-readiness/:runId/retry")
   @HttpCode(202)
+  @ApiOperation({ summary: "Retry a failed immutable final-readiness run" })
   public retry(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,

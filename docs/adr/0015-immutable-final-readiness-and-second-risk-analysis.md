@@ -1,6 +1,6 @@
 # ADR 0015: Immutable Final Readiness and Second Risk Analysis
 
-- Status: Accepted for Phase 11 design; implementation pending
+- Status: Accepted and implemented; final release validation pending
 - Date: 2026-08-03
 
 ## Context
@@ -47,7 +47,7 @@ An `OWNER`, `ADMIN`, or `REVIEWER` with an explicit decision permission may deci
 only when different from the readiness requester and consolidated-draft creator.
 There is no single-user bypass and no implicit `PLATFORM_ADMIN` tenant access.
 
-Before Phase 11 accepts a draft approval, production implementation must enforce
+Before Phase 11 accepts a draft approval, the implementation enforces
 `DraftTemplateVersion.requiredReviewRole` and capture the approver's organisation
 role at approval time. Historical approvals without verifiable role evidence require
 fresh compliant approval.
@@ -64,8 +64,8 @@ readable.
 - Machine risk and human readiness authority remain distinct and auditable.
 - Relational snapshots and source links add rows and validation queries but prevent
   forged, stale, or cross-tenant provenance.
-- Phase 11 requires a migration, new domain/contracts/API/worker/web behavior, and
-  comprehensive security tests in later implementation tasks.
+- Phase 11 uses the versioned migration and domain, contract, API, worker, and web
+  boundaries described here, with automated security and integration coverage.
 - Single-user organisations must add an eligible independent reviewer.
 - Existing unverifiable draft approvals cannot be grandfathered into Phase 11.
 - Phase 12 export remains separately authorised and unimplemented.
@@ -89,5 +89,6 @@ readable.
 
 ## Implementation status
 
-This ADR locks Phase 11 architecture and policy only. No Phase 11 schema, migration,
-API, worker, web, contract, or domain implementation exists yet.
+This ADR remains the architecture decision for the implemented Phase 11 schema,
+migration, domain, contracts, API, worker, and web stage. Release still requires the
+separate final local-stack and browser validation; Phase 12 remains unimplemented.

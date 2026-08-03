@@ -244,11 +244,11 @@ internet, approval, export, or submission capability. Unknown handles, unsupport
 company facts, cancellation, stale sources, and provider errors fail closed.
 Telemetry excludes source, prompt, draft, and human-input bodies.
 
-## Phase 11 final-readiness security design
+## Phase 11 final-readiness security boundary
 
-Phase 11 is designed but not yet implemented. Its preflight is informational and
+Phase 11 is implemented and undergoing final validation. Its preflight is informational and
 cannot bypass the serializable start transaction. Start, reads, worker processing,
-source access, finding review, and final disposition will repeat organisation,
+source access, finding review, and final disposition repeat organisation,
 tender, version, run, snapshot, finding, and source predicates. Browser-provided
 organisation IDs remain selectors checked against server-derived membership, and
 `PLATFORM_ADMIN` receives no implicit tenant access.
@@ -265,8 +265,8 @@ and consolidated-draft creator. There is no single-user bypass. The decision
 transaction rechecks current pointers, both run statuses, invalidation, fingerprint,
 provenance, findings, acknowledgements, authority, and separation of duties.
 
-Draft approval must first be hardened to enforce
-`DraftTemplateVersion.requiredReviewRole` and preserve role-at-approval evidence.
+Draft approval enforces `DraftTemplateVersion.requiredReviewRole` and preserves
+role-at-approval evidence from authenticated membership.
 Existing unverifiable approvals cannot satisfy Phase 11. Read-time stale detection
 is mandatory even when write paths eagerly invalidate affected runs. See
 [Final Readiness Policy](FINAL_READINESS_POLICY.md).

@@ -354,17 +354,28 @@ describe("final readiness contracts", () => {
   });
 
   it("rejects client claims about server-validated decision facts", () => {
-    expect(
-      createFinalReadinessDispositionSchema.safeParse({
-        acknowledgement_ids: [],
-        actor_has_permission: true,
-        disposition: "STOP_PURSUIT",
-        expected_fingerprint: "sha256:0123456789abcdef",
-        rationale:
-          "The independent reviewer recorded the reason to stop pursuit.",
-        run_id: id,
-      }).success,
-    ).toBe(false);
+    for (const authorityField of [
+      "actorId",
+      "actorRole",
+      "organisationRole",
+      "membershipId",
+      "snapshotId",
+      "finalRiskRunId",
+      "queueId",
+      "provenance",
+    ])
+      expect(
+        createFinalReadinessDispositionSchema.safeParse({
+          acknowledgement_ids: [],
+          disposition: "STOP_PURSUIT",
+          expected_fingerprint: "sha256:0123456789abcdef",
+          rationale:
+            "The independent reviewer recorded the reason to stop pursuit.",
+          run_id: id,
+          [authorityField]: "browser-asserted-authority",
+        }).success,
+        authorityField,
+      ).toBe(false);
   });
 
   it("preserves safe disposition history without submission approval language", () => {

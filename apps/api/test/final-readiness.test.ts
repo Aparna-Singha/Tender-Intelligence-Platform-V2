@@ -251,10 +251,13 @@ describe("Phase 11 final-readiness API boundaries", () => {
       },
     };
     const jobs = { add: vi.fn() };
+    const freshness = {
+      evaluate: vi.fn().mockResolvedValue({ fresh: true, reasons: [] }),
+    };
     const service = new FinalReadinessService(
       database as never,
       jobs as never,
-      {} as never,
+      freshness as never,
     );
 
     await expect(
@@ -269,6 +272,50 @@ describe("Phase 11 final-readiness API boundaries", () => {
       final_risk_run_id: "risk-a",
       run_id: "run-a",
       status: "QUEUED",
+    });
+    expect(jobs.add).not.toHaveBeenCalled();
+    expect(freshness.evaluate).toHaveBeenCalledWith(
+      "organisation-a",
+      "tender-a",
+      "run-a",
+    );
+  });
+
+  it("rejects idempotency-key reuse after authoritative inputs change", async () => {
+    const database = {
+      finalReadinessRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          createdAt: new Date("2026-08-03T10:00:00.000Z"),
+          finalRiskRun: { id: "risk-a" },
+          id: "run-a",
+          status: "COMPLETED",
+        }),
+      },
+    };
+    const jobs = { add: vi.fn() };
+    const freshness = {
+      evaluate: vi.fn().mockResolvedValue({
+        fresh: false,
+        reasons: ["SOURCE_SET_CHANGED"],
+      }),
+    };
+    const service = new FinalReadinessService(
+      database as never,
+      jobs as never,
+      freshness as never,
+    );
+
+    await expect(
+      service.start(
+        "organisation-a",
+        "tender-a",
+        "user-a",
+        "idempotency-a",
+        "request-a",
+      ),
+    ).rejects.toMatchObject({
+      publicCode: "FINAL_READINESS_IDEMPOTENCY_CONFLICT",
+      status: 409,
     });
     expect(jobs.add).not.toHaveBeenCalled();
   });
@@ -490,6 +537,7 @@ describe("Phase 11 final-readiness API boundaries", () => {
     expect(source).toContain(
       'Get("final-readiness/:runId/findings/:findingId/reviews")',
     );
+    expect(source.match(/@ApiOperation/g)).toHaveLength(14);
   });
 
   it("uses a serializable transaction and an opaque queue body", () => {

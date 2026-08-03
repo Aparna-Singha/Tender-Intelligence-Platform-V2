@@ -143,6 +143,22 @@ describe("deterministic final-readiness rules", () => {
     );
   });
 
+  it("does not invent an expiry finding when authoritative evidence has no expiry", () => {
+    const findings = generateDeterministicReadinessFindings(
+      input({
+        evidence: [
+          { assessmentId: "no-expiry", expiryDate: null, mandatory: true },
+        ],
+      }),
+    );
+    expect(findings.map(({ ruleCode }) => ruleCode)).not.toEqual(
+      expect.arrayContaining([
+        "EXPIRED_MANDATORY_EVIDENCE",
+        "EVIDENCE_EXPIRING_WITHIN_30_DAYS",
+      ]),
+    );
+  });
+
   it("classifies blocking, reassessment, and non-blocking checklist work", () => {
     const result = rules(
       input({

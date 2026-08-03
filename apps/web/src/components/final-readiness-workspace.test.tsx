@@ -465,5 +465,12 @@ describe("final readiness responsive and content safety", () => {
     );
     expect(source).not.toContain("Export package");
     expect(source).not.toContain("Submit bid");
+    expect(source).not.toMatch(/readinessScore|riskScore/i);
+    expect(source).not.toMatch(/approved to submit|ready to submit/i);
+    expect(source).toContain("controlled Phase 12 export review");
+    expect(source).toContain("not approval to submit");
+    expect(source).toMatch(
+      /not affiliated with GeM, CPPP[\s\S]*government portal/i,
+    );
   });
 });

@@ -12,7 +12,8 @@
 - Authentication and mutations block duplicate submission and surface safe API
   errors with request IDs when available.
 - Onboarding review uses structured labelled sections rather than raw JSON.
-- Phase 11 readiness, Phase 12 export, scraping and submission remain absent.
+- Phase 11 readiness is implemented on its feature branch; Phase 12 export, scraping
+  and submission remain absent.
 
 ## Milestone 0: Documentation contract
 

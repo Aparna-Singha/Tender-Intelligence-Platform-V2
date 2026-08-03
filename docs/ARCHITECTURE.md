@@ -256,16 +256,16 @@ component can perform readiness, export, internet retrieval, scraping, or
 submission. See [Draft Policy](DRAFT_POLICY.md) and
 [ADR 0013](adr/0013-fact-constrained-immutable-drafting.md).
 
-## Phase 11 final-readiness design
+## Phase 11 final-readiness architecture
 
-Phase 11 is designed but not yet implemented. The API will use one transactional
+Phase 11 is implemented and undergoing final validation. The API uses one transactional
 start boundary to validate current same-tenant Phase 5–10 hard prerequisites and
-create a proposed `FinalReadinessRun`, its relational
+create a `FinalReadinessRun`, its relational
 `FinalReadinessInputSnapshot`, and a linked existing `RiskAnalysisRun` with
 `gateType = FINAL_READINESS`. The final-risk run is an output linked to the
 readiness run, not an input inside its snapshot.
 
-One opaque-ID BullMQ job will process the already-created records. It will recheck
+One opaque-ID BullMQ job processes the already-created records. It rechecks
 the complete fingerprint before work and before atomic activation, run only
 deterministic policies, and persist machine risk separately from readiness findings
 and human disposition. Unresolved authoritative findings become audit inputs rather

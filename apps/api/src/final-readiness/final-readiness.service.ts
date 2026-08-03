@@ -96,7 +96,12 @@ export class FinalReadinessService {
       include: { finalRiskRun: { select: { id: true } } },
       where: { idempotencyKey: scopedKey, organisationId, tenderId },
     });
-    if (existing !== null) return this.startResponse(existing);
+    if (existing !== null)
+      return this.replayStartOrRejectChangedInputs(
+        organisationId,
+        tenderId,
+        existing,
+      );
 
     let run: Awaited<ReturnType<FinalReadinessService["createRun"]>> | null =
       null;
@@ -123,7 +128,12 @@ export class FinalReadinessService {
             include: { finalRiskRun: { select: { id: true } } },
             where: { idempotencyKey: scopedKey, organisationId, tenderId },
           });
-          if (replay !== null) return this.startResponse(replay);
+          if (replay !== null)
+            return this.replayStartOrRejectChangedInputs(
+              organisationId,
+              tenderId,
+              replay,
+            );
           throw new FinalReadinessError(
             "FINAL_READINESS_ALREADY_ACTIVE",
             "A final-readiness audit is already active.",
@@ -171,6 +181,25 @@ export class FinalReadinessService {
         HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
+    return this.startResponse(run);
+  }
+
+  private async replayStartOrRejectChangedInputs(
+    organisationId: string,
+    tenderId: string,
+    run: Parameters<FinalReadinessService["startResponse"]>[0],
+  ): Promise<unknown> {
+    const freshness = await this.freshness.evaluate(
+      organisationId,
+      tenderId,
+      run.id,
+    );
+    if (!freshness.fresh)
+      throw new FinalReadinessError(
+        "FINAL_READINESS_IDEMPOTENCY_CONFLICT",
+        "The idempotency key belongs to a final-readiness audit with different authoritative inputs.",
+        HttpStatus.CONFLICT,
+      );
     return this.startResponse(run);
   }
 

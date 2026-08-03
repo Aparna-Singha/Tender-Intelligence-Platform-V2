@@ -26,8 +26,9 @@
 
 The pilot does not discover live tenders, scrape GeM or CPPP, bypass CAPTCHA,
 submit bids, make autonomous declarations, or export Phase 12 packages. Phase 11 is
-currently designed but remains unavailable until production implementation is
-complete. It provides no eligibility, compliance, completeness or success guarantee.
+implemented on its feature branch but remains unreleased until final local-stack and
+browser validation is complete. It provides no eligibility, compliance,
+completeness or success guarantee.
 
 Tender Intelligence Platform is independent and not affiliated with GeM, CPPP or
 any government authority.

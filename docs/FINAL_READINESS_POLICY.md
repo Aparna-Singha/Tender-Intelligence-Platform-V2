@@ -2,7 +2,8 @@
 
 Policy version: `final-readiness-deterministic-v1`
 
-Status: designed for Phase 11; production implementation is not yet complete.
+Status: implemented on the Phase 11 feature branch; final local-stack and browser
+validation is pending before release.
 
 ## Scope and boundary
 
@@ -19,7 +20,7 @@ The two Phase 11 records have different authority:
   review, and cited-provenance concepts where valid. It does not update
   `activeEarlyRiskRunId`, create an `EarlyPursuitDecision`, or execute EARLY-specific
   invalidation.
-- the proposed `FinalReadinessRun` owns prerequisite snapshotting, readiness
+- `FinalReadinessRun` owns prerequisite snapshotting, readiness
   findings and provenance, readiness reviews, and the final human disposition.
 
 Machine risk findings and final human readiness decisions remain separate,
@@ -214,9 +215,9 @@ bypass. `PLATFORM_ADMIN` has no implicit tenant authority.
 
 ## Required-review-role hardening
 
-`DraftTemplateVersion.requiredReviewRole` is stored today but is not yet enforced by
-the production draft-approval path. Phase 11 implementation must therefore harden
-new draft approvals before treating them as authoritative prerequisites:
+`DraftTemplateVersion.requiredReviewRole` is enforced by the draft-approval path,
+which records authenticated membership role evidence before Phase 11 treats an
+approval as an authoritative prerequisite:
 
 - approval must enforce `requiredReviewRole`;
 - approval history must capture the actor's organisation role at approval time;
@@ -225,7 +226,7 @@ new draft approvals before treating them as authoritative prerequisites:
 - an affected version requires a fresh compliant approval; and
 - role changes, cross-tenant attempts, and historical approvals require tests.
 
-This document does not claim that the hardening is already implemented.
+Historical approvals remain unchanged; no role is inferred or backfilled.
 
 ## Invalidation, concurrency, and idempotency
 

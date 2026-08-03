@@ -241,7 +241,7 @@ See [Draft Policy](DRAFT_POLICY.md).
 
 ## Final readiness and second risk analysis
 
-Phase 11 is designed but not yet implemented. A proposed `FinalReadinessRun` owns an
+Phase 11 is implemented and undergoing final validation. A `FinalReadinessRun` owns an
 immutable relational snapshot of exact current Phase 5–10 authority, readiness
 findings, reviews, and an append-oriented human `FinalReadinessDisposition`. A
 separate linked `RiskAnalysisRun` with `gateType = FINAL_READINESS` owns the second

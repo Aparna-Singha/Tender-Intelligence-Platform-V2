@@ -138,7 +138,8 @@ Status: implemented on the Phase 10 feature branch.
 
 ## Phase 11: Final readiness audit and second risk analysis
 
-Status: architecture and policy accepted; production implementation pending.
+Status: feature implementation and automated integration hardening complete on the
+Phase 11 branch; final local-stack and browser validation remains pending.
 
 - policy `final-readiness-deterministic-v1` separates transactional hard start
   prerequisites from cited readiness blockers and warnings;
