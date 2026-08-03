@@ -238,3 +238,23 @@ Company assertions reference the accepted evidence-fact version; material tender
 statements require exact source citations. Edits create child versions and never
 inherit approval. Invalidated versions remain historical and cannot be approved.
 See [Draft Policy](DRAFT_POLICY.md).
+
+## Final readiness and second risk analysis
+
+Phase 11 is designed but not yet implemented. A proposed `FinalReadinessRun` owns an
+immutable relational snapshot of exact current Phase 5–10 authority, readiness
+findings, reviews, and an append-oriented human `FinalReadinessDisposition`. A
+separate linked `RiskAnalysisRun` with `gateType = FINAL_READINESS` owns the second
+deterministic machine risk analysis and never creates an `EarlyPursuitDecision`.
+
+The hard gate requires the authoritative records needed to take the snapshot;
+unresolved ambiguity, risk, evidence, checklist, and limitation states become cited
+audit findings. Readiness treatment is `BLOCKER`, `HUMAN_DISPOSITION_REQUIRED`,
+`WARNING`, or `INFORMATIONAL` and remains distinct from risk severity. V1 requires
+one compliant approved `CONSOLIDATED_FIRST_DRAFT`, no RAG index, and no provider.
+
+Only an eligible independent human may record proceed to controlled export review,
+hold for remediation, or stop pursuit. Proceed authorises neither export nor
+submission. Stale inputs fail closed while historical snapshots, findings, reviews,
+and decisions remain attributable. See
+[Final Readiness Policy](FINAL_READINESS_POLICY.md).

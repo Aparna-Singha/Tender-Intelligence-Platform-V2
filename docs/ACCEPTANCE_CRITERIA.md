@@ -332,3 +332,56 @@ author, blocked by stale sources, unsupported claims, conflicts, commitments, or
 material placeholders, and means only approval for Phase 11 review. Quality gates,
 migration validation, security inspection, and documentation must pass. Final
 readiness, the second risk analysis, export, scraping, and submission remain absent.
+
+## Phase 11: Final readiness audit and second risk analysis
+
+Phase 11 is accepted only when policy `final-readiness-deterministic-v1` is
+implemented and all of the following are measurable:
+
+- read-only preflight reports bounded missing/stale prerequisite codes and an
+  eligible independent decision actor without claiming readiness;
+- start independently repeats every hard check in a serializable transaction and
+  atomically creates the readiness run, relational Phase 5–10 snapshot, and linked
+  existing `RiskAnalysisRun` with `gateType = FINAL_READINESS` before enqueueing;
+- hard prerequisites require current same-tenant authority through Phase 8 and
+  exactly one compliant approved `CONSOLIDATED_FIRST_DRAFT`, but unresolved
+  extraction, risk, eligibility, evidence, checklist, warning, and limitation states
+  remain auditable inputs rather than start failures;
+- v1 has no Phase 9 RAG, provider, model, prompt, internet, tool, export, or
+  submission dependency;
+- every material final-risk and readiness finding has valid exact relational
+  provenance, and unsupported candidates are not established findings;
+- readiness treatment remains distinct from risk severity and enforces `BLOCKER`,
+  `HUMAN_DISPOSITION_REQUIRED`, `WARNING`, and `INFORMATIONAL` behavior;
+- expired material evidence blocks, evidence expiring within 30 days warns, later
+  expiry is informational only when relevant, and missing dates are never invented;
+- proceed to controlled export review is unselected by default and is blocked unless
+  both runs are current and complete, blockers and required dispositions are closed,
+  acknowledgements and provenance are valid, and the full fingerprint still matches;
+- hold and stop require rationale and may be recorded on a current completed run
+  while blockers remain;
+- only an `OWNER`, `ADMIN`, or `REVIEWER` with the explicit decision permission may
+  decide, and the actor differs from the run requester and consolidated-draft
+  creator; there is no single-user or Platform Administrator bypass;
+- draft approval enforces `DraftTemplateVersion.requiredReviewRole`, preserves the
+  approver's role at approval time, rejects cross-tenant evidence, and requires a
+  fresh compliant approval for unverifiable historical approvals;
+- read-time freshness checks and transactional decision revalidation prevent stale
+  runs, replayed decisions, duplicate starts, serialization races, and old workers
+  from creating current authority;
+- historical snapshots, runs, findings, reviews, and decisions remain readable and
+  attributable after invalidation;
+- queue bodies, logs, SSE, safe errors, and audit metadata contain no source,
+  evidence, prompt, draft, or finding bodies;
+- domain, contract, migration, API, worker, security, tenant-isolation, behavioural,
+  accessibility, responsive, and local-stack smoke tests cover the full policy;
+- the readiness stage is URL-addressable after Draft, mounts only while active, has
+  no export action or automatic submission-readiness claim, and works at 1440, 1024,
+  768, and 390 pixels without document-level horizontal overflow; and
+- formatting, linting, strict type checking, all tests, production build, migration
+  validation, Docker health, API and worker readiness, Ubuntu and Windows CI,
+  dependency review, and secret scanning pass.
+
+The final disposition authorises only the future Phase 12 controlled export review.
+Phase 11 does not generate export artifacts, approve submission, guarantee
+eligibility or completeness, scrape portals, or submit bids.

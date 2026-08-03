@@ -363,5 +363,20 @@ DRAFT_JOB_TIMEOUT_MS=300000
 provider configuration fails explicitly; no fake draft is created. Drafts preserve
 exact source and policy versions, visible placeholders, immutable revisions, and
 mandatory independent human review. Approval is not readiness, compliance, export,
-or submission. Phase 11 readiness and the second risk analysis, Phase 12 export,
-public internet retrieval, scraping, and submission are not implemented.
+or submission.
+
+## Phase 11 final-readiness design
+
+Phase 11 is designed but not yet implemented. Policy
+`final-readiness-deterministic-v1` will create a relational immutable snapshot of
+current Phase 5–10 authority, a separate linked `FINAL_READINESS` risk run, cited
+readiness findings, and an independent human disposition. Unresolved findings are
+audit inputs rather than automatic start failures. V1 requires one compliant
+approved `CONSOLIDATED_FIRST_DRAFT`, does not require Phase 9 RAG, and calls no AI
+provider. Proceed means only that future Phase 12 controlled export review may
+begin; it never approves or submits a bid. See the
+[Final Readiness Policy](docs/FINAL_READINESS_POLICY.md) and
+[ADR 0015](docs/adr/0015-immutable-final-readiness-and-second-risk-analysis.md).
+
+Phase 12 export, public internet retrieval, scraping, and submission are not
+implemented.

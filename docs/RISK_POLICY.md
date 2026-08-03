@@ -25,3 +25,7 @@ decision; history remains auditable. This analysis is not legal advice, does not
 determine eligibility, and cannot guarantee complete risk detection. Evidence
 comparison is deferred to Phase 7, missing-document checks to Phase 8, and final
 readiness risk analysis to a later phase.
+
+The accepted design for the separate deterministic `FINAL_READINESS` gate is in the
+[Final Readiness Policy](FINAL_READINESS_POLICY.md). This document remains the
+EARLY-only Phase 6 policy.
