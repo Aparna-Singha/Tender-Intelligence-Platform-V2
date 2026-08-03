@@ -20,6 +20,7 @@ decisions, their context, alternatives, and trade-offs.
 | [0011](0011-immutable-source-grounded-checklists.md)      | Immutable source-grounded action checklists       | Accepted |
 | [0012](0012-tenant-isolated-hybrid-rag.md)                | Tenant-isolated hybrid cited RAG                  | Accepted |
 | [0013](0013-fact-constrained-immutable-drafting.md)       | Fact-constrained immutable drafting               | Accepted |
+| [0014](0014-product-ui-and-cross-platform-development.md) | Product UI and cross-platform development         | Accepted |
 
 ## Process
 
