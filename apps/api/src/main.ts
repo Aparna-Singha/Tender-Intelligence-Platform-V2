@@ -52,6 +52,7 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
   app.enableCors({
     credentials: true,
+    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
     origin: environment.WEB_ORIGIN,
   });
 

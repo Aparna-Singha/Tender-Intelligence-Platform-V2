@@ -679,6 +679,16 @@ describe("Phase 11 stable public errors", () => {
 });
 
 describe("Phase 11 controller selectors", () => {
+  it("allows the browser methods used by cancellation and review flows", () => {
+    const source = readFileSync(
+      new URL("../src/main.ts", import.meta.url),
+      "utf8",
+    );
+    expect(source).toContain(
+      'methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"]',
+    );
+  });
+
   it("rejects a mismatched body run identifier", () => {
     const controller = new FinalReadinessController({} as never);
     expect(() =>
