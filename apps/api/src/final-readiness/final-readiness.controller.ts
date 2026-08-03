@@ -136,6 +136,22 @@ export class FinalReadinessController {
     return this.readiness.finding(organisationId, tenderId, runId, findingId);
   }
 
+  @RequireOrganisationPermission("TENDER_FINAL_READINESS_READ")
+  @Get("final-readiness/:runId/findings/:findingId/reviews")
+  public findingReviews(
+    @Param("organisationId") organisationId: string,
+    @Param("tenderId") tenderId: string,
+    @Param("runId") runId: string,
+    @Param("findingId") findingId: string,
+  ): Promise<unknown> {
+    return this.readiness.findingReviews(
+      organisationId,
+      tenderId,
+      runId,
+      findingId,
+    );
+  }
+
   @RequireOrganisationPermission("TENDER_FINAL_READINESS_FINDING_REVIEW")
   @Post("final-readiness/:runId/findings/:findingId/reviews")
   public reviewFinding(

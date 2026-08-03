@@ -350,6 +350,26 @@ export class FinalReadinessService {
     return safeFinding(finding);
   }
 
+  public async findingReviews(
+    organisationId: string,
+    tenderId: string,
+    runId: string,
+    findingId: string,
+  ): Promise<unknown> {
+    const finding = await this.database.finalReadinessFinding.findFirst({
+      select: { id: true },
+      where: { id: findingId, organisationId, run: { id: runId, tenderId } },
+    });
+    if (finding === null) throw new NotFoundException();
+    const items = await this.database.finalReadinessFindingReview.findMany({
+      include: { actor: { select: { displayName: true, id: true } } },
+      orderBy: { reviewVersion: "asc" },
+      take: 100,
+      where: { findingId, organisationId },
+    });
+    return { items: items.map(reviewResponse) };
+  }
+
   public async reviewFinding(
     organisationId: string,
     tenderId: string,
@@ -1237,6 +1257,7 @@ function safeFinding(finding: FindingWithSafeRelations) {
   );
   return {
     created_at: finding.createdAt.toISOString(),
+    current_review_version: latestReview?.reviewVersion ?? 0,
     explanation: finding.explanation,
     id: finding.id,
     lifecycle_state: finding.lifecycle,
@@ -1269,8 +1290,10 @@ function safeFinding(finding: FindingWithSafeRelations) {
 function runResponse(run: RunWithSafeRelations, fresh: boolean) {
   const decision = run.decisions[0] ?? null;
   return {
+    completed_at: run.completedAt?.toISOString() ?? null,
     created_at: run.createdAt.toISOString(),
     current_disposition: decision === null ? null : decisionResponse(decision),
+    disposition_concurrency_token: run.inputFingerprint,
     failure_code: run.safeFailureCode ?? run.invalidationCode,
     final_risk_run_id: run.finalRiskRun!.id,
     final_risk_status: mapRiskStatus(run.finalRiskRun?.status),
@@ -1280,6 +1303,7 @@ function runResponse(run: RunWithSafeRelations, fresh: boolean) {
     is_current: fresh,
     policy_version: run.policyVersion,
     stale: !fresh,
+    started_at: run.startedAt?.toISOString() ?? null,
     status: run.status === "INVALIDATED" ? "FAILED" : run.status,
     tender_version_id: run.tenderVersionId,
     updated_at: run.updatedAt.toISOString(),

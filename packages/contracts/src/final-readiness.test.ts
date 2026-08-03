@@ -7,6 +7,7 @@ import {
   finalReadinessErrorCodes,
   finalReadinessFindingFilterSchema,
   finalReadinessFindingListResponseSchema,
+  finalReadinessFindingReviewHistorySchema,
   finalReadinessFindingSchema,
   finalReadinessHistoryResponseSchema,
   finalReadinessPaginationSchema,
@@ -34,8 +35,11 @@ const dispositionRecord = {
   superseded_at: null,
 };
 const run = {
+  completed_at: timestamp,
   created_at: timestamp,
   current_disposition: dispositionRecord,
+  disposition_concurrency_token:
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
   failure_code: null,
   final_risk_run_id: otherId,
   final_risk_status: "COMPLETED",
@@ -50,12 +54,14 @@ const run = {
   is_current: true,
   policy_version: "final-readiness-deterministic-v1",
   stale: false,
+  started_at: timestamp,
   status: "COMPLETED",
   tender_version_id: otherId,
   updated_at: timestamp,
 };
 const finding = {
   created_at: timestamp,
+  current_review_version: 0,
   explanation: "A mandatory eligibility requirement has conflicting evidence.",
   id,
   lifecycle_state: "OPEN",
@@ -156,6 +162,25 @@ describe("final readiness contracts", () => {
     expect(run).not.toHaveProperty("readiness_score");
   });
 
+  it("requires an opaque disposition token and nullable lifecycle timestamps", () => {
+    expect(
+      finalReadinessRunSchema.safeParse({
+        ...run,
+        completed_at: null,
+        started_at: null,
+      }).success,
+    ).toBe(true);
+    expect(
+      finalReadinessRunSchema.safeParse({
+        ...run,
+        disposition_concurrency_token: "short",
+      }).success,
+    ).toBe(false);
+    expect(JSON.stringify(run)).not.toMatch(
+      /source_body|draft_text|evidence_text|object_key|snapshot/i,
+    );
+  });
+
   it("enforces pagination boundaries and strict filters", () => {
     expect(finalReadinessPaginationSchema.parse({}).limit).toBe(25);
     expect(finalReadinessPaginationSchema.safeParse({ limit: 1 }).success).toBe(
@@ -239,6 +264,33 @@ describe("final readiness contracts", () => {
         actor_id: id,
       }).success,
     ).toBe(false);
+  });
+
+  it("exposes the authoritative review version and safe append-only history", () => {
+    expect(
+      finalReadinessFindingSchema.safeParse({
+        ...finding,
+        current_review_version: 2,
+      }).success,
+    ).toBe(true);
+    const parsed = finalReadinessFindingReviewHistorySchema.parse({
+      items: [
+        {
+          acknowledgement_recorded: true,
+          action: "ACKNOWLEDGE",
+          actor,
+          created_at: timestamp,
+          finding_id: id,
+          id: otherId,
+          rationale: "The cited limitation was reviewed and acknowledged.",
+          review_version: 1,
+        },
+      ],
+    });
+    expect(parsed.items[0]?.review_version).toBe(1);
+    expect(JSON.stringify(parsed)).not.toMatch(
+      /source_body|draft_text|evidence_text|object_key/i,
+    );
   });
 
   it.each([

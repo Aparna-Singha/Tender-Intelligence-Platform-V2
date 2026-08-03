@@ -177,8 +177,10 @@ export const finalReadinessDispositionRecordSchema = z
 
 export const finalReadinessRunSchema = z
   .object({
+    completed_at: timestampSchema.nullable(),
     created_at: timestampSchema,
     current_disposition: finalReadinessDispositionRecordSchema.nullable(),
+    disposition_concurrency_token: fingerprintTokenSchema,
     failure_code: z
       .string()
       .regex(/^[A-Z][A-Z0-9_]*$/)
@@ -191,6 +193,7 @@ export const finalReadinessRunSchema = z
     is_current: z.boolean(),
     policy_version: finalReadinessPolicyVersionSchema,
     stale: z.boolean(),
+    started_at: timestampSchema.nullable(),
     status: finalReadinessRunStatusSchema,
     tender_version_id: uuidSchema,
     updated_at: timestampSchema,
@@ -287,6 +290,7 @@ const reviewSummarySchema = z
 export const finalReadinessFindingSchema = z
   .object({
     created_at: timestampSchema,
+    current_review_version: z.number().int().nonnegative(),
     explanation: z.string().trim().min(1).max(2_000),
     id: uuidSchema,
     lifecycle_state: finalReadinessFindingLifecycleSchema,
