@@ -36,7 +36,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@nestjs/cli": "11.0.16",
+    "@nestjs/cli": "11.0.24",
     "@nestjs/testing": "11.1.28",
     "@types/node": "24.10.13",
     "rimraf": "6.1.3"
