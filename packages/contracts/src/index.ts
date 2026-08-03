@@ -23,6 +23,7 @@ export {
   organisationRoleSchema,
   organisationTypeSchema,
 } from "./organisations.js";
+export * from "./final-readiness.js";
 export {
   askRagQuestionSchema,
   createRagConversationSchema,
