@@ -255,3 +255,25 @@ invalidate approval and the affected version while retaining history. No Phase 1
 component can perform readiness, export, internet retrieval, scraping, or
 submission. See [Draft Policy](DRAFT_POLICY.md) and
 [ADR 0013](adr/0013-fact-constrained-immutable-drafting.md).
+
+## Phase 11 final-readiness architecture
+
+Phase 11 is implemented and undergoing final validation. The API uses one transactional
+start boundary to validate current same-tenant Phase 5–10 hard prerequisites and
+create a `FinalReadinessRun`, its relational
+`FinalReadinessInputSnapshot`, and a linked existing `RiskAnalysisRun` with
+`gateType = FINAL_READINESS`. The final-risk run is an output linked to the
+readiness run, not an input inside its snapshot.
+
+One opaque-ID BullMQ job processes the already-created records. It rechecks
+the complete fingerprint before work and before atomic activation, run only
+deterministic policies, and persist machine risk separately from readiness findings
+and human disposition. Unresolved authoritative findings become audit inputs rather
+than start failures. Phase 9 RAG and AI providers are not dependencies in v1.
+
+Read-time freshness checks remain mandatory; eager invalidation only supplements
+them. The final-decision transaction will recheck authority, statuses, fingerprint,
+provenance, blockers, required dispositions, acknowledgements, permission, and
+separation of duties. Phase 12 export remains a separate future boundary. See
+[Final Readiness Policy](FINAL_READINESS_POLICY.md) and
+[ADR 0015](adr/0015-immutable-final-readiness-and-second-risk-analysis.md).

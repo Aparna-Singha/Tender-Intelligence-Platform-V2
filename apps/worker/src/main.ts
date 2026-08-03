@@ -36,6 +36,11 @@ import {
   isDraftGenerationJob,
   type DraftGenerationJob,
 } from "./draft-generation-processor.js";
+import {
+  FinalReadinessProcessor,
+  isFinalReadinessJob,
+  type FinalReadinessJob,
+} from "./final-readiness-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -103,6 +108,7 @@ async function bootstrap(): Promise<void> {
     gemini,
     draftGateway,
   );
+  const finalReadinessProcessor = new FinalReadinessProcessor(database);
   const documentWorker = new Worker<
     | DocumentJob
     | TenderDocumentJob
@@ -112,6 +118,7 @@ async function bootstrap(): Promise<void> {
     | ChecklistGenerationJob
     | RagJob
     | DraftGenerationJob
+    | FinalReadinessJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -172,6 +179,14 @@ async function bootstrap(): Promise<void> {
           draftGenerationProcessor.process(data, signal),
         );
       }
+      if (job.name === "run-final-readiness-audit") {
+        if (!isFinalReadinessJob(job.data))
+          throw new Error("Invalid final readiness job");
+        const data = job.data;
+        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+          finalReadinessProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -222,6 +237,11 @@ async function bootstrap(): Promise<void> {
         job.data.checklistRunId,
         error.name,
       );
+    if (
+      job?.name === "run-final-readiness-audit" &&
+      isFinalReadinessJob(job.data)
+    )
+      void finalReadinessProcessor.fail(job.data, error);
     if (
       job?.name === "process-company-document" &&
       isCompanyDocumentJob(job.data)
@@ -305,7 +325,8 @@ function isTenderDocumentJob(
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
     | RagJob
-    | DraftGenerationJob,
+    | DraftGenerationJob
+    | FinalReadinessJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
@@ -319,7 +340,8 @@ function isCompanyDocumentJob(
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
     | RagJob
-    | DraftGenerationJob,
+    | DraftGenerationJob
+    | FinalReadinessJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
@@ -333,7 +355,8 @@ function isExtractionJob(
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
     | RagJob
-    | DraftGenerationJob,
+    | DraftGenerationJob
+    | FinalReadinessJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
@@ -347,7 +370,8 @@ function isRiskAnalysisJob(
     | EvidenceAssessmentJob
     | ChecklistGenerationJob
     | RagJob
-    | DraftGenerationJob,
+    | DraftGenerationJob
+    | FinalReadinessJob,
 ): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }

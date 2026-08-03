@@ -2,7 +2,7 @@
 
 ## Phase 10.5 — Cross-platform reliability, product UI and pilot readiness
 
-Status: implemented on `feat/phase-10-5-reliability-product-ui` pending review.
+Status: merged into `main` through PR #11.
 
 - Cross-platform workspace scripts and a Nest-compatible API watch process.
 - Explicit development, test and production-build environments.
@@ -135,6 +135,25 @@ Status: implemented on the Phase 10 feature branch.
   fail-closed invalidation;
 - final readiness, the second risk analysis, export, scraping, and submission
   remain deferred.
+
+## Phase 11: Final readiness audit and second risk analysis
+
+Status: feature implementation and automated integration hardening complete on the
+Phase 11 branch; final local-stack and browser validation remains pending.
+
+- policy `final-readiness-deterministic-v1` separates transactional hard start
+  prerequisites from cited readiness blockers and warnings;
+- exactly one current compliant approved `CONSOLIDATED_FIRST_DRAFT` is required;
+- an immutable relational Phase 5–10 snapshot and a linked but separate
+  `FINAL_READINESS` risk run preserve provenance and authority;
+- v1 is deterministic and does not require RAG or an AI provider;
+- readiness treatment, human disposition, separation of duties, stale-state
+  invalidation, and role-at-draft-approval hardening fail closed;
+- Phase 12 export, scraping, portal automation, submission, and autonomous approval
+  remain absent.
+
+See [Final Readiness Policy](FINAL_READINESS_POLICY.md) and
+[ADR 0015](adr/0015-immutable-final-readiness-and-second-risk-analysis.md).
 
 ## Phase 9: Tenant-isolated cited tender chatbot
 

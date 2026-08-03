@@ -7,6 +7,7 @@ import {
 } from "@nestjs/common";
 import type { ApiErrorResponse } from "@tender/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { FinalReadinessError } from "../final-readiness/final-readiness.error.js";
 
 const publicErrors: Readonly<
   Record<number, { readonly code: string; readonly message: string }>
@@ -59,10 +60,13 @@ export class ApiExceptionFilter implements ExceptionFilter {
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
-    const safeError = publicErrors[status] ?? {
-      code: "INTERNAL_SERVER_ERROR",
-      message: "An unexpected error occurred.",
-    };
+    const safeError =
+      exception instanceof FinalReadinessError
+        ? { code: exception.publicCode, message: exception.message }
+        : (publicErrors[status] ?? {
+            code: "INTERNAL_SERVER_ERROR",
+            message: "An unexpected error occurred.",
+          });
     const body: ApiErrorResponse = {
       error: safeError,
       request_id: request.id,

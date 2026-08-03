@@ -4,8 +4,11 @@ import {
   canChangeMemberRole,
   canInviteRole,
   hasPermission,
+  isOrganisationRole,
   ownsOrganisationResource,
   type OrganisationPrincipal,
+  type OrganisationRole,
+  type Permission,
 } from "../src/index.js";
 
 const owner: OrganisationPrincipal = {
@@ -71,5 +74,41 @@ describe("organisation authorisation policy", () => {
     expect(hasPermission("REVIEWER", "TENDER_PURSUIT_DECISION_CREATE")).toBe(
       true,
     );
+  });
+
+  it("enforces the complete Phase 11 permission matrix", () => {
+    const phase11Permissions = [
+      "TENDER_FINAL_READINESS_READ",
+      "TENDER_FINAL_READINESS_START",
+      "TENDER_FINAL_READINESS_CANCEL",
+      "TENDER_FINAL_READINESS_RETRY",
+      "TENDER_FINAL_READINESS_FINDING_REVIEW",
+      "TENDER_FINAL_READINESS_DISPOSITION_CREATE",
+    ] as const satisfies readonly Permission[];
+    const expected: Readonly<Record<OrganisationRole, readonly Permission[]>> =
+      {
+        OWNER: phase11Permissions,
+        ADMIN: phase11Permissions,
+        TENDER_EXECUTIVE: phase11Permissions.slice(0, 4),
+        CONSULTANT: phase11Permissions.slice(0, 4),
+        REVIEWER: [
+          "TENDER_FINAL_READINESS_READ",
+          "TENDER_FINAL_READINESS_FINDING_REVIEW",
+          "TENDER_FINAL_READINESS_DISPOSITION_CREATE",
+        ],
+      };
+
+    for (const [role, allowed] of Object.entries(expected) as readonly [
+      OrganisationRole,
+      readonly Permission[],
+    ][])
+      for (const permission of phase11Permissions)
+        expect(hasPermission(role, permission), `${role}:${permission}`).toBe(
+          allowed.includes(permission),
+        );
+  });
+
+  it("does not treat Platform Administrator as an organisation role", () => {
+    expect(isOrganisationRole("PLATFORM_ADMIN")).toBe(false);
   });
 });

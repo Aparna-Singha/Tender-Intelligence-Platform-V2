@@ -15,12 +15,20 @@
 10. Resolve source-grounded checklist work without treating it as a score.
 11. Ask tender-scoped cited questions when a provider is configured.
 12. Generate and review a fact-constrained draft with citations and placeholders.
+13. Start the deterministic final-readiness audit after its hard prerequisites are
+    current.
+14. Review the separate second-risk analysis, cited blockers, required human
+    dispositions, warnings, and limitations.
+15. Have an eligible independent actor record an unselected-by-default final
+    disposition with rationale and acknowledgements.
 
 ## Unsupported path
 
 The pilot does not discover live tenders, scrape GeM or CPPP, bypass CAPTCHA,
-submit bids, make autonomous declarations, run Phase 11 final readiness or export
-Phase 12 packages. It provides no eligibility, compliance or success guarantee.
+submit bids, make autonomous declarations, or export Phase 12 packages. Phase 11 is
+implemented on its feature branch but remains unreleased until final local-stack and
+browser validation is complete. It provides no eligibility, compliance,
+completeness or success guarantee.
 
 Tender Intelligence Platform is independent and not affiliated with GeM, CPPP or
 any government authority.

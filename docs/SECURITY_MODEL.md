@@ -243,3 +243,30 @@ Retrieved text, templates, and human input are inert; the provider has no tools,
 internet, approval, export, or submission capability. Unknown handles, unsupported
 company facts, cancellation, stale sources, and provider errors fail closed.
 Telemetry excludes source, prompt, draft, and human-input bodies.
+
+## Phase 11 final-readiness security boundary
+
+Phase 11 is implemented and undergoing final validation. Its preflight is informational and
+cannot bypass the serializable start transaction. Start, reads, worker processing,
+source access, finding review, and final disposition repeat organisation,
+tender, version, run, snapshot, finding, and source predicates. Browser-provided
+organisation IDs remain selectors checked against server-derived membership, and
+`PLATFORM_ADMIN` receives no implicit tenant access.
+
+Idempotency keys, database uniqueness, bounded serialization retry, and complete
+fingerprint checks prevent duplicate starts and stale activation. The worker receives
+opaque identifiers only, reloads every source, and never records a human decision,
+exports, or submits. Source, evidence, prompt, draft, and finding bodies are excluded
+from queue payloads, logs, SSE, and audit metadata.
+
+Only an `OWNER`, `ADMIN`, or `REVIEWER` with an explicit decision permission may
+record the final disposition, and that actor must differ from both the run requester
+and consolidated-draft creator. There is no single-user bypass. The decision
+transaction rechecks current pointers, both run statuses, invalidation, fingerprint,
+provenance, findings, acknowledgements, authority, and separation of duties.
+
+Draft approval enforces `DraftTemplateVersion.requiredReviewRole` and preserves
+role-at-approval evidence from authenticated membership.
+Existing unverifiable approvals cannot satisfy Phase 11. Read-time stale detection
+is mandatory even when write paths eagerly invalidate affected runs. See
+[Final Readiness Policy](FINAL_READINESS_POLICY.md).

@@ -21,6 +21,7 @@ import { EvidenceMatrix } from "./evidence-matrix";
 import { ActionChecklist } from "./action-checklist";
 import { RagChatbot } from "./rag-chatbot";
 import { DraftWorkspace } from "./draft-workspace";
+import { FinalReadinessWorkspace } from "./final-readiness-workspace";
 
 interface Workspace {
   buyer: string;
@@ -76,6 +77,7 @@ const workspaceTabs = [
   "checklist",
   "ask",
   "draft",
+  "readiness",
 ] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
 
@@ -518,6 +520,15 @@ export function TenderWorkspace({
         {activeTab === "draft" && (
           <DraftWorkspace organisationId={organisationId} tenderId={tenderId} />
         )}
+        {activeTab === "readiness" &&
+          workspace?.versions[0]?.id !== undefined && (
+            <FinalReadinessWorkspace
+              onNavigateStage={selectTab}
+              organisationId={organisationId}
+              tenderId={tenderId}
+              versionId={workspace.versions[0].id}
+            />
+          )}
       </div>
     </div>
   );
