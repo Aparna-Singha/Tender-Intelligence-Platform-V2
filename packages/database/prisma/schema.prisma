@@ -127,11 +127,79 @@ enum AuditEventType {
   DRAFT_ARCHIVED
   DRAFT_DELETED
   DRAFT_ACCESS_DENIED
+  FINAL_READINESS_STARTED
+  FINAL_READINESS_CANCELLED
+  FINAL_READINESS_RETRIED
+  FINAL_READINESS_ACTIVATED
+  FINAL_READINESS_INVALIDATED
+  FINAL_READINESS_FINDING_REVIEWED
+  FINAL_READINESS_DISPOSITION_RECORDED
+  FINAL_READINESS_DISPOSITION_SUPERSEDED
+  FINAL_READINESS_ACTION_DENIED
 }
 
 enum RiskAnalysisGate {
   EARLY
   FINAL_READINESS
+}
+
+enum FinalReadinessRunStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  CANCELLED
+  INVALIDATED
+}
+
+enum FinalReadinessTreatment {
+  BLOCKER
+  HUMAN_DISPOSITION_REQUIRED
+  WARNING
+  INFORMATIONAL
+}
+
+enum FinalReadinessFindingLifecycle {
+  OPEN
+  UNDER_REVIEW
+  DISPOSITION_RECORDED
+  RESOLVED
+  SUPERSEDED
+  INVALIDATED
+}
+
+enum FinalReadinessFindingReviewState {
+  UNREVIEWED
+  HUMAN_REVIEW_REQUIRED
+  REVIEWED
+}
+
+enum FinalReadinessFindingReviewAction {
+  ACKNOWLEDGE
+  ACCEPT
+  REMEDIATE
+  DISMISS
+  REOPEN
+}
+
+enum FinalReadinessDisposition {
+  PROCEED_TO_CONTROLLED_EXPORT_REVIEW
+  HOLD_FOR_REMEDIATION
+  STOP_PURSUIT
+}
+
+enum FinalReadinessProvenanceKind {
+  EXTRACTION_CITATION
+  RISK_FINDING
+  ELIGIBILITY_ASSESSMENT
+  EVIDENCE_FACT_VERSION
+  EVIDENCE_CITATION
+  CHECKLIST_ITEM
+  DRAFT_VERSION
+  DRAFT_CLAIM
+  DRAFT_CITATION
+  DRAFT_PLACEHOLDER
+  HUMAN_REVIEW_RECORD
 }
 
 enum RiskAnalysisRunStatus {
@@ -820,6 +888,11 @@ model User {
   requestedChecklistRuns    ChecklistGenerationRun[]
   checklistAssignments      ChecklistItem[]
   checklistHistory          ChecklistItemHistory[]
+  requestedFinalReadinessRuns          FinalReadinessRun[]                   @relation("FinalReadinessRequester")
+  createdReadinessSnapshots            FinalReadinessInputSnapshot[]         @relation("FinalReadinessSnapshotCreator")
+  finalReadinessReviews                FinalReadinessFindingReview[]
+  finalReadinessDecisions              FinalReadinessDecision[]
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
 
   @@map("users")
 }
@@ -880,6 +953,11 @@ model Organisation {
   checklistRuns          ChecklistGenerationRun[]
   checklistItems         ChecklistItem[]
   checklistHistory       ChecklistItemHistory[]
+  finalReadinessRuns      FinalReadinessRun[]
+  finalReadinessSnapshots FinalReadinessInputSnapshot[]
+  finalReadinessFindings  FinalReadinessFinding[]
+  finalReadinessReviews   FinalReadinessFindingReview[]
+  finalReadinessDecisions FinalReadinessDecision[]
 
   @@map("organisations")
 }
@@ -1213,6 +1291,10 @@ model Tender {
   eligibilityAssessments EligibilityAssessment[]
   checklistRuns          ChecklistGenerationRun[]
   checklistItems         ChecklistItem[]
+  finalReadinessRuns      FinalReadinessRun[]
+  finalReadinessSnapshots FinalReadinessInputSnapshot[]
+  finalReadinessFindings  FinalReadinessFinding[]
+  finalReadinessDecisions FinalReadinessDecision[]
 
   @@index([organisationId, lifecycleStatus, submissionDeadline])
   @@index([organisationId, sourceTenderNumber])
@@ -1250,6 +1332,10 @@ model TenderVersion {
   activeEligibilityAssessmentRunId String?                    @unique @map("active_eligibility_assessment_run_id") @db.Uuid
   eligibilityAssessmentRuns        EligibilityAssessmentRun[] @relation("TenderVersionEligibilityRuns")
   activeEligibilityAssessmentRun   EligibilityAssessmentRun?  @relation("ActiveEligibilityAssessmentRun", fields: [activeEligibilityAssessmentRunId], references: [id], onDelete: SetNull)
+  activeFinalReadinessRunId        String?                       @unique @map("active_final_readiness_run_id") @db.Uuid
+  activeFinalReadinessRun          FinalReadinessRun?            @relation("ActiveFinalReadinessRun", fields: [activeFinalReadinessRunId], references: [id], onDelete: SetNull)
+  finalReadinessRuns               FinalReadinessRun[]           @relation("TenderVersionFinalReadinessRuns")
+  finalReadinessSnapshots          FinalReadinessInputSnapshot[]
   eligibilityAssessments           EligibilityAssessment[]
   checklistRuns                    ChecklistGenerationRun[]
   checklistItems                   ChecklistItem[]
@@ -1288,6 +1374,7 @@ model TenderDocument {
   uploadedBy             User                    @relation("TenderDocumentUploader", fields: [uploadedByUserId], references: [id], onDelete: Restrict)
   extractionRunDocuments ExtractionRunDocument[]
   extractionCitations    ExtractionCitation[]
+  finalReadinessSnapshots FinalReadinessSnapshotDocument[]
 
   @@unique([organisationId, tenderVersionId, role, sha256])
   @@index([organisationId, sha256])
@@ -1307,6 +1394,7 @@ model TenderSource {
   importMethod     String           @map("import_method") @db.VarChar(80)
   externalMetadata Json?            @map("external_metadata")
   importedByUserId String           @map("imported_by_user_id") @db.Uuid
+  finalReadinessSnapshots FinalReadinessSnapshotDocument[]
   importedAt       DateTime         @default(now()) @map("imported_at") @db.Timestamptz(3)
   organisation     Organisation     @relation(fields: [organisationId], references: [id], onDelete: Cascade)
   tender           Tender           @relation(fields: [tenderId], references: [id], onDelete: Cascade)
@@ -1412,6 +1500,7 @@ model ExtractionRun {
   eligibilityRuns          EligibilityAssessmentRun[]
   riskFindings             RiskFinding[]
   checklistRuns            ChecklistGenerationRun[]
+  finalReadinessInputSnapshots FinalReadinessInputSnapshot[]
 
   @@index([organisationId, tenderId, status, createdAt])
   @@index([tenderVersionId, createdAt])
@@ -1621,6 +1710,7 @@ model ExtractionCitation {
   riskFindingCitations    RiskFindingCitation[]
   eligibilityAssessments  EligibilityAssessment[]
   checklistSourceLinks    ChecklistItemSourceCitation[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@index([extractionRunId, tenderDocumentId, pageNumber])
   @@index([extractedTenderFieldId])
@@ -1674,6 +1764,7 @@ model RiskAnalysisRun {
   tenderVersionId          String                     @map("tender_version_id") @db.Uuid
   extractionRunId          String                     @map("extraction_run_id") @db.Uuid
   gateType                 RiskAnalysisGate           @default(EARLY) @map("gate_type")
+  finalReadinessRunId          String?                       @unique @map("final_readiness_run_id") @db.Uuid
   status                   RiskAnalysisRunStatus      @default(QUEUED)
   triggerType              RiskAnalysisTriggerType    @map("trigger_type")
   riskPolicyVersion        String                     @map("risk_policy_version") @db.VarChar(80)
@@ -1705,6 +1796,8 @@ model RiskAnalysisRun {
   decisions                EarlyPursuitDecision[]
   eligibilityRuns          EligibilityAssessmentRun[]
   checklistRuns            ChecklistGenerationRun[]
+  finalReadinessRun            FinalReadinessRun?            @relation("FinalReadinessRiskRun", fields: [finalReadinessRunId], references: [id], onDelete: Restrict)
+  finalReadinessInputSnapshots FinalReadinessInputSnapshot[] @relation("FinalReadinessEarlyRiskSnapshot")
 
   @@index([organisationId, tenderId, gateType, status, createdAt])
   @@index([tenderVersionId, extractionRunId, createdAt])
@@ -1742,6 +1835,7 @@ model RiskFinding {
   riskAnalysisRun          RiskAnalysisRun       @relation(fields: [riskAnalysisRunId], references: [id], onDelete: Cascade)
   citations                RiskFindingCitation[]
   reviews                  RiskFindingReview[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@index([organisationId, riskAnalysisRunId, severity, category])
   @@index([riskAnalysisRunId, findingStatus, reviewState, blocking])
@@ -1809,6 +1903,7 @@ model EarlyPursuitDecision {
   supersedingDecisions        EarlyPursuitDecision[]     @relation("DecisionHistory")
   eligibilityRuns             EligibilityAssessmentRun[]
   checklistRuns               ChecklistGenerationRun[]
+  finalReadinessInputSnapshots FinalReadinessInputSnapshot[]
 
   @@index([organisationId, tenderId, tenderVersionId, createdAt])
   @@index([riskAnalysisRunId, supersededAt])
@@ -1864,6 +1959,7 @@ model CompanyEvidenceFactVersion {
   citations         CompanyEvidenceCitation[]
   snapshotFacts     EligibilitySnapshotEvidenceFact[]
   assessmentLinks   EligibilityAssessmentEvidenceLink[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@unique([evidenceFactId, versionNumber])
   @@index([documentVersionId, reviewState])
@@ -1895,6 +1991,7 @@ model CompanyEvidenceCitation {
   createdBy             User                                @relation("EvidenceCitationCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
   assessmentLinks       EligibilityAssessmentEvidenceLink[]
   checklistSourceLinks  ChecklistItemSourceCitation[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@index([organisationId, documentId, documentVersionId])
   @@map("company_evidence_citations")
@@ -1938,6 +2035,7 @@ model EligibilityInputSnapshot {
   evidenceCitations EligibilitySnapshotEvidenceCitation[]
   run               EligibilityAssessmentRun?
   checklistRuns     ChecklistGenerationRun[]
+  finalReadinessInputSnapshots FinalReadinessInputSnapshot[]
 
   @@index([organisationId, tenderVersionId, capturedAt])
   @@map("eligibility_input_snapshots")
@@ -2089,6 +2187,7 @@ model EligibilityAssessmentRun {
   activeForVersion           TenderVersion?                   @relation("ActiveEligibilityAssessmentRun")
   assessments                EligibilityAssessment[]
   checklistRuns              ChecklistGenerationRun[]
+  finalReadinessInputSnapshots FinalReadinessInputSnapshot[]
 
   @@index([organisationId, tenderId, tenderVersionId, status, createdAt])
   @@index([organisationId, sourceFingerprint, comparisonPolicyVersion])
@@ -2128,6 +2227,7 @@ model EligibilityAssessment {
   evidenceLinks           EligibilityAssessmentEvidenceLink[]
   reviews                 EligibilityAssessmentReview[]
   checklistLinks          ChecklistItemAssessmentLink[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@unique([assessmentRunId, structuredRequirementId])
   @@index([organisationId, assessmentRunId, currentState, reviewState])
@@ -2221,6 +2321,7 @@ model ChecklistGenerationRun {
   evidenceSnapshot           EligibilityInputSnapshot     @relation(fields: [evidenceSnapshotId], references: [id], onDelete: Restrict)
   requestedBy                User                         @relation(fields: [requestedByUserId], references: [id], onDelete: Restrict)
   items                      ChecklistItem[]
+  finalReadinessInputSnapshots FinalReadinessInputSnapshot[]
 
   @@index([organisationId, tenderId, tenderVersionId, status, createdAt])
   @@index([organisationId, assessmentRunId, sourceFingerprint])
@@ -2271,6 +2372,7 @@ model ChecklistItem {
   requirementLinks     ChecklistItemRequirementLink[]
   sourceCitations      ChecklistItemSourceCitation[]
   history              ChecklistItemHistory[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@unique([generationRunId, deduplicationKey])
   @@index([organisationId, tenderId, generationRunId, status, currentPriority])
@@ -2596,6 +2698,7 @@ model DraftTemplateVersion {
   retiredAt             DateTime?     @map("retired_at") @db.Timestamptz(3)
   createdAt             DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
   template              DraftTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
 
   @@unique([templateId, versionNumber])
   @@index([templateId, activatedAt, retiredAt])
@@ -2653,6 +2756,7 @@ model DraftGenerationRun {
   createdAt                DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt                DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
   inputSnapshot            DraftInputSnapshot?
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
 
   @@index([organisationId, tenderId, tenderVersionId, status, createdAt])
   @@index([organisationId, sourceFingerprint, draftType])
@@ -2685,6 +2789,7 @@ model DraftInputSnapshot {
   createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
   generationRun            DraftGenerationRun @relation(fields: [generationRunId], references: [id], onDelete: Cascade)
   sources                  DraftInputSnapshotSource[]
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
 
   @@index([organisationId, tenderId, sourceFingerprint])
   @@map("draft_input_snapshots")
@@ -2726,6 +2831,7 @@ model Draft {
   createdAt        DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt        DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
   versions         DraftVersion[]
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
 
   @@index([organisationId, tenderId, lifecycle, updatedAt])
   @@map("drafts")
@@ -2758,6 +2864,8 @@ model DraftVersion {
   sections              DraftSection[]
   reviews               DraftReview[]
   reviewEvents          DraftReviewEvent[]
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
+  finalReadinessFindingProvenances     FinalReadinessFindingProvenance[]
 
   @@unique([draftId, versionNumber])
   @@index([organisationId, tenderId, draftId, reviewState])
@@ -2798,6 +2906,7 @@ model DraftClaim {
   createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   section               DraftSection      @relation(fields: [sectionId], references: [id], onDelete: Cascade)
   citations             DraftClaimCitation[]
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@index([sectionId, claimClass, supportState])
   @@map("draft_claims")
@@ -2817,6 +2926,7 @@ model DraftClaimCitation {
   sourceChecksum       String       @map("source_checksum") @db.Char(64)
   createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
   claim                DraftClaim   @relation(fields: [claimId], references: [id], onDelete: Cascade)
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@unique([claimId, handle])
   @@index([ragChunkId])
@@ -2844,6 +2954,7 @@ model DraftPlaceholder {
   createdAt               DateTime                        @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt               DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(3)
   section                 DraftSection                    @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  finalReadinessFindingProvenances FinalReadinessFindingProvenance[]
 
   @@index([organisationId, tenderId, draftVersionId, resolutionState])
   @@map("draft_placeholders")
@@ -2898,12 +3009,260 @@ model DraftReviewEvent {
   newState         DraftReviewState? @map("new_state")
   rationale        String            @db.VarChar(2000)
   actorUserId      String            @map("actor_user_id") @db.Uuid
+  actorRoleAtAction                    Role?                                 @map("actor_role_at_action")
   sourceFingerprint String           @map("source_fingerprint") @db.Char(64)
   eventSequence    Int               @map("event_sequence")
   createdAt        DateTime          @default(now()) @map("created_at") @db.Timestamptz(3)
   draftVersion     DraftVersion      @relation(fields: [draftVersionId], references: [id], onDelete: Cascade)
+  finalReadinessSnapshotRequiredDrafts FinalReadinessSnapshotRequiredDraft[]
+  finalReadinessFindingProvenances     FinalReadinessFindingProvenance[]
 
   @@unique([draftVersionId, eventSequence])
   @@index([organisationId, tenderId, draftVersionId, createdAt])
   @@map("draft_review_events")
+}
+
+model FinalReadinessRun {
+  id                          String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId              String                       @map("organisation_id") @db.Uuid
+  tenderId                    String                       @map("tender_id") @db.Uuid
+  tenderVersionId             String                       @map("tender_version_id") @db.Uuid
+  requestedByUserId           String                       @map("requested_by_user_id") @db.Uuid
+  status                      FinalReadinessRunStatus      @default(QUEUED)
+  policyVersion               String                       @map("policy_version") @db.VarChar(80)
+  evidenceExpiryPolicyVersion String                       @map("evidence_expiry_policy_version") @db.VarChar(80)
+  requiredDraftPolicyVersion  String                       @map("required_draft_policy_version") @db.VarChar(80)
+  inputFingerprint            String                       @map("input_fingerprint") @db.Char(64)
+  idempotencyKey              String                       @map("idempotency_key") @db.VarChar(120)
+  progressPercentage          Int                          @default(0) @map("progress_percentage")
+  currentStage                String                       @default("QUEUED") @map("current_stage") @db.VarChar(80)
+  eventSequence               Int                          @default(1) @map("event_sequence")
+  cancellationRequestedAt     DateTime?                    @map("cancellation_requested_at") @db.Timestamptz(3)
+  safeFailureCode             String?                      @map("safe_failure_code") @db.VarChar(80)
+  invalidationCode            String?                      @map("invalidation_code") @db.VarChar(80)
+  queuedAt                    DateTime                     @default(now()) @map("queued_at") @db.Timestamptz(3)
+  startedAt                   DateTime?                    @map("started_at") @db.Timestamptz(3)
+  completedAt                 DateTime?                    @map("completed_at") @db.Timestamptz(3)
+  failedAt                    DateTime?                    @map("failed_at") @db.Timestamptz(3)
+  cancelledAt                 DateTime?                    @map("cancelled_at") @db.Timestamptz(3)
+  invalidatedAt               DateTime?                    @map("invalidated_at") @db.Timestamptz(3)
+  createdAt                   DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                   DateTime                     @updatedAt @map("updated_at") @db.Timestamptz(3)
+  organisation                Organisation                 @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  tender                      Tender                       @relation(fields: [tenderId], references: [id], onDelete: Restrict)
+  tenderVersion               TenderVersion                @relation("TenderVersionFinalReadinessRuns", fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  requestedBy                 User                         @relation("FinalReadinessRequester", fields: [requestedByUserId], references: [id], onDelete: Restrict)
+  activeForVersion            TenderVersion?               @relation("ActiveFinalReadinessRun")
+  inputSnapshot               FinalReadinessInputSnapshot?
+  finalRiskRun                RiskAnalysisRun?             @relation("FinalReadinessRiskRun")
+  findings                    FinalReadinessFinding[]
+  decisions                   FinalReadinessDecision[]
+
+  @@unique([organisationId, tenderId, idempotencyKey])
+  @@index([organisationId, tenderId, tenderVersionId, status, createdAt])
+  @@index([tenderVersionId, createdAt])
+  @@map("final_readiness_runs")
+}
+
+model FinalReadinessInputSnapshot {
+  id                          String                                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  runId                       String                                @unique @map("run_id") @db.Uuid
+  organisationId              String                                @map("organisation_id") @db.Uuid
+  tenderId                    String                                @map("tender_id") @db.Uuid
+  tenderVersionId             String                                @map("tender_version_id") @db.Uuid
+  extractionRunId             String                                @map("extraction_run_id") @db.Uuid
+  earlyRiskRunId              String                                @map("early_risk_run_id") @db.Uuid
+  pursuitDecisionId           String                                @map("pursuit_decision_id") @db.Uuid
+  eligibilityAssessmentRunId  String                                @map("eligibility_assessment_run_id") @db.Uuid
+  eligibilityInputSnapshotId  String                                @map("eligibility_input_snapshot_id") @db.Uuid
+  checklistGenerationRunId    String                                @map("checklist_generation_run_id") @db.Uuid
+  createdByUserId             String                                @map("created_by_user_id") @db.Uuid
+  fingerprint                 String                                @db.Char(64)
+  policyVersion               String                                @map("policy_version") @db.VarChar(80)
+  evidenceExpiryPolicyVersion String                                @map("evidence_expiry_policy_version") @db.VarChar(80)
+  requiredDraftPolicyVersion  String                                @map("required_draft_policy_version") @db.VarChar(80)
+  capturedAt                  DateTime                              @default(now()) @map("captured_at") @db.Timestamptz(3)
+  run                         FinalReadinessRun                     @relation(fields: [runId], references: [id], onDelete: Cascade)
+  organisation                Organisation                          @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  tender                      Tender                                @relation(fields: [tenderId], references: [id], onDelete: Restrict)
+  tenderVersion               TenderVersion                         @relation(fields: [tenderVersionId], references: [id], onDelete: Restrict)
+  extractionRun               ExtractionRun                         @relation(fields: [extractionRunId], references: [id], onDelete: Restrict)
+  earlyRiskRun                RiskAnalysisRun                       @relation("FinalReadinessEarlyRiskSnapshot", fields: [earlyRiskRunId], references: [id], onDelete: Restrict)
+  pursuitDecision             EarlyPursuitDecision                  @relation(fields: [pursuitDecisionId], references: [id], onDelete: Restrict)
+  eligibilityAssessmentRun    EligibilityAssessmentRun              @relation(fields: [eligibilityAssessmentRunId], references: [id], onDelete: Restrict)
+  eligibilityInputSnapshot    EligibilityInputSnapshot              @relation(fields: [eligibilityInputSnapshotId], references: [id], onDelete: Restrict)
+  checklistGenerationRun      ChecklistGenerationRun                @relation(fields: [checklistGenerationRunId], references: [id], onDelete: Restrict)
+  createdBy                   User                                  @relation("FinalReadinessSnapshotCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  documents                   FinalReadinessSnapshotDocument[]
+  requiredDrafts              FinalReadinessSnapshotRequiredDraft[]
+
+  @@index([organisationId, tenderId, tenderVersionId, capturedAt])
+  @@map("final_readiness_input_snapshots")
+}
+
+model FinalReadinessSnapshotDocument {
+  id               String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId       String                      @map("snapshot_id") @db.Uuid
+  tenderDocumentId String                      @map("tender_document_id") @db.Uuid
+  tenderSourceId   String?                     @map("tender_source_id") @db.Uuid
+  role             TenderDocumentRole
+  checksum         String                      @db.Char(64)
+  sourceIdentifier String                      @map("source_identifier") @db.VarChar(240)
+  corrigendum      Boolean                     @default(false)
+  createdAt        DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  snapshot         FinalReadinessInputSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  tenderDocument   TenderDocument              @relation(fields: [tenderDocumentId], references: [id], onDelete: Restrict)
+  tenderSource     TenderSource?               @relation(fields: [tenderSourceId], references: [id], onDelete: Restrict)
+
+  @@unique([snapshotId, tenderDocumentId])
+  @@index([tenderDocumentId])
+  @@map("final_readiness_snapshot_documents")
+}
+
+model FinalReadinessSnapshotRequiredDraft {
+  id                      String                      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  snapshotId              String                      @map("snapshot_id") @db.Uuid
+  draftType               DraftType                   @map("draft_type")
+  draftId                 String                      @map("draft_id") @db.Uuid
+  draftVersionId          String                      @map("draft_version_id") @db.Uuid
+  generationRunId         String?                     @map("generation_run_id") @db.Uuid
+  inputSnapshotId         String                      @map("input_snapshot_id") @db.Uuid
+  templateVersionId       String                      @map("template_version_id") @db.Uuid
+  sourceFingerprint       String                      @map("source_fingerprint") @db.Char(64)
+  draftCreatorUserId      String                      @map("draft_creator_user_id") @db.Uuid
+  qualifyingReviewEventId String                      @map("qualifying_review_event_id") @db.Uuid
+  createdAt               DateTime                    @default(now()) @map("created_at") @db.Timestamptz(3)
+  snapshot                FinalReadinessInputSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+  draft                   Draft                       @relation(fields: [draftId], references: [id], onDelete: Restrict)
+  draftVersion            DraftVersion                @relation(fields: [draftVersionId], references: [id], onDelete: Restrict)
+  generationRun           DraftGenerationRun?         @relation(fields: [generationRunId], references: [id], onDelete: Restrict)
+  inputSnapshot           DraftInputSnapshot          @relation(fields: [inputSnapshotId], references: [id], onDelete: Restrict)
+  templateVersion         DraftTemplateVersion        @relation(fields: [templateVersionId], references: [id], onDelete: Restrict)
+  draftCreator            User                        @relation(fields: [draftCreatorUserId], references: [id], onDelete: Restrict)
+  qualifyingReviewEvent   DraftReviewEvent            @relation(fields: [qualifyingReviewEventId], references: [id], onDelete: Restrict)
+
+  @@unique([snapshotId, draftType])
+  @@index([draftVersionId, qualifyingReviewEventId])
+  @@map("final_readiness_snapshot_required_drafts")
+}
+
+model FinalReadinessFinding {
+  id               String                                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId   String                                  @map("organisation_id") @db.Uuid
+  tenderId         String                                  @map("tender_id") @db.Uuid
+  runId            String                                  @map("run_id") @db.Uuid
+  treatment        FinalReadinessTreatment
+  ruleCode         String                                  @map("rule_code") @db.VarChar(120)
+  title            String                                  @db.VarChar(240)
+  explanation      String                                  @db.VarChar(2000)
+  lifecycle        FinalReadinessFindingLifecycle          @default(OPEN)
+  reviewState      FinalReadinessFindingReviewState        @default(UNREVIEWED) @map("review_state")
+  materiality      RiskMateriality?
+  provenanceValid  Boolean                                 @default(false) @map("provenance_valid")
+  findingOrder     Int                                     @map("finding_order")
+  supersededAt     DateTime?                               @map("superseded_at") @db.Timestamptz(3)
+  invalidatedAt    DateTime?                               @map("invalidated_at") @db.Timestamptz(3)
+  createdAt        DateTime                                @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation     Organisation                            @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  tender           Tender                                  @relation(fields: [tenderId], references: [id], onDelete: Restrict)
+  run              FinalReadinessRun                       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  provenance       FinalReadinessFindingProvenance[]
+  reviews          FinalReadinessFindingReview[]
+  acknowledgements FinalReadinessDecisionAcknowledgement[]
+
+  @@unique([runId, findingOrder])
+  @@index([organisationId, tenderId, runId, treatment, lifecycle])
+  @@map("final_readiness_findings")
+}
+
+model FinalReadinessFindingProvenance {
+  id                      String                       @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  findingId               String                       @map("finding_id") @db.Uuid
+  kind                    FinalReadinessProvenanceKind
+  extractionCitationId    String?                      @map("extraction_citation_id") @db.Uuid
+  riskFindingId           String?                      @map("risk_finding_id") @db.Uuid
+  eligibilityAssessmentId String?                      @map("eligibility_assessment_id") @db.Uuid
+  evidenceFactVersionId   String?                      @map("evidence_fact_version_id") @db.Uuid
+  evidenceCitationId      String?                      @map("evidence_citation_id") @db.Uuid
+  checklistItemId         String?                      @map("checklist_item_id") @db.Uuid
+  draftVersionId          String?                      @map("draft_version_id") @db.Uuid
+  draftClaimId            String?                      @map("draft_claim_id") @db.Uuid
+  draftCitationId         String?                      @map("draft_citation_id") @db.Uuid
+  draftPlaceholderId      String?                      @map("draft_placeholder_id") @db.Uuid
+  draftReviewEventId      String?                      @map("draft_review_event_id") @db.Uuid
+  createdAt               DateTime                     @default(now()) @map("created_at") @db.Timestamptz(3)
+  finding                 FinalReadinessFinding        @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  extractionCitation      ExtractionCitation?          @relation(fields: [extractionCitationId], references: [id], onDelete: Restrict)
+  riskFinding             RiskFinding?                 @relation(fields: [riskFindingId], references: [id], onDelete: Restrict)
+  eligibilityAssessment   EligibilityAssessment?       @relation(fields: [eligibilityAssessmentId], references: [id], onDelete: Restrict)
+  evidenceFactVersion     CompanyEvidenceFactVersion?  @relation(fields: [evidenceFactVersionId], references: [id], onDelete: Restrict)
+  evidenceCitation        CompanyEvidenceCitation?     @relation(fields: [evidenceCitationId], references: [id], onDelete: Restrict)
+  checklistItem           ChecklistItem?               @relation(fields: [checklistItemId], references: [id], onDelete: Restrict)
+  draftVersion            DraftVersion?                @relation(fields: [draftVersionId], references: [id], onDelete: Restrict)
+  draftClaim              DraftClaim?                  @relation(fields: [draftClaimId], references: [id], onDelete: Restrict)
+  draftCitation           DraftClaimCitation?          @relation(fields: [draftCitationId], references: [id], onDelete: Restrict)
+  draftPlaceholder        DraftPlaceholder?            @relation(fields: [draftPlaceholderId], references: [id], onDelete: Restrict)
+  draftReviewEvent        DraftReviewEvent?            @relation(fields: [draftReviewEventId], references: [id], onDelete: Restrict)
+
+  @@unique([findingId, kind, extractionCitationId, riskFindingId, eligibilityAssessmentId, evidenceFactVersionId, evidenceCitationId, checklistItemId, draftVersionId, draftClaimId, draftCitationId, draftPlaceholderId, draftReviewEventId])
+  @@index([findingId, kind])
+  @@map("final_readiness_finding_provenance")
+}
+
+model FinalReadinessFindingReview {
+  id                      String                            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId          String                            @map("organisation_id") @db.Uuid
+  findingId               String                            @map("finding_id") @db.Uuid
+  actorUserId             String                            @map("actor_user_id") @db.Uuid
+  action                  FinalReadinessFindingReviewAction
+  rationale               String                            @db.VarChar(2000)
+  acknowledgementRecorded Boolean                           @default(false) @map("acknowledgement_recorded")
+  reviewVersion           Int                               @map("review_version")
+  supersededAt            DateTime?                         @map("superseded_at") @db.Timestamptz(3)
+  createdAt               DateTime                          @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation            Organisation                      @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  finding                 FinalReadinessFinding             @relation(fields: [findingId], references: [id], onDelete: Cascade)
+  actor                   User                              @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@unique([findingId, reviewVersion])
+  @@index([organisationId, findingId, createdAt])
+  @@map("final_readiness_finding_reviews")
+}
+
+model FinalReadinessDecision {
+  id                   String                                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId       String                                  @map("organisation_id") @db.Uuid
+  tenderId             String                                  @map("tender_id") @db.Uuid
+  runId                String                                  @map("run_id") @db.Uuid
+  actorUserId          String                                  @map("actor_user_id") @db.Uuid
+  actorRoleAtDecision  Role                                    @map("actor_role_at_decision")
+  disposition          FinalReadinessDisposition
+  runFingerprint       String                                  @map("run_fingerprint") @db.Char(64)
+  rationale            String                                  @db.VarChar(2000)
+  supersedesDecisionId String?                                 @map("supersedes_decision_id") @db.Uuid
+  supersededAt         DateTime?                               @map("superseded_at") @db.Timestamptz(3)
+  createdAt            DateTime                                @default(now()) @map("created_at") @db.Timestamptz(3)
+  organisation         Organisation                            @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  tender               Tender                                  @relation(fields: [tenderId], references: [id], onDelete: Restrict)
+  run                  FinalReadinessRun                       @relation(fields: [runId], references: [id], onDelete: Restrict)
+  actor                User                                    @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+  supersedesDecision   FinalReadinessDecision?                 @relation("FinalReadinessDecisionHistory", fields: [supersedesDecisionId], references: [id], onDelete: Restrict)
+  supersedingDecisions FinalReadinessDecision[]                @relation("FinalReadinessDecisionHistory")
+  acknowledgements     FinalReadinessDecisionAcknowledgement[]
+
+  @@index([organisationId, tenderId, runId, createdAt])
+  @@index([runId, supersededAt])
+  @@map("final_readiness_decisions")
+}
+
+model FinalReadinessDecisionAcknowledgement {
+  id         String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  decisionId String                 @map("decision_id") @db.Uuid
+  findingId  String                 @map("finding_id") @db.Uuid
+  createdAt  DateTime               @default(now()) @map("created_at") @db.Timestamptz(3)
+  decision   FinalReadinessDecision @relation(fields: [decisionId], references: [id], onDelete: Cascade)
+  finding    FinalReadinessFinding  @relation(fields: [findingId], references: [id], onDelete: Restrict)
+
+  @@unique([decisionId, findingId])
+  @@map("final_readiness_decision_acknowledgements")
 }
