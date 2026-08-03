@@ -3,11 +3,12 @@
   "compilerOptions": {
     "allowJs": false,
     "incremental": true,
-    "jsx": "preserve",
+    "jsx": "react-jsx",
     "lib": ["dom", "dom.iterable", "es2023"],
     "module": "esnext",
     "moduleResolution": "bundler",
     "noEmit": true,
+    "types": ["@testing-library/jest-dom", "vitest/globals"],
     "plugins": [{ "name": "next" }]
   },
   "include": [

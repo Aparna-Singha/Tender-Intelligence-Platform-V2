@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "clean": "rm -rf dist",
-    "dev": "tsx watch src/main.ts",
+    "clean": "rimraf dist",
+    "dev": "nest start --watch --preserveWatchOutput",
     "lint": "eslint src test",
     "start": "node dist/main.js",
     "test": "vitest run",
@@ -36,8 +36,9 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@nestjs/cli": "11.0.24",
     "@nestjs/testing": "11.1.28",
     "@types/node": "24.10.13",
-    "tsx": "4.23.1"
+    "rimraf": "6.1.3"
   }
 }

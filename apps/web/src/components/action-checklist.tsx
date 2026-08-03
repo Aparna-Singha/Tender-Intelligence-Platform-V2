@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState, type JSX } from "react";
 import { apiRequest } from "../lib/api";
+import { humanizeEnum } from "@tender/ui";
 
 interface ChecklistRun {
   assessmentRunId: string;
@@ -187,14 +188,14 @@ export function ActionChecklist({
           <option value="">No generation selected</option>
           {runs.map((run) => (
             <option key={run.id} value={run.id}>
-              {run.status} · {run.checklistPolicyVersion}
+              {humanizeEnum(run.status)} · {run.checklistPolicyVersion}
             </option>
           ))}
         </select>
       </label>
       {selected !== undefined && (
         <p>
-          {selected.status} · {selected.progressPercentage}% ·{" "}
+          {humanizeEnum(selected.status)} · {selected.progressPercentage}% ·{" "}
           {selected.publicMessage}
           {selected.invalidatedAt === null ? "" : " · Historical/invalidated"}
         </p>
@@ -235,7 +236,8 @@ export function ActionChecklist({
         <article key={item.id} tabIndex={0}>
           <h3>{item.currentTitle}</h3>
           <p>
-            {item.itemType} · {item.currentPriority} · {item.status}
+            {humanizeEnum(item.itemType)} · {humanizeEnum(item.currentPriority)}{" "}
+            · {humanizeEnum(item.status)}
           </p>
           <button
             onClick={() => void editWorkflow(item.id, "assignee_id")}

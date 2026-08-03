@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { apiRequest } from "../lib/api";
+import { humanizeEnum } from "@tender/ui";
 
 interface RiskRun {
   id: string;
@@ -49,6 +50,7 @@ export function RiskWorkspace({
   const [findings, setFindings] = useState<readonly RiskFinding[]>([]);
   const [severity, setSeverity] = useState("");
   const [message, setMessage] = useState("");
+  const [decisionSubmitting, setDecisionSubmitting] = useState(false);
 
   async function loadRuns(): Promise<void> {
     try {
@@ -108,17 +110,30 @@ export function RiskWorkspace({
   }
   async function decide(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
-    await apiRequest(`${base}/risk-analyses/${runId}/decisions`, {
-      body: JSON.stringify({
-        acknowledged_limitations: values.get("acknowledged") === "on",
-        decision: values.get("decision"),
-        rationale: values.get("rationale"),
-      }),
-      method: "POST",
-    });
-    setMessage("Human pursuit decision recorded.");
-    event.currentTarget.reset();
+    if (decisionSubmitting) return;
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    setDecisionSubmitting(true);
+    try {
+      await apiRequest(`${base}/risk-analyses/${runId}/decisions`, {
+        body: JSON.stringify({
+          acknowledged_limitations: values.get("acknowledged") === "on",
+          decision: values.get("decision"),
+          rationale: values.get("rationale"),
+        }),
+        method: "POST",
+      });
+      form.reset();
+      setMessage("Human pursuit decision recorded.");
+    } catch (error) {
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "The human decision could not be recorded.",
+      );
+    } finally {
+      setDecisionSubmitting(false);
+    }
   }
   const active = runs.find((run) => run.id === runId);
   return (
@@ -140,7 +155,8 @@ export function RiskWorkspace({
           >
             {runs.map((run, index) => (
               <option key={run.id} value={run.id}>
-                {index === 0 ? "Latest" : "Historical"} — {run.status}
+                {index === 0 ? "Latest" : "Historical"} —{" "}
+                {humanizeEnum(run.status)}
               </option>
             ))}
           </select>
@@ -149,7 +165,7 @@ export function RiskWorkspace({
       {active !== undefined && (
         <article>
           <h3>
-            EARLY · {active.status} · {active.progressPercentage}%
+            Early · {humanizeEnum(active.status)} · {active.progressPercentage}%
           </h3>
           <p>{active.publicMessage}</p>
           <p>Policy: {active.riskPolicyVersion}</p>
@@ -185,13 +201,15 @@ export function RiskWorkspace({
         <article key={finding.id}>
           <h3>{finding.title}</h3>
           <p>
-            Severity: {finding.severity} · Confidence: {finding.confidence} ·
-            Materiality: {finding.materiality}
+            Severity: {humanizeEnum(finding.severity)} · Confidence:{" "}
+            {humanizeEnum(finding.confidence)} · Materiality:{" "}
+            {humanizeEnum(finding.materiality)}
           </p>
-          <p>{finding.category.replaceAll("_", " ")}</p>
+          <p>{humanizeEnum(finding.category)}</p>
           <p>{finding.explanation}</p>
           <p>
-            {finding.findingStatus} · {finding.reviewState}
+            {humanizeEnum(finding.findingStatus)} ·{" "}
+            {humanizeEnum(finding.reviewState)}
           </p>
           {finding.citations.map(({ extractionCitation }) => (
             <blockquote key={extractionCitation.id}>
@@ -238,7 +256,11 @@ export function RiskWorkspace({
             <input name="acknowledged" required type="checkbox" />I acknowledge
             unresolved findings and source-quality limitations.
           </label>
-          <button type="submit">Record human decision</button>
+          <button disabled={decisionSubmitting} type="submit">
+            {decisionSubmitting
+              ? "Recording decision…"
+              : "Record human decision"}
+          </button>
         </form>
       )}
     </section>

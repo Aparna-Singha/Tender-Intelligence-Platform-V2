@@ -1,5 +1,16 @@
 # Security Model
 
+## Phase 10.5 web presentation controls
+
+- Route organisation IDs remain selectors; cookies and server-derived memberships
+  remain the authority.
+- Browser API errors expose only safe messages, status, machine code and bounded
+  request IDs. Malformed or non-JSON responses do not expose internals.
+- CSRF acquisition, HttpOnly cookie authentication and credentialed requests are
+  preserved, with one safe refresh retry for an unsafe request rejected by `403`.
+- Signed URLs, document content, prompts, RAG answers and draft bodies are not
+  added to telemetry.
+
 ## Objectives
 
 The platform must preserve organisation isolation, document confidentiality, data

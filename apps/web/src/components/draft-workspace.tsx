@@ -8,6 +8,7 @@ import {
   type JSX,
 } from "react";
 import { apiRequest } from "../lib/api";
+import { humanizeEnum } from "@tender/ui";
 
 type SourceMode =
   | "FULL_AUTHORISED_TENDER_CONTEXT"
@@ -228,7 +229,8 @@ export function DraftWorkspace({
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const values = new FormData(form);
     const title = values.get("title");
     const instructions = values.get("instructions");
     const template = templates.find(
@@ -254,7 +256,7 @@ export function DraftWorkspace({
         }),
         method: "POST",
       });
-      event.currentTarget.reset();
+      form.reset();
       setStatus(
         "Draft generation queued. Human approval will still be required.",
       );
@@ -353,9 +355,9 @@ export function DraftWorkspace({
       <h3>Generation history</h3>
       {runs.map((run) => (
         <p key={run.id}>
-          {run.currentStage} · {run.status} · {run.progressPercentage}% ·{" "}
-          {run.validatedClaimCount} validated claims · {run.citationCount}{" "}
-          citations · {run.placeholderCount} placeholders
+          {humanizeEnum(run.currentStage)} · {humanizeEnum(run.status)} ·{" "}
+          {run.progressPercentage}% · {run.validatedClaimCount} validated claims
+          · {run.citationCount} citations · {run.placeholderCount} placeholders
           {run.safeFailureCode === null ? "" : ` · ${run.safeFailureCode}`}
         </p>
       ))}
@@ -379,13 +381,14 @@ export function DraftWorkspace({
           <ol>
             {versionHistory.map((item) => (
               <li key={item.id}>
-                Version {item.versionNumber} · {item.reviewState}
+                Version {item.versionNumber} · {humanizeEnum(item.reviewState)}
                 {item.invalidatedAt === null ? "" : " · invalidated"}
               </li>
             ))}
           </ol>
           <h3 id="draft-version-heading">
-            Version {version.versionNumber} · {version.reviewState}
+            Version {version.versionNumber} ·{" "}
+            {humanizeEnum(version.reviewState)}
           </h3>
           {version.invalidatedAt !== null && (
             <p className="warning">
@@ -400,7 +403,8 @@ export function DraftWorkspace({
               {section.claims.map((claim) => (
                 <div key={claim.id}>
                   <p>
-                    {claim.claimClass} · {claim.supportState}: {claim.claimText}
+                    {humanizeEnum(claim.claimClass)} ·{" "}
+                    {humanizeEnum(claim.supportState)}: {claim.claimText}
                   </p>
                   {claim.citations.map((citation) => (
                     <details key={`${claim.id}-${citation.handle}`}>
@@ -423,7 +427,8 @@ export function DraftWorkspace({
                 <div className="warning" key={placeholder.id}>
                   <strong>{placeholder.markerText}</strong>
                   <p>
-                    {placeholder.explanation} · {placeholder.resolutionState}
+                    {placeholder.explanation} ·{" "}
+                    {humanizeEnum(placeholder.resolutionState)}
                     {placeholder.approvalBlocking ? " · blocks approval" : ""}
                   </p>
                 </div>

@@ -1,5 +1,19 @@
 # Roadmap
 
+## Phase 10.5 — Cross-platform reliability, product UI and pilot readiness
+
+Status: implemented on `feat/phase-10-5-reliability-product-ui` pending review.
+
+- Cross-platform workspace scripts and a Nest-compatible API watch process.
+- Explicit development, test and production-build environments.
+- Repository-owned accessible UI primitives and responsive application shell.
+- Product landing/authentication, dashboard, onboarding, evidence and tender UI.
+- URL-addressable tender stages through Phase 10, mounting only the active stage.
+- Typed safe browser API errors and behavioural frontend tests.
+
+This phase adds no backend business feature, database table or migration. Phase 11
+readiness and Phase 12 export remain future work.
+
 The roadmap sequences outcomes without presenting future work as available. Each
 milestone needs its own approved scope and acceptance criteria.
 

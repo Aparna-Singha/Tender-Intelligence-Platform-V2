@@ -1,17 +1,14 @@
 # Tender Intelligence Platform
 
-Phase 7 adds controlled requirement-to-company-evidence comparison. After a
-completed cited EARLY risk analysis and an authorised human `CONTINUE`, the API
-captures an immutable company-evidence snapshot and queues deterministic
-requirement assessments. The tender workspace exposes an Evidence Matrix with
-source citations, conservative proposals, uncertainty, conflicts, review state,
-history, and invalidation. See [the evidence policy](docs/EVIDENCE_POLICY.md) and
-[comparison policy](docs/COMPARISON_POLICY.md).
+Phase 10.5 turns the implemented Phase 0–10 foundation into a responsive,
+accessible product interface and makes local development reliable on Windows and
+Linux. It adds no new tender business behaviour. Existing source provenance,
+tenant isolation, human pursuit decisions, evidence review, cited RAG and
+fact-constrained drafting remain authoritative.
 
-This is not a global eligibility decision or a guarantee of bid success.
-Company-document OCR/extraction, missing-document checklists, RAG/chatbot,
-drafting, readiness audit, export, scraping, and submission are not implemented
-in this phase.
+This is not a global eligibility decision or a guarantee of bid success. Final
+readiness, export, portal scraping, automated submission and autonomous approval
+remain outside the implemented scope.
 
 Tender Intelligence Platform is an independent AI-assisted tender intelligence and
 bid-readiness platform for Indian MSMEs, tender teams, and tender consultants. It is
@@ -26,14 +23,9 @@ evidence, prepare reviewable drafts, and complete a human-controlled readiness a
 
 ## Repository status
 
-Phase 1B adds the PostgreSQL identity schema, database-backed browser sessions,
-authentication, organisations, invitations, deny-by-default authorisation, and a
-minimal protected web shell. Tender and onboarding business features remain
-intentionally unimplemented.
-
-Phase 2 adds an eight-step progressive onboarding wizard and structured,
-organisation-scoped company profiles. It does not upload or verify documents and
-does not perform tender matching.
+The repository implements Phases 0–10 plus the Phase 10.5 productisation and
+cross-platform reliability work. See the roadmap for the exact boundary of each
+phase.
 
 ## Product principles
 
@@ -57,6 +49,8 @@ does not perform tender matching.
 - [Roadmap](docs/ROADMAP.md)
 - [Acceptance criteria](docs/ACCEPTANCE_CRITERIA.md)
 - [Architecture decision records](docs/adr/README.md)
+- [Design system](docs/DESIGN_SYSTEM.md)
+- [Pilot user flow](docs/PILOT_USER_FLOW.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 
@@ -164,6 +158,11 @@ The services are then available at:
 | MinIO API        | `http://localhost:9000`         |
 | MinIO console    | `http://localhost:9001`         |
 
+The same `pnpm` commands are supported in PowerShell and POSIX shells. The API
+uses the Nest compiler in watch mode so decorator metadata is emitted correctly;
+the worker uses its TypeScript watch runner. No generated JavaScript needs manual
+editing or direct execution.
+
 Run all health checks with:
 
 ```sh
@@ -185,6 +184,10 @@ manager and must not be committed.
 
 Next.js only receives `NEXT_PUBLIC_API_URL`. Server credentials must never use a
 `NEXT_PUBLIC_` prefix.
+
+Repository scripts set `NODE_ENV=development` for development, `test` for tests,
+and `production` for production builds. A local `.env` may contain development
+defaults without changing the production build environment.
 
 For local HTTP only, set `SESSION_COOKIE_SECURE=false`; production must use
 `SESSION_COOKIE_SECURE=true` behind TLS. Set `WEB_ORIGIN` to the exact browser

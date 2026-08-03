@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { apiRequest } from "../lib/api";
+import { humanizeEnum } from "@tender/ui";
 
 interface ExtractionRun {
   current_stage: string;
@@ -211,7 +212,7 @@ export function ExtractionWorkspace({
               {runs.map((run, index) => (
                 <option key={run.id} value={run.id}>
                   {index === 0 ? "Latest — " : "Historical — "}
-                  {run.status}
+                  {humanizeEnum(run.status)}
                 </option>
               ))}
             </select>
@@ -220,7 +221,8 @@ export function ExtractionWorkspace({
         {activeRun !== undefined && (
           <article>
             <h3>
-              {activeRun.status} · {activeRun.progress_percentage}%
+              {humanizeEnum(activeRun.status)} · {activeRun.progress_percentage}
+              %
             </h3>
             <p>{activeRun.public_message}</p>
             <p>Parser policy: {activeRun.parser_policy_version}</p>
@@ -239,7 +241,7 @@ export function ExtractionWorkspace({
         )}
         {issues.map((issue) => (
           <p className="warning" key={issue.id}>
-            {issue.severity}: {issue.safeMessage}
+            {humanizeEnum(issue.severity)}: {issue.safeMessage}
             {issue.requiresHumanReview ? " — human review required" : ""}
           </p>
         ))}
@@ -256,8 +258,9 @@ export function ExtractionWorkspace({
             <h3>{field.fieldType.replaceAll("_", " ")}</h3>
             <p>{field.normalizedTextValue}</p>
             <p>
-              {field.confidence} confidence · {field.findingState} ·{" "}
-              {field.reviewState}
+              {humanizeEnum(field.confidence)} confidence ·{" "}
+              {humanizeEnum(field.findingState)} ·{" "}
+              {humanizeEnum(field.reviewState)}
             </p>
             {field.citations.map((citation) => (
               <CitationView
@@ -325,8 +328,10 @@ export function ExtractionWorkspace({
             <h3>{requirement.title}</h3>
             <p>{requirement.normalizedStatement}</p>
             <p>
-              {requirement.category} · {requirement.obligation} ·{" "}
-              {requirement.confidence} confidence · {requirement.findingState}
+              {humanizeEnum(requirement.category)} ·{" "}
+              {humanizeEnum(requirement.obligation)} ·{" "}
+              {humanizeEnum(requirement.confidence)} confidence ·{" "}
+              {humanizeEnum(requirement.findingState)}
             </p>
             {requirement.citations.map((citation) => (
               <CitationView

@@ -1,5 +1,19 @@
 # Acceptance Criteria
 
+## Phase 10.5 productisation
+
+- Windows and Linux use the same install, generate, quality, build and development
+  commands without Bash-only package scripts.
+- The authenticated shell contains only Overview, Tenders, Company evidence and
+  Organisation profile.
+- Dashboard values come from existing organisation-scoped APIs or deterministic
+  calculations; no demonstration metrics are present in production code.
+- Tender stages are URL-addressable and only the selected Phase 5–10 module mounts.
+- Authentication and mutations block duplicate submission and surface safe API
+  errors with request IDs when available.
+- Onboarding review uses structured labelled sections rather than raw JSON.
+- Phase 11 readiness, Phase 12 export, scraping and submission remain absent.
+
 ## Milestone 0: Documentation contract
 
 This documentation phase is accepted when:

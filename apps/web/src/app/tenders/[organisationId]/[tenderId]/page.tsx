@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import { TenderWorkspace } from "../../../../components/tender-workspace";
+import { AppShell } from "../../../../components/app-shell";
 
 export default async function TenderWorkspacePage({
   params,
@@ -8,6 +9,8 @@ export default async function TenderWorkspacePage({
 }): Promise<JSX.Element> {
   const { organisationId, tenderId } = await params;
   return (
-    <TenderWorkspace organisationId={organisationId} tenderId={tenderId} />
+    <AppShell>
+      <TenderWorkspace organisationId={organisationId} tenderId={tenderId} />
+    </AppShell>
   );
 }

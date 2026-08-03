@@ -2,6 +2,13 @@
 
 ## Status and constraints
 
+Phase 10.5 retains the modular-monolith boundary while adding a repository-owned
+web design system, responsive authenticated shell and URL-addressable tender
+stages. The web composes existing organisation-scoped endpoints; it adds no
+frontend-owned tenant authority or aggregation API. Nest CLI performs API watch
+compilation so decorator metadata is preserved, and production builds force
+`NODE_ENV=production` before local environment loading.
+
 This document records the approved target direction through the Phase 3 private
 reusable company-document vault.
 

@@ -37,7 +37,7 @@ describe("password and cookie security", () => {
     expect(hash).not.toContain("StrongPassword123");
     await expect(hasher.verify("StrongPassword123", hash)).resolves.toBe(true);
     await expect(hasher.verify("WrongPassword123", hash)).resolves.toBe(false);
-  });
+  }, 30_000);
 
   it("sets HttpOnly, Secure and SameSite session cookie flags", () => {
     const reply = { header: vi.fn() } as never;

@@ -1,7 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, type FormEvent, type JSX } from "react";
+import {
+  Alert,
+  Badge,
+  Button,
+  Card,
+  EmptyState,
+  PageHeader,
+  Progress,
+  Tabs,
+  humanizeEnum,
+} from "@tender/ui";
 import { apiRequest } from "../lib/api";
 import { ExtractionWorkspace } from "./extraction-workspace";
 import { RiskWorkspace } from "./risk-workspace";
@@ -55,6 +67,18 @@ interface UploadSession {
   upload_url: string;
 }
 
+const workspaceTabs = [
+  "overview",
+  "sources",
+  "extraction",
+  "risks",
+  "evidence",
+  "checklist",
+  "ask",
+  "draft",
+] as const;
+type WorkspaceTab = (typeof workspaceTabs)[number];
+
 async function sha256(file: File): Promise<string> {
   const digest = await crypto.subtle.digest(
     "SHA-256",
@@ -75,6 +99,22 @@ export function TenderWorkspace({
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [message, setMessage] = useState("Loading workspace…");
   const [selectedVersionId, setSelectedVersionId] = useState("");
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const router = useRouter();
+  const requestedTab = searchParams.get("stage");
+  const activeTab: WorkspaceTab = workspaceTabs.includes(
+    requestedTab as WorkspaceTab,
+  )
+    ? (requestedTab as WorkspaceTab)
+    : "overview";
+
+  function selectTab(tab: WorkspaceTab): void {
+    const next = new URLSearchParams(searchParams.toString());
+    if (tab === "overview") next.delete("stage");
+    else next.set("stage", tab);
+    router.push(`${pathname}${next.size === 0 ? "" : `?${next.toString()}`}`);
+  }
 
   async function load(): Promise<void> {
     try {
@@ -192,168 +232,293 @@ export function TenderWorkspace({
     window.location.assign(result.download_url);
   }
 
+  const currentVersion = workspace?.versions[0];
+  const sourceCount = currentVersion?.documents.length ?? 0;
+  const latestJob = workspace?.processingJobs[0];
   return (
-    <main>
-      <div className="panel">
-        <Link href={`/tenders/${organisationId}`}>All tender workspaces</Link>
-        <h1>{workspace?.title ?? "Tender workspace"}</h1>
-        {workspace?.demonstration_label !== undefined && (
-          <p className="warning">{workspace.demonstration_label}</p>
+    <div className="page tender-workspace">
+      <PageHeader
+        description={workspace?.buyer ?? "Loading tender context…"}
+        eyebrow={<Link href={`/tenders/${organisationId}`}>Tenders</Link>}
+        title={workspace?.title ?? "Tender workspace"}
+      />
+      <div className="tender-header-meta">
+        {workspace !== null && (
+          <Badge tone="info">{humanizeEnum(workspace.lifecycleStatus)}</Badge>
         )}
-        <p>{workspace?.buyer}</p>
-        <section>
-          <h2>Source and processing</h2>
-          <p>
-            Status: {workspace?.lifecycleStatus ?? "Loading"} ·{" "}
-            {workspace?.workspace.processingProgress ?? 0}%
-          </p>
-          {workspace?.sources.map((source) => (
-            <article key={`${source.adapterType}:${source.sourceName}`}>
-              <h3>{source.sourceName}</h3>
-              <p>{source.provenance}</p>
-              {source.sourceUrl !== null && (
-                <a href={source.sourceUrl} rel="noreferrer" target="_blank">
-                  Official source
-                </a>
-              )}
-            </article>
-          ))}
-          <form onSubmit={(event) => void upload(event)}>
-            <label>
-              Document role
-              <select name="role">
-                <option value="PRIMARY">Primary tender</option>
-                <option value="ANNEXURE">Annexure</option>
-                <option value="BOQ">BOQ</option>
-                <option value="TECHNICAL_SPECIFICATION">
-                  Technical specification
-                </option>
-                <option value="FORM">Form</option>
-                <option value="DECLARATION">Declaration</option>
-                <option value="CORRIGENDUM">Corrigendum</option>
-                <option value="AMENDMENT">Amendment</option>
-                <option value="CLARIFICATION">Buyer clarification</option>
-                <option value="SUPPORTING">Supporting document</option>
-              </select>
-            </label>
-            <label>
-              Corrigendum identifier (required for corrigendum role)
-              <input name="corrigendum_identifier" />
-            </label>
-            <label>
-              Corrigendum description (required for corrigendum role)
-              <input name="corrigendum_description" />
-            </label>
-            <label>
-              PDF, ZIP, XLSX, DOCX, or CSV (maximum 25 MiB)
-              <input
-                accept=".pdf,.zip,.xlsx,.docx,.csv"
-                multiple
-                name="file"
-                required
-                type="file"
+        {currentVersion !== undefined && (
+          <Badge>Version {currentVersion.versionNumber}</Badge>
+        )}
+        {latestJob !== undefined && (
+          <Badge
+            tone={
+              latestJob.state === "FAILED"
+                ? "danger"
+                : latestJob.state === "COMPLETE"
+                  ? "success"
+                  : "warning"
+            }
+          >
+            {humanizeEnum(latestJob.state)}
+          </Badge>
+        )}
+        {workspace?.demonstration_label !== undefined && (
+          <Badge tone="warning">Demonstration tender</Badge>
+        )}
+      </div>
+      {workspace?.demonstration_label !== undefined && (
+        <Alert tone="warning">
+          <p>{workspace.demonstration_label}</p>
+        </Alert>
+      )}
+      <Tabs label="Tender workspace stages">
+        {workspaceTabs.map((tab) => (
+          <button
+            aria-selected={activeTab === tab}
+            key={tab}
+            onClick={() => selectTab(tab)}
+            type="button"
+          >
+            {tab === "ask" ? "Ask tender" : humanizeEnum(tab.toUpperCase())}
+          </button>
+        ))}
+      </Tabs>
+      <div className="panel">
+        {activeTab === "overview" && (
+          <section>
+            <div className="section-header">
+              <div>
+                <h2>Workspace overview</h2>
+                <p>
+                  Current source-processing state and the next supported review
+                  step.
+                </p>
+              </div>
+            </div>
+            {workspace === null ? (
+              <p aria-live="polite">{message}</p>
+            ) : (
+              <div className="summary-grid">
+                <Card>
+                  <span className="stat-card__title">Current source state</span>
+                  <strong className="stat-card__value">
+                    {humanizeEnum(workspace.workspace.sourceSectionStatus)}
+                  </strong>
+                  {latestJob !== undefined && (
+                    <Progress
+                      label={latestJob.publicMessage}
+                      value={latestJob.progressPercentage}
+                    />
+                  )}
+                </Card>
+                <Card>
+                  <span className="stat-card__title">Source documents</span>
+                  <strong className="stat-card__value">{sourceCount}</strong>
+                  <span className="stat-card__description">
+                    Across {workspace.versions.length} immutable{" "}
+                    {workspace.versions.length === 1 ? "version" : "versions"}
+                  </span>
+                </Card>
+                <Card>
+                  <span className="stat-card__title">
+                    Suggested next action
+                  </span>
+                  <strong className="stat-card__value">
+                    {sourceCount === 0
+                      ? "Upload a tender source"
+                      : workspace.workspace.sourceSectionStatus === "READY"
+                        ? "Review extraction"
+                        : "Review source processing"}
+                  </strong>
+                  <Button
+                    onClick={() =>
+                      selectTab(
+                        sourceCount === 0
+                          ? "sources"
+                          : workspace.workspace.sourceSectionStatus === "READY"
+                            ? "extraction"
+                            : "sources",
+                      )
+                    }
+                    variant="quiet"
+                  >
+                    Open stage
+                  </Button>
+                </Card>
+              </div>
+            )}
+            {sourceCount === 0 && workspace !== null && (
+              <EmptyState
+                action={
+                  <Button onClick={() => selectTab("sources")}>
+                    Upload tender source
+                  </Button>
+                }
+                description="Add the primary tender document and any annexures before extraction can begin."
+                title="No source documents yet"
               />
-            </label>
-            <button type="submit">Upload source securely</button>
-          </form>
-          <p aria-live="polite">{message}</p>
-          <label>
-            Source version
-            <select
-              value={selectedVersionId}
-              onChange={(event) => setSelectedVersionId(event.target.value)}
-            >
-              {workspace?.versions.map((version, index) => (
-                <option key={version.id} value={version.id}>
-                  Version {version.versionNumber}
-                  {index === 0 ? " — current" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
-          {workspace?.versions
-            .filter((version) => version.id === selectedVersionId)
-            .map((version) => (
-              <article key={version.id}>
-                <h3>Version {version.versionNumber}</h3>
-                <p>{version.reason}</p>
-                {version.documents.map((document) => (
-                  <p key={document.id}>
-                    {document.displayFilename} · {document.role} ·{" "}
-                    {document.status} · SHA-256 {document.sha256.slice(0, 12)}…
-                    <button
-                      disabled={document.status !== "READY"}
-                      onClick={() => void download(document.id)}
-                      type="button"
-                    >
-                      Download
-                    </button>
-                  </p>
-                ))}
+            )}
+          </section>
+        )}
+        {activeTab === "sources" && (
+          <section>
+            <h2>Source and processing</h2>
+            <p>
+              Status:{" "}
+              {workspace === null
+                ? "Loading"
+                : humanizeEnum(workspace.lifecycleStatus)}{" "}
+              · {workspace?.workspace.processingProgress ?? 0}%
+            </p>
+            {workspace?.sources.map((source) => (
+              <article key={`${source.adapterType}:${source.sourceName}`}>
+                <h3>{source.sourceName}</h3>
+                <p>{source.provenance}</p>
+                {source.sourceUrl !== null && (
+                  <a href={source.sourceUrl} rel="noreferrer" target="_blank">
+                    Official source
+                  </a>
+                )}
               </article>
             ))}
-          <h3>Processing timeline</h3>
-          {workspace?.processingJobs.length === 0 && (
-            <p>No source-processing jobs have started.</p>
-          )}
-          {workspace?.processingJobs.map((job) => (
-            <p key={job.id}>
-              {job.state} · {job.progressPercentage}% · {job.publicMessage}
-            </p>
-          ))}
-          <h3>Corrigendum history</h3>
-          {workspace?.corrigenda.length === 0 && (
-            <p>No corrigenda have been recorded.</p>
-          )}
-          {workspace?.corrigenda.map((corrigendum) => (
-            <p key={corrigendum.id}>
-              {corrigendum.identifier} · {corrigendum.description}
-            </p>
-          ))}
-        </section>
-        {workspace?.versions[0]?.id !== undefined && (
-          <ExtractionWorkspace
-            organisationId={organisationId}
-            tenderId={tenderId}
-            versionId={workspace.versions[0].id}
-          />
+            <form onSubmit={(event) => void upload(event)}>
+              <label>
+                Document role
+                <select name="role">
+                  <option value="PRIMARY">Primary tender</option>
+                  <option value="ANNEXURE">Annexure</option>
+                  <option value="BOQ">BOQ</option>
+                  <option value="TECHNICAL_SPECIFICATION">
+                    Technical specification
+                  </option>
+                  <option value="FORM">Form</option>
+                  <option value="DECLARATION">Declaration</option>
+                  <option value="CORRIGENDUM">Corrigendum</option>
+                  <option value="AMENDMENT">Amendment</option>
+                  <option value="CLARIFICATION">Buyer clarification</option>
+                  <option value="SUPPORTING">Supporting document</option>
+                </select>
+              </label>
+              <label>
+                Corrigendum identifier (required for corrigendum role)
+                <input name="corrigendum_identifier" />
+              </label>
+              <label>
+                Corrigendum description (required for corrigendum role)
+                <input name="corrigendum_description" />
+              </label>
+              <label>
+                PDF, ZIP, XLSX, DOCX, or CSV (maximum 25 MiB)
+                <input
+                  accept=".pdf,.zip,.xlsx,.docx,.csv"
+                  multiple
+                  name="file"
+                  required
+                  type="file"
+                />
+              </label>
+              <button type="submit">Upload source securely</button>
+            </form>
+            <p aria-live="polite">{message}</p>
+            <label>
+              Source version
+              <select
+                value={selectedVersionId}
+                onChange={(event) => setSelectedVersionId(event.target.value)}
+              >
+                {workspace?.versions.map((version, index) => (
+                  <option key={version.id} value={version.id}>
+                    Version {version.versionNumber}
+                    {index === 0 ? " — current" : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {workspace?.versions
+              .filter((version) => version.id === selectedVersionId)
+              .map((version) => (
+                <article key={version.id}>
+                  <h3>Version {version.versionNumber}</h3>
+                  <p>{version.reason}</p>
+                  {version.documents.map((document) => (
+                    <p key={document.id}>
+                      {document.displayFilename} · {humanizeEnum(document.role)}{" "}
+                      · {humanizeEnum(document.status)} · SHA-256{" "}
+                      {document.sha256.slice(0, 12)}…
+                      <button
+                        disabled={document.status !== "READY"}
+                        onClick={() => void download(document.id)}
+                        type="button"
+                      >
+                        Download
+                      </button>
+                    </p>
+                  ))}
+                </article>
+              ))}
+            <h3>Processing timeline</h3>
+            {workspace?.processingJobs.length === 0 && (
+              <p>No source-processing jobs have started.</p>
+            )}
+            {workspace?.processingJobs.map((job) => (
+              <p key={job.id}>
+                {humanizeEnum(job.state)} · {job.progressPercentage}% ·{" "}
+                {job.publicMessage}
+              </p>
+            ))}
+            <h3>Corrigendum history</h3>
+            {workspace?.corrigenda.length === 0 && (
+              <p>No corrigenda have been recorded.</p>
+            )}
+            {workspace?.corrigenda.map((corrigendum) => (
+              <p key={corrigendum.id}>
+                {corrigendum.identifier} · {corrigendum.description}
+              </p>
+            ))}
+          </section>
         )}
-        {workspace?.versions[0]?.id !== undefined && (
+        {activeTab === "extraction" &&
+          workspace?.versions[0]?.id !== undefined && (
+            <ExtractionWorkspace
+              organisationId={organisationId}
+              tenderId={tenderId}
+              versionId={workspace.versions[0].id}
+            />
+          )}
+        {activeTab === "risks" && workspace?.versions[0]?.id !== undefined && (
           <RiskWorkspace
             organisationId={organisationId}
             tenderId={tenderId}
             versionId={workspace.versions[0].id}
           />
         )}
-        {workspace?.versions[0]?.id !== undefined && (
-          <EvidenceMatrix
-            organisationId={organisationId}
-            tenderId={tenderId}
-            versionId={workspace.versions[0].id}
-          />
-        )}
-        {workspace?.versions[0]?.id !== undefined && (
-          <ActionChecklist
-            organisationId={organisationId}
-            tenderId={tenderId}
-            versionId={workspace.versions[0].id}
-          />
-        )}
-        {workspace?.versions[0]?.id !== undefined && (
+        {activeTab === "evidence" &&
+          workspace?.versions[0]?.id !== undefined && (
+            <EvidenceMatrix
+              organisationId={organisationId}
+              tenderId={tenderId}
+              versionId={workspace.versions[0].id}
+            />
+          )}
+        {activeTab === "checklist" &&
+          workspace?.versions[0]?.id !== undefined && (
+            <ActionChecklist
+              organisationId={organisationId}
+              tenderId={tenderId}
+              versionId={workspace.versions[0].id}
+            />
+          )}
+        {activeTab === "ask" && workspace?.versions[0]?.id !== undefined && (
           <RagChatbot
             organisationId={organisationId}
             tenderId={tenderId}
             versionId={workspace.versions[0].id}
           />
         )}
-        <DraftWorkspace organisationId={organisationId} tenderId={tenderId} />
-        {["Readiness audit", "Export"].map((section) => (
-          <section key={section}>
-            <h2>{section}</h2>
-            <p>Not implemented in this phase.</p>
-          </section>
-        ))}
+        {activeTab === "draft" && (
+          <DraftWorkspace organisationId={organisationId} tenderId={tenderId} />
+        )}
       </div>
-    </main>
+    </div>
   );
 }
