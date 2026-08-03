@@ -29,7 +29,12 @@ interface Membership {
   role: string;
 }
 interface DashboardGuidance {
-  completeness: number;
+  completeness: {
+    completed: number;
+    missingFields: readonly string[];
+    percentage: number;
+    total: number;
+  };
   display_mode: "BEGINNER" | "PROFESSIONAL";
   progress: {
     completed_steps: readonly number[];
@@ -211,7 +216,7 @@ export function Dashboard(): JSX.Element {
             <StatCard
               description={`${guidance?.progress.completed_steps.length ?? 0} of 8 onboarding steps saved`}
               title="Organisation profile"
-              value={`${guidance?.completeness ?? 0}% complete`}
+              value={`${guidance?.completeness.percentage ?? 0}% complete`}
             />
             <StatCard
               description="Ready means processed, not verified or eligible"

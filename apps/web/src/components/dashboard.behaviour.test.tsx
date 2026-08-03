@@ -39,7 +39,12 @@ describe("dashboard organisation flow", () => {
         );
       if (path.endsWith("/dashboard-recommendations"))
         return Promise.resolve({
-          completeness: 0,
+          completeness: {
+            completed: 0,
+            missingFields: [],
+            percentage: 0,
+            total: 8,
+          },
           display_mode: "BEGINNER",
           progress: {
             completed_steps: [],
