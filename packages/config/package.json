@@ -11,7 +11,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "clean": "rm -rf dist",
+    "clean": "rimraf dist",
     "lint": "eslint src test",
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -20,6 +20,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "24.10.13"
+    "@types/node": "24.10.13",
+    "rimraf": "6.1.3"
   }
 }

@@ -11,12 +11,15 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "clean": "rm -rf dist",
+    "clean": "rimraf dist",
     "lint": "eslint src",
     "test": "vitest run --exclude 'dist/**'",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "rimraf": "6.1.3"
   }
 }

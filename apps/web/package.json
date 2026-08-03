@@ -4,23 +4,29 @@
   "private": true,
   "scripts": {
     "build": "next build",
-    "clean": "rm -rf .next",
-    "dev": "next dev --hostname 0.0.0.0 --port ${WEB_PORT:-3000}",
+    "clean": "rimraf .next",
+    "dev": "node scripts/next-command.mjs dev",
     "lint": "eslint src next.config.ts",
-    "start": "next start --hostname 0.0.0.0 --port ${WEB_PORT:-3000}",
+    "start": "node scripts/next-command.mjs start",
     "test": "vitest run --passWithNoTests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tender/config": "workspace:*",
     "@tender/ui": "workspace:*",
+    "lucide-react": "0.468.0",
     "next": "16.2.12",
     "react": "19.2.8",
     "react-dom": "19.2.8"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "6.9.1",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
     "@types/node": "24.10.13",
     "@types/react": "19.2.17",
-    "@types/react-dom": "19.2.3"
+    "@types/react-dom": "19.2.3",
+    "jsdom": "27.0.1",
+    "rimraf": "6.1.3"
   }
 }

@@ -15,9 +15,13 @@ concurrency:
 
 jobs:
   quality:
-    name: Install, validate, test, and build
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    name: Install, validate, test, and build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       NEXT_PUBLIC_API_URL: http://localhost:4000
@@ -38,6 +42,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Generate Prisma Client
+        run: pnpm db:generate
+
+      - name: Verify cross-platform clean scripts
+        run: pnpm clean
+
+      - name: Regenerate Prisma Client after clean
         run: pnpm db:generate
 
       - name: Check formatting
