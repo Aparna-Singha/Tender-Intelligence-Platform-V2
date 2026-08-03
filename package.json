@@ -10,7 +10,7 @@
   },
   "scripts": {
     "build": "cross-env NODE_ENV=production dotenv -e .env -- turbo run build",
-    "clean": "turbo run clean && rimraf .turbo coverage",
+    "clean": "turbo run clean --concurrency=1 --output-logs=full && rimraf .turbo coverage",
     "db:generate": "dotenv -e .env -- pnpm --filter @tender/database db:generate",
     "db:migrate": "dotenv -e .env -- pnpm --filter @tender/database db:migrate",
     "db:migrate:deploy": "dotenv -e .env -- pnpm --filter @tender/database db:migrate:deploy",

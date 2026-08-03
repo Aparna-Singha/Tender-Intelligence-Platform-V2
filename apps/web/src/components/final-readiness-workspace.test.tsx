@@ -21,8 +21,7 @@ vi.mock("../lib/api", () => ({
   apiRequest,
 }));
 
-const token =
-  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const token = "test-test-test-test";
 const run = {
   completed_at: "2026-08-04T10:04:00.000Z",
   created_at: "2026-08-04T10:00:00.000Z",
@@ -220,7 +219,7 @@ function mutationBody(pathSuffix: string): Record<string, unknown> {
 describe("final readiness workspace", () => {
   beforeEach(() => {
     apiRequest.mockReset();
-    vi.stubGlobal("crypto", { randomUUID: () => "idempotency-key-123" });
+    vi.stubGlobal("crypto", { randomUUID: () => "test-test-test-test" });
   });
 
   it("shows preflight, lifecycle timestamps, treatments, provenance and separate final risk", async () => {
@@ -240,13 +239,38 @@ describe("final readiness workspace", () => {
       screen.getByText(/Treatment: Human disposition required/),
     ).toBeInTheDocument();
     expect(screen.getAllByText("Extraction citation")).toHaveLength(2);
-    expect(screen.getAllByText(/4\/8\/2026/).length).toBeGreaterThan(0);
+    for (const label of ["Created", "Started", "Completed", "Updated"]) {
+      const term = screen.getByText(label, { selector: "dt" });
+      const value = term.parentElement?.querySelector("dd");
+      expect(value).not.toBeNull();
+      expect(value).not.toBeEmptyDOMElement();
+      expect(value).not.toHaveTextContent("Not recorded");
+    }
     expect(screen.queryByText(/readiness score/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/approved to submit/i)).not.toBeInTheDocument();
     await userEvent.click(
       screen.getAllByRole("button", { name: "Open extraction" })[0]!,
     );
     expect(navigate).toHaveBeenCalledWith("extraction");
+  });
+
+  it("checks timestamp semantics without assuming day/month locale order", async () => {
+    const formatter = vi
+      .spyOn(Date.prototype, "toLocaleString")
+      .mockReturnValue("locale-specific timestamp");
+    try {
+      installApi();
+      renderWorkspace();
+      await screen.findByText("Created", { selector: "dt" });
+      for (const label of ["Created", "Started", "Completed", "Updated"]) {
+        const term = screen.getByText(label, { selector: "dt" });
+        expect(term.parentElement?.querySelector("dd")).toHaveTextContent(
+          "locale-specific timestamp",
+        );
+      }
+    } finally {
+      formatter.mockRestore();
+    }
   });
 
   it("starts through the transactional API with only an idempotency key", async () => {
@@ -261,7 +285,7 @@ describe("final readiness workspace", () => {
       expect(apiRequest).toHaveBeenCalledWith(
         "/organisations/org-1/tenders/tender-1/final-readiness",
         {
-          body: JSON.stringify({ idempotency_key: "idempotency-key-123" }),
+          body: JSON.stringify({ idempotency_key: "test-test-test-test" }),
           method: "POST",
         },
       ),
