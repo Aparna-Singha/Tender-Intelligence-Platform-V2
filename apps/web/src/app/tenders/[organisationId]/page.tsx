@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import { TenderCentre } from "../../../components/tender-centre";
+import { AppShell } from "../../../components/app-shell";
 
 export default async function TendersPage({
   params,
@@ -7,5 +8,9 @@ export default async function TendersPage({
   readonly params: Promise<{ organisationId: string }>;
 }): Promise<JSX.Element> {
   const { organisationId } = await params;
-  return <TenderCentre organisationId={organisationId} />;
+  return (
+    <AppShell>
+      <TenderCentre organisationId={organisationId} />
+    </AppShell>
+  );
 }

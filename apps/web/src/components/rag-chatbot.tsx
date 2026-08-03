@@ -8,6 +8,7 @@ import {
   type JSX,
 } from "react";
 import { apiRequest } from "../lib/api";
+import { humanizeEnum } from "@tender/ui";
 
 type SourceMode =
   | "FULL_AUTHORISED_TENDER_CONTEXT"
@@ -137,7 +138,8 @@ export function RagChatbot({
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
     event.preventDefault();
-    const values = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const values = new FormData(form);
     const title = values.get("title");
     if (typeof title !== "string") return;
     setStatus("Creating conversation…");
@@ -149,7 +151,7 @@ export function RagChatbot({
           method: "POST",
         },
       );
-      event.currentTarget.reset();
+      form.reset();
       setSelectedConversation(conversation.id);
       await load();
     } catch {
@@ -160,7 +162,8 @@ export function RagChatbot({
   async function ask(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (selectedConversation === "") return;
-    const values = new FormData(event.currentTarget);
+    const form = event.currentTarget;
+    const values = new FormData(form);
     const question = values.get("question");
     if (typeof question !== "string") return;
     setStatus("Retrieving fresh authorised evidence…");
@@ -175,7 +178,7 @@ export function RagChatbot({
           method: "POST",
         },
       );
-      event.currentTarget.reset();
+      form.reset();
       await loadConversation();
     } catch {
       setStatus(
@@ -217,7 +220,8 @@ export function RagChatbot({
       </button>
       {indexes.map((index) => (
         <p key={index.id}>
-          {index.sourceMode} · {index.status} · {index.progressPercentage}%
+          {humanizeEnum(index.sourceMode)} · {humanizeEnum(index.status)} ·{" "}
+          {index.progressPercentage}%
         </p>
       ))}
       <form onSubmit={(event) => void createConversation(event)}>

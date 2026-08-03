@@ -1,5 +1,6 @@
 import type { JSX } from "react";
 import { DocumentCentre } from "../../../components/document-centre";
+import { AppShell } from "../../../components/app-shell";
 
 export default async function DocumentsPage({
   params,
@@ -7,5 +8,9 @@ export default async function DocumentsPage({
   readonly params: Promise<{ organisationId: string }>;
 }): Promise<JSX.Element> {
   const { organisationId } = await params;
-  return <DocumentCentre organisationId={organisationId} />;
+  return (
+    <AppShell>
+      <DocumentCentre organisationId={organisationId} />
+    </AppShell>
+  );
 }

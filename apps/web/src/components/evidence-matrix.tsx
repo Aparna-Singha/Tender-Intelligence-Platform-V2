@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { apiRequest } from "../lib/api";
+import { humanizeEnum } from "@tender/ui";
 
 interface AssessmentRun {
   comparisonPolicyVersion: string;
@@ -368,7 +369,9 @@ export function EvidenceMatrix({
           <h4>{fact.factType.replaceAll("_", " ")}</h4>
           <p>
             Version {fact.currentVersion?.versionNumber ?? "—"} ·{" "}
-            {fact.currentVersion?.reviewState ?? "NO CURRENT VERSION"}
+            {humanizeEnum(
+              fact.currentVersion?.reviewState ?? "NO_CURRENT_VERSION",
+            )}
           </p>
           <p>
             Citations: {fact.currentVersion?.citations.length ?? 0}
@@ -411,7 +414,8 @@ export function EvidenceMatrix({
           >
             {runs.map((run, index) => (
               <option key={run.id} value={run.id}>
-                {index === 0 ? "Latest" : "Historical"} — {run.status}
+                {index === 0 ? "Latest" : "Historical"} —{" "}
+                {humanizeEnum(run.status)}
               </option>
             ))}
           </select>
@@ -420,7 +424,7 @@ export function EvidenceMatrix({
       {active !== undefined && (
         <article>
           <h3>
-            {active.status} · {active.progressPercentage}%
+            {humanizeEnum(active.status)} · {active.progressPercentage}%
           </h3>
           <p>{active.publicMessage}</p>
           <p>Policy: {active.comparisonPolicyVersion}</p>
@@ -460,7 +464,7 @@ export function EvidenceMatrix({
       </label>
       {matrix?.counts.map((count) => (
         <span key={count.currentState}>
-          {count.currentState.replaceAll("_", " ")}: {count._count}{" "}
+          {humanizeEnum(count.currentState)}: {count._count}{" "}
         </span>
       ))}
       {active?.status === "COMPLETE" && matrix?.total === 0 && (
@@ -474,9 +478,9 @@ export function EvidenceMatrix({
             {item.requirementObligation} · {item.requirementCategory}
           </p>
           <p>
-            Proposed: {item.proposedState.replaceAll("_", " ")} · Current:{" "}
-            {item.currentState.replaceAll("_", " ")} · Review:{" "}
-            {item.reviewState.replaceAll("_", " ")}
+            Proposed: {humanizeEnum(item.proposedState)} · Current:{" "}
+            {humanizeEnum(item.currentState)} · Review:{" "}
+            {humanizeEnum(item.reviewState)}
           </p>
           <p>Confidence: {item.proposedConfidence}</p>
           <p>{item.proposedRationale}</p>

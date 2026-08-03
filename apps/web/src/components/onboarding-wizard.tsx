@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { useRouter } from "next/navigation";
 import { apiRequest } from "../lib/api";
+import { Badge, Button, PageHeader, Progress, humanizeEnum } from "@tender/ui";
 
 const stepNames = [
   "User role and goals",
@@ -373,6 +374,24 @@ function stringArray(value: unknown): string[] {
     : [];
 }
 
+function safeDisplay(value: unknown, fallback = "Not provided"): string {
+  return typeof value === "string" || typeof value === "number"
+    ? String(value)
+    : fallback;
+}
+
+function reviewValue(field: Field, value: unknown): string {
+  if (value === undefined || value === null || value === "")
+    return "Not provided";
+  if (Array.isArray(value))
+    return value.length === 0
+      ? "Not provided"
+      : value.map((item) => safeDisplay(item)).join(", ");
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  const displayed = safeDisplay(value);
+  return field.options === undefined ? displayed : humanizeEnum(displayed);
+}
+
 export function OnboardingWizard({
   organisationId,
 }: {
@@ -383,18 +402,26 @@ export function OnboardingWizard({
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [message, setMessage] = useState("Loading saved progress…");
   const [mode, setMode] = useState<"BEGINNER" | "PROFESSIONAL">("BEGINNER");
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    let active = true;
     void apiRequest<ResumeResponse>(
       `/organisations/${organisationId}/onboarding`,
     )
       .then((saved) => {
+        if (!active) return;
         setStep(saved.progress.current_step);
         setValues(saved.values);
         setMode(saved.display_mode);
         setMessage("");
       })
-      .catch(() => router.replace("/dashboard"));
+      .catch(() => {
+        if (active) router.replace("/dashboard");
+      });
+    return () => {
+      active = false;
+    };
   }, [organisationId, router]);
 
   const visibleFields = useMemo(() => {
@@ -417,6 +444,7 @@ export function OnboardingWizard({
     formElement: HTMLFormElement,
     continueNext: boolean,
   ): Promise<void> {
+    if (saving) return;
     const form = new FormData(formElement);
     const payload: Record<string, unknown> = {};
     for (const field of visibleFields)
@@ -446,6 +474,7 @@ export function OnboardingWizard({
     }
     if (step === 8) payload.confirmed = true;
     setMessage("Saving…");
+    setSaving(true);
     try {
       const saved = await apiRequest<ResumeResponse>(
         `/organisations/${organisationId}/onboarding/steps/${step}?complete=${continueNext}`,
@@ -461,16 +490,26 @@ export function OnboardingWizard({
           ? error.message
           : "Please correct the highlighted fields.",
       );
+    } finally {
+      setSaving(false);
     }
   }
 
   return (
-    <main>
-      <p>Step {step} of 8</p>
-      <progress aria-label="Onboarding progress" max={8} value={step}>
-        {step} of 8
-      </progress>
-      <h1>{stepNames[step - 1]}</h1>
+    <div className="page onboarding-page">
+      <PageHeader
+        description="Build a structured, organisation-scoped profile. Saved values remain self-declared until supported by reviewed evidence."
+        eyebrow={
+          <span>
+            Step {step} of 8 · <Badge>{humanizeEnum(mode)}</Badge>
+          </span>
+        }
+        title={stepNames[step - 1]}
+      />
+      <Progress
+        label={`Onboarding step ${step} of 8`}
+        value={Math.round((step / 8) * 100)}
+      />
       {mode === "BEGINNER" && (
         <p>
           Guided mode explains why sensitive information is requested. You may
@@ -509,7 +548,7 @@ export function OnboardingWizard({
                   }}
                   type="checkbox"
                 />
-                {model.replaceAll("_", " ")}
+                {humanizeEnum(model)}
               </label>
             ))}
           </fieldset>
@@ -529,7 +568,9 @@ export function OnboardingWizard({
                 >
                   <option value="">Select</option>
                   {field.options.map((option) => (
-                    <option key={option}>{option}</option>
+                    <option key={option} value={option}>
+                      {humanizeEnum(option)}
+                    </option>
                   ))}
                 </select>
               ) : field.type === "boolean" ? (
@@ -590,7 +631,7 @@ export function OnboardingWizard({
             <legend>Document readiness</legend>
             {documentTypes.map((type) => (
               <label key={type}>
-                {type.replaceAll("_", " ")}
+                {humanizeEnum(type)}
                 <select name={`document_${type}`}>
                   <option>AVAILABLE</option>
                   <option>MISSING</option>
@@ -609,29 +650,87 @@ export function OnboardingWizard({
               Review your saved profile. Values remain self-declared until
               supported and verified by an authorised process.
             </p>
-            <pre>{JSON.stringify(values, null, 2)}</pre>
+            <div className="review-sections">
+              {stepNames.slice(0, 7).map((name, index) => {
+                const reviewFields = fieldsByStep[index + 1] ?? [];
+                return (
+                  <article key={name}>
+                    <div className="section-header">
+                      <h3>{name}</h3>
+                      <Button
+                        onClick={() => setStep(index + 1)}
+                        type="button"
+                        variant="quiet"
+                      >
+                        Edit
+                      </Button>
+                    </div>
+                    <dl className="review-list">
+                      {reviewFields.map((field) => (
+                        <div key={field.key}>
+                          <dt>
+                            {field.label
+                              .replace(" (comma separated)", "")
+                              .replace(" (optional)", "")}
+                          </dt>
+                          <dd>{reviewValue(field, values[field.key])}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    {index === 5 && Array.isArray(values.documents) && (
+                      <ul>
+                        {values.documents.map((document, documentIndex) => {
+                          const record =
+                            typeof document === "object" && document !== null
+                              ? (document as Record<string, unknown>)
+                              : {};
+                          return (
+                            <li
+                              key={`${safeDisplay(record.type, "document")}-${documentIndex}`}
+                            >
+                              {humanizeEnum(
+                                safeDisplay(record.type, "Document"),
+                              )}
+                              : {humanizeEnum(safeDisplay(record.status))}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
+                  </article>
+                );
+              })}
+            </div>
           </section>
         )}
         <p aria-live="polite">{message}</p>
         <div>
           <button
-            disabled={step === 1}
+            disabled={step === 1 || saving}
             onClick={() => setStep(step - 1)}
             type="button"
           >
             Back
           </button>
           <button
-            onClick={(event) => void save(event.currentTarget.form!, false)}
+            disabled={saving}
+            onClick={(event) => {
+              const form = event.currentTarget.form;
+              if (form !== null) void save(form, false);
+            }}
             type="button"
           >
             Save and continue later
           </button>
-          <button type="submit">
-            {step === 8 ? "Confirm profile" : "Save and next"}
+          <button disabled={saving} type="submit">
+            {saving
+              ? "Saving…"
+              : step === 8
+                ? "Confirm profile"
+                : "Save and next"}
           </button>
         </div>
       </form>
-    </main>
+    </div>
   );
 }
