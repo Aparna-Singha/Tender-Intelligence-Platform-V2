@@ -156,6 +156,25 @@ describe("Phase 12 controlled review-package API boundaries", () => {
       ),
     ).toThrow();
   });
+
+  it("prevents caching a redeemed signed download URL", async () => {
+    const redeem = vi.fn().mockResolvedValue({ download_url: "signed" });
+    const header = vi.fn();
+    const controller = new ControlledReviewPackageController({
+      redeem,
+    } as never);
+
+    await controller.redeem(
+      "organisation-a",
+      "tender-a",
+      "run-a",
+      "grant-a",
+      { authenticatedUser: { userId: "user-a" } } as never,
+      { header } as never,
+    );
+
+    expect(header).toHaveBeenCalledWith("Cache-Control", "no-store");
+  });
 });
 
 describe("Phase 12 controlled-package freshness", () => {

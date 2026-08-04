@@ -9,6 +9,7 @@ import {
   Post,
   Query,
   Req,
+  Res,
 } from "@nestjs/common";
 import { ApiCookieAuth, ApiOperation, ApiTags } from "@nestjs/swagger";
 import {
@@ -21,6 +22,8 @@ import {
   startControlledPackageSchema,
   submitControlledPackageReviewSchema,
 } from "@tender/contracts";
+import type { FastifyReply } from "fastify";
+
 import { RequireOrganisationPermission } from "../common/access-control.js";
 import type { AuthenticatedRequest } from "../common/authenticated-request.js";
 import { ControlledReviewPackageService } from "./controlled-review-package.service.js";
@@ -314,7 +317,9 @@ export class ControlledReviewPackageController {
     @Param("runId") runId: string,
     @Param("grantId") grantId: string,
     @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<unknown> {
+    reply.header("Cache-Control", "no-store");
     return this.packages.redeem(
       organisationId,
       tenderId,
