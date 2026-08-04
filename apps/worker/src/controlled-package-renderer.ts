@@ -245,20 +245,18 @@ class PdfWriter {
   }
   finish(): void {
     const total = this.document.getPageCount();
-    this.document
-      .getPages()
-      .forEach((page, index) =>
-        page.drawText(
-          `Controlled human review only  |  Page ${index + 1} of ${total}`,
-          {
-            x: MARGIN,
-            y: 24,
-            size: 8,
-            font: this.regular,
-            color: rgb(0.25, 0.25, 0.25),
-          },
-        ),
-      );
+    this.document.getPages().forEach((page, index) =>
+      page.drawText(
+        `Controlled human review only  |  Page ${index + 1} of ${total}`,
+        {
+          x: MARGIN,
+          y: 24,
+          size: 8,
+          font: this.regular,
+          color: rgb(0.25, 0.25, 0.25),
+        },
+      ),
+    );
   }
   private drawWrapped(
     value: string,
