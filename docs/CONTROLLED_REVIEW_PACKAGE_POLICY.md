@@ -2,7 +2,9 @@
 
 Policy version: `controlled-review-package-deterministic-v1`
 
-Status: Phase 12 discovery and design; production implementation is pending.
+Status: architecture is approved for incremental implementation. Domain policy,
+shared contracts, and relational persistence are implemented; API, worker, renderer,
+web, and release validation remain pending.
 
 ## Purpose and boundary
 
@@ -321,12 +323,17 @@ families are `controlled-review-packages/preflight`,
 contract work for the API implementation; all selectors are server-validated and no
 route accepts an authority-bearing fingerprint computed by the browser.
 
-Persistence will require a versioned reversible migration for the aggregate,
-relational snapshot children, artifacts, manifest, reviews, approval, grants,
-idempotency, current pointer, and partial active-run uniqueness. The migration must
-support both upgrade and fresh-database deployment and document recovery for a
-database commit followed by queue or storage failure. This document does not modify
-Prisma or claim those tables exist.
+The versioned migration implements the aggregate, relational snapshot children,
+artifacts, manifest, reviews, approval, grants, idempotency, current pointer, and
+partial active-run uniqueness. Deployment must support both upgrade and fresh
+databases and preserve recovery for a future database commit followed by queue or
+storage failure.
+
+The implemented migration is forward-only under the repository's Prisma convention.
+Rollback requires stopping Phase 12 writers, preserving immutable rows and private
+object references, deploying compatible application code, and applying a separately
+reviewed recovery migration; an existing migration must never be edited after
+release.
 
 ## Private storage and controlled download
 
