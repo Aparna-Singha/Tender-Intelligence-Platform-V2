@@ -14,6 +14,19 @@ const schema = readFileSync(
   "utf8",
 );
 
+export function shouldRunDatabaseIntegrationTests(
+  environment: Readonly<Record<string, string | undefined>>,
+): boolean {
+  return (
+    environment.RUN_DATABASE_INTEGRATION_TESTS === "true" &&
+    Boolean(environment.DATABASE_URL)
+  );
+}
+
+const runDatabaseIntegrationTests = shouldRunDatabaseIntegrationTests(
+  process.env,
+);
+
 describe("controlled review-package migration", () => {
   it.each([
     "export_templates",
@@ -114,9 +127,34 @@ describe("controlled review-package migration", () => {
     expect(schema).toContain("actorRoleAtAction");
     expect(schema).toContain("requesterRoleAtAction");
   });
+
+  it("requires explicit integration consent in addition to DATABASE_URL", () => {
+    expect(
+      shouldRunDatabaseIntegrationTests({
+        DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRunDatabaseIntegrationTests({
+        DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci",
+        RUN_DATABASE_INTEGRATION_TESTS: "false",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRunDatabaseIntegrationTests({
+        DATABASE_URL: "postgresql://ci:ci@localhost:5432/ci",
+        RUN_DATABASE_INTEGRATION_TESTS: "true",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRunDatabaseIntegrationTests({
+        RUN_DATABASE_INTEGRATION_TESTS: "true",
+      }),
+    ).toBe(false);
+  });
 });
 
-describe.runIf(Boolean(process.env.DATABASE_URL))(
+describe.runIf(runDatabaseIntegrationTests)(
   "deployed controlled package database",
   () => {
     let pool: Pool;
