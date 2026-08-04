@@ -241,7 +241,7 @@ See [Draft Policy](DRAFT_POLICY.md).
 
 ## Final readiness and second risk analysis
 
-Phase 11 is implemented and undergoing final validation. A `FinalReadinessRun` owns an
+Phase 11 is implemented and merged. A `FinalReadinessRun` owns an
 immutable relational snapshot of exact current Phase 5–10 authority, readiness
 findings, reviews, and an append-oriented human `FinalReadinessDisposition`. A
 separate linked `RiskAnalysisRun` with `gateType = FINAL_READINESS` owns the second
@@ -258,3 +258,17 @@ hold for remediation, or stop pursuit. Proceed authorises neither export nor
 submission. Stale inputs fail closed while historical snapshots, findings, reviews,
 and decisions remain attributable. See
 [Final Readiness Policy](FINAL_READINESS_POLICY.md).
+
+## Controlled review packages
+
+Phase 12 is designed but not implemented. A `ControlledReviewPackageRun` is the
+planned immutable aggregate root. It owns a package-specific input snapshot, passive
+artifacts, a manifest, append-only reviews, one terminal approval or rejection, and
+audited download grants. A retry or regeneration creates a new run; it never replaces
+historical artifacts.
+
+Generation status, review status, and freshness are independent. The current package
+pointer may identify only the newest non-superseded run for a tender version, while
+older, failed, stale, invalidated, rejected, revoked, and superseded runs remain
+attributable history. See
+[Controlled Review-Package Export Policy](CONTROLLED_REVIEW_PACKAGE_POLICY.md).

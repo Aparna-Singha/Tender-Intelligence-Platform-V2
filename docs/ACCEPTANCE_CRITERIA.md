@@ -386,3 +386,69 @@ implemented and all of the following are measurable:
 The final disposition authorises only the future Phase 12 controlled export review.
 Phase 11 does not generate export artifacts, approve submission, guarantee
 eligibility or completeness, scrape portals, or submit bids.
+
+## Phase 12: Controlled review-package export
+
+Phase 12 remains planned. Future implementation is accepted only when all of the
+following are demonstrated:
+
+- every preflight, start, read, review, approval, revocation, and download operation
+  derives organisation, membership, actor, and role authority on the server and has
+  negative cross-tenant and Platform Administrator tests;
+- a serializable start transaction independently rechecks the current Phase 11 run,
+  linked final-risk run, unsuperseded proceed decision, approved consolidated draft,
+  source and evidence availability, malware state, template, permission, active-run
+  uniqueness, and complete server-derived fingerprint;
+- the transaction atomically creates one run and relational immutable snapshot, then
+  enqueues only opaque identifiers after commit; equivalent idempotency replays return
+  the same result and changed-input reuse returns a bounded conflict;
+- snapshot rows pin the Phase 11 snapshot and decision, approved draft and approval,
+  export template, source hashes, evidence, eligibility, checklist, and final-risk
+  references without copying unrestricted bodies into generic JSON;
+- database constraints and concurrency tests prevent duplicate active runs, current
+  pointers, approvals, artifact promotion, and stale decisions;
+- identical authoritative inputs, policy, and template produce the same canonical
+  content model and deterministic artifact payload apart from explicitly separated
+  run and transport metadata; every final artifact has a verified SHA-256 checksum;
+- v1 produces exactly the specified private ZIP, deterministic passive review PDF,
+  manifest JSON, checksum list, and provenance index within documented count, byte,
+  page, filename, and processing-time limits;
+- export templates have immutable approved versions, reject executable content and
+  unsafe references, and historical packages remain pinned after deprecation;
+- final PDF and ZIP bytes pass structural validation and fail-closed ClamAV scanning
+  before atomic promotion; tests cover malicious inputs, MIME/extension confusion,
+  path traversal, ZIP Slip, duplicate entries, archive bombs, unsafe Unicode and
+  Windows filenames, PDF active content, remote relationships, object substitution,
+  incomplete uploads, and checksum mismatch;
+- the bucket remains private, public contracts expose no object key or permanent URL,
+  and a one-minute signed URL is issued only after a fresh package, approval,
+  permission, checksum, and freshness recheck;
+- cancellation is cooperative and cannot promote artifacts after acknowledgement;
+  failures and cancellations clean temporary objects, while every retry or
+  regeneration creates a new immutable run;
+- authoritative upstream change is detected at read, review, approval, and download;
+  it invalidates in-progress work or makes generated work stale, revokes approval,
+  and blocks new links while retaining historical records;
+- reviews are append-only, rejection requires a new run, and approval requires an
+  `OWNER`, `ADMIN`, or `REVIEWER` with explicit permission who differs from both the
+  requester and approved-draft creator, with no single-user bypass;
+- unapproved, rejected, stale, invalidated, failed, cancelled, revoked, expired, or
+  superseded packages cannot be downloaded;
+- queue payloads, logs, metrics, audit metadata, manifests, and public errors exclude
+  document bodies, draft text, evidence values, credentials, storage keys, and signed
+  URLs; required audit events and bounded error codes are verified;
+- the controlled-review web stage is keyboard and screen-reader operable, has no
+  preselected approval, clearly separates generate, review, approve, download, and
+  external submission, and works at 1440, 1024, 768, and 390 pixels without
+  document-level horizontal overflow;
+- the migration deploys on an upgraded database and a fresh database, and rollback or
+  recovery for schema and orphaned objects is documented and exercised;
+- real-stack tests inspect the generated PDF and ZIP, verify manifest and checksums,
+  exercise a real-browser authorised download, and prove expired, replayed after
+  revocation, and cross-tenant links fail closed; and
+- no LLM/RAG rewriting, new material claim, scoring, certification, public sharing,
+  portal automation, submission control, or government-affiliation claim is present.
+
+The detailed design and limits are in
+[Controlled Review-Package Export Policy](CONTROLLED_REVIEW_PACKAGE_POLICY.md) and
+[Controlled Review-Package File Security](CONTROLLED_REVIEW_PACKAGE_SECURITY.md).

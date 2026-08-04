@@ -138,8 +138,7 @@ Status: implemented on the Phase 10 feature branch.
 
 ## Phase 11: Final readiness audit and second risk analysis
 
-Status: feature implementation and automated integration hardening complete on the
-Phase 11 branch; final local-stack and browser validation remains pending.
+Status: completed and merged through PR #12.
 
 - policy `final-readiness-deterministic-v1` separates transactional hard start
   prerequisites from cited readiness blockers and warnings;
@@ -149,11 +148,29 @@ Phase 11 branch; final local-stack and browser validation remains pending.
 - v1 is deterministic and does not require RAG or an AI provider;
 - readiness treatment, human disposition, separation of duties, stale-state
   invalidation, and role-at-draft-approval hardening fail closed;
-- Phase 12 export, scraping, portal automation, submission, and autonomous approval
-  remain absent.
+- scraping, portal automation, submission, and autonomous approval remain absent.
 
 See [Final Readiness Policy](FINAL_READINESS_POLICY.md) and
 [ADR 0015](adr/0015-immutable-final-readiness-and-second-risk-analysis.md).
+
+## Phase 12: Controlled review-package export
+
+Status: discovery and design in progress; production implementation remains pending.
+
+- create an immutable package-input snapshot pinned to the valid Phase 11 proceed
+  decision and the exact approved materials it authorised;
+- generate deterministic review artifacts without AI rewriting or new material
+  tender claims;
+- require append-only human review and independent approval before an authorised,
+  short-lived private download;
+- preserve tenant isolation, freshness, checksums, malware scanning, provenance,
+  auditability, bounded file limits, cancellation, and immutable regeneration; and
+- keep external portal integration, bid submission, public sharing, certification,
+  scoring, and autonomous approval outside Phase 12.
+
+See [Controlled Review-Package Export Policy](CONTROLLED_REVIEW_PACKAGE_POLICY.md),
+[Controlled Review-Package File Security](CONTROLLED_REVIEW_PACKAGE_SECURITY.md),
+and [ADR 0016](adr/0016-immutable-controlled-review-package-export.md).
 
 ## Phase 9: Tenant-isolated cited tender chatbot
 

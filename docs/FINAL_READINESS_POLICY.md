@@ -2,8 +2,7 @@
 
 Policy version: `final-readiness-deterministic-v1`
 
-Status: implemented on the Phase 11 feature branch; final local-stack and browser
-validation is pending before release.
+Status: implemented and merged through PR #12.
 
 ## Scope and boundary
 
