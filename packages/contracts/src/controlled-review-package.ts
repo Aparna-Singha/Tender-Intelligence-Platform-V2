@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { organisationRoleSchema } from "./organisations.js";
 
 const uuidSchema = z.string().uuid();
 const timestampSchema = z.string().datetime({ offset: true });
@@ -132,6 +133,9 @@ export const controlledPackageErrorCodeSchema = z.enum(
 const actorSchema = z
   .object({ display_name: safeDisplaySchema, user_id: uuidSchema })
   .strict();
+const actorWithRoleAtActionSchema = actorSchema
+  .extend({ role_at_action: organisationRoleSchema })
+  .strict();
 const pageSchema = z
   .object({
     cursor: uuidSchema.optional(),
@@ -194,7 +198,7 @@ export const controlledPackageSummarySchema = z
     id: uuidSchema,
     is_current: z.boolean(),
     policy_version: z.literal("controlled-review-package-deterministic-v1"),
-    requested_by: actorSchema,
+    requested_by: actorWithRoleAtActionSchema,
     review_status: controlledPackageReviewStatusSchema,
     stale_at: timestampSchema.nullable(),
     tender_version_id: uuidSchema,
@@ -292,7 +296,7 @@ export const submitControlledPackageReviewSchema = z
   .strict();
 export const controlledPackageReviewRecordSchema = z
   .object({
-    actor: actorSchema,
+    actor: actorWithRoleAtActionSchema,
     comment: commentSchema,
     created_at: timestampSchema,
     id: uuidSchema,
@@ -317,7 +321,7 @@ export const decideControlledPackageSchema = z
   .strict();
 export const controlledPackageApprovalRecordSchema = z
   .object({
-    actor: actorSchema,
+    actor: actorWithRoleAtActionSchema,
     created_at: timestampSchema,
     id: uuidSchema,
     outcome: controlledPackageApprovalOutcomeSchema,

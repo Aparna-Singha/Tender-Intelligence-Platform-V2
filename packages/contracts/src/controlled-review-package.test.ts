@@ -12,6 +12,8 @@ import {
   controlledPackagePreflightResponseSchema,
   controlledPackageProvenanceIndexSchema,
   controlledPackageReviewStatusSchema,
+  controlledPackageApprovalHistorySchema,
+  controlledPackageReviewHistorySchema,
   decideControlledPackageSchema,
   requestControlledPackageDownloadGrantSchema,
   startControlledPackageSchema,
@@ -252,7 +254,11 @@ describe("controlled review-package contracts", () => {
       id,
       is_current: true,
       policy_version: "controlled-review-package-deterministic-v1",
-      requested_by: { display_name: "Requester", user_id: otherId },
+      requested_by: {
+        display_name: "Requester",
+        role_at_action: "OWNER",
+        user_id: otherId,
+      },
       review_status: "APPROVED",
       stale_at: null,
       tender_version_id: otherId,
@@ -272,5 +278,90 @@ describe("controlled review-package contracts", () => {
     expect(JSON.stringify({ detail, grant })).not.toMatch(
       /object_key|signed_url|credential|cookie/i,
     );
+  });
+
+  it("requires persisted organisation roles on package actors", () => {
+    const roles = [
+      "OWNER",
+      "ADMIN",
+      "TENDER_EXECUTIVE",
+      "CONSULTANT",
+      "REVIEWER",
+    ] as const;
+    for (const role_at_action of roles) {
+      const review = controlledPackageReviewHistorySchema.parse({
+        items: [
+          {
+            actor: {
+              display_name: "Historical actor",
+              role_at_action,
+              user_id: id,
+            },
+            comment: "The generated package was reviewed.",
+            created_at: timestamp,
+            id,
+            outcome: "REVIEW_COMPLETE",
+            review_version: 1,
+          },
+        ],
+        next_cursor: null,
+      });
+      expect(review.items[0]?.actor.role_at_action).toBe(role_at_action);
+    }
+
+    const approval = {
+      actor: {
+        display_name: "Historical actor",
+        role_at_action: "REVIEWER",
+        user_id: id,
+      },
+      created_at: timestamp,
+      id,
+      outcome: "APPROVED_FOR_CONTROLLED_DOWNLOAD",
+      rationale:
+        "The package was independently reviewed for controlled download.",
+      revoked_at: null,
+      superseded_at: null,
+    };
+    expect(
+      controlledPackageApprovalHistorySchema.parse({ items: [approval] })
+        .items[0]?.actor.role_at_action,
+    ).toBe("REVIEWER");
+    for (const invalidActor of [
+      { display_name: "Actor", user_id: id },
+      {
+        display_name: "Actor",
+        role_at_action: "PLATFORM_ADMIN",
+        user_id: id,
+      },
+      { display_name: "Actor", role_at_action: "UNKNOWN", user_id: id },
+      {
+        display_name: "Actor",
+        membership_id: otherId,
+        role_at_action: "OWNER",
+        user_id: id,
+      },
+    ]) {
+      expect(
+        controlledPackageApprovalHistorySchema.safeParse({
+          items: [{ ...approval, actor: invalidActor }],
+        }).success,
+      ).toBe(false);
+      expect(
+        controlledPackageReviewHistorySchema.safeParse({
+          items: [
+            {
+              actor: invalidActor,
+              comment: "The generated package was reviewed.",
+              created_at: timestamp,
+              id,
+              outcome: "REVIEW_COMPLETE",
+              review_version: 1,
+            },
+          ],
+          next_cursor: null,
+        }).success,
+      ).toBe(false);
+    }
   });
 });
