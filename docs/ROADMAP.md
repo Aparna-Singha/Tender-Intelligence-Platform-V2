@@ -156,8 +156,8 @@ See [Final Readiness Policy](FINAL_READINESS_POLICY.md) and
 ## Phase 12: Controlled review-package export
 
 Status: discovery is complete. Domain policy, shared contracts, and relational
-persistence are implemented; API, worker, renderer, web, integration hardening, and
-final real-stack validation remain pending.
+persistence and the tenant-scoped API lifecycle are implemented; worker, renderer,
+web, integration hardening, and final real-stack validation remain pending.
 
 - create an immutable package-input snapshot pinned to the valid Phase 11 proceed
   decision and the exact approved materials it authorised;

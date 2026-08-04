@@ -18,6 +18,7 @@ import { ChecklistsModule } from "./checklists/checklists.module.js";
 import { RagModule } from "./rag/rag.module.js";
 import { DraftsModule } from "./drafts/drafts.module.js";
 import { FinalReadinessModule } from "./final-readiness/final-readiness.module.js";
+import { ControlledReviewPackageModule } from "./controlled-review-packages/controlled-review-package.module.js";
 import {
   AccessGuard,
   CsrfGuard,
@@ -62,6 +63,7 @@ import { RateLimitService } from "./common/rate-limit.service.js";
     RagModule,
     DraftsModule,
     FinalReadinessModule,
+    ControlledReviewPackageModule,
   ],
   providers: [
     RateLimitService,
