@@ -22,6 +22,7 @@ import { ActionChecklist } from "./action-checklist";
 import { RagChatbot } from "./rag-chatbot";
 import { DraftWorkspace } from "./draft-workspace";
 import { FinalReadinessWorkspace } from "./final-readiness-workspace";
+import { ControlledReviewPackageWorkspace } from "./controlled-review-package-workspace";
 
 interface Workspace {
   buyer: string;
@@ -78,6 +79,7 @@ const workspaceTabs = [
   "ask",
   "draft",
   "readiness",
+  "export",
 ] as const;
 type WorkspaceTab = (typeof workspaceTabs)[number];
 
@@ -529,6 +531,13 @@ export function TenderWorkspace({
               versionId={workspace.versions[0].id}
             />
           )}
+        {activeTab === "export" && workspace?.versions[0]?.id !== undefined && (
+          <ControlledReviewPackageWorkspace
+            organisationId={organisationId}
+            tenderId={tenderId}
+            versionId={workspace.versions[0].id}
+          />
+        )}
       </div>
     </div>
   );

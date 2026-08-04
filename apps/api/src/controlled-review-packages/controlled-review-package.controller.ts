@@ -305,6 +305,25 @@ export class ControlledReviewPackageController {
     );
   }
 
+  @RequireOrganisationPermission("TENDER_CONTROLLED_PACKAGE_DOWNLOAD")
+  @Get("controlled-review-packages/:runId/download-grants/:grantId")
+  @ApiOperation({ summary: "Redeem an authorised controlled-package download" })
+  public redeem(
+    @Param("organisationId") organisationId: string,
+    @Param("tenderId") tenderId: string,
+    @Param("runId") runId: string,
+    @Param("grantId") grantId: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<unknown> {
+    return this.packages.redeem(
+      organisationId,
+      tenderId,
+      runId,
+      grantId,
+      request.authenticatedUser.userId,
+    );
+  }
+
   @RequireOrganisationPermission("TENDER_CONTROLLED_PACKAGE_AUDIT_READ")
   @Get("controlled-review-packages/audit/history")
   @ApiOperation({ summary: "Read bounded controlled-package audit history" })

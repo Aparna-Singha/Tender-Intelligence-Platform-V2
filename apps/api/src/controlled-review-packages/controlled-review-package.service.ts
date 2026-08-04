@@ -4,7 +4,11 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from "@nestjs/common";
+import { GetObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import type { ApiEnvironment } from "@tender/config";
 import type { OrganisationRole } from "@tender/contracts";
 import { Prisma, type PrismaClient, type Role } from "@tender/database";
 import {
@@ -23,7 +27,12 @@ import {
 } from "@tender/domain";
 import type { Queue } from "bullmq";
 import { createHash } from "node:crypto";
-import { JOB_QUEUE, PRISMA_CLIENT } from "../infrastructure.tokens.js";
+import {
+  API_ENVIRONMENT,
+  JOB_QUEUE,
+  PRISMA_CLIENT,
+  S3_CLIENT,
+} from "../infrastructure.tokens.js";
 import { ControlledReviewPackageError } from "./controlled-review-package.error.js";
 import { ControlledReviewPackageFreshnessService } from "./controlled-review-package-freshness.service.js";
 
@@ -63,6 +72,10 @@ export class ControlledReviewPackageService {
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(JOB_QUEUE) private readonly jobs: Queue,
     private readonly freshness: ControlledReviewPackageFreshnessService,
+    @Optional() @Inject(S3_CLIENT) private readonly storage?: S3Client,
+    @Optional()
+    @Inject(API_ENVIRONMENT)
+    private readonly environment?: ApiEnvironment,
   ) {}
 
   public async preflight(
@@ -420,8 +433,13 @@ export class ControlledReviewPackageService {
   ): Promise<unknown> {
     const run = await this.run(organisationId, tenderId, runId);
     const summary = await this.summary(organisationId, tenderId, runId);
+    const artifact = await this.database.packageArtifact.findFirst({
+      select: { id: true },
+      where: { organisationId, runId, tenderId },
+    });
     return {
       ...summary,
+      artifact_id: artifact?.id ?? null,
       failure_code: run.safeFailureCode,
       input_fingerprint: run.inputFingerprint,
       logical_content_fingerprint: run.logicalContentFingerprint,
@@ -1011,6 +1029,71 @@ export class ControlledReviewPackageService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+  }
+
+  public async redeem(
+    organisationId: string,
+    tenderId: string,
+    runId: string,
+    grantId: string,
+    userId: string,
+  ): Promise<unknown> {
+    if (this.storage === undefined || this.environment === undefined)
+      throw packageError(
+        "CONTROLLED_PACKAGE_ARTIFACT_UNAVAILABLE",
+        "The package artifact is unavailable.",
+      );
+    const now = new Date();
+    const grant = await this.database.packageDownloadGrant.findFirst({
+      include: {
+        artifact: true,
+        run: { include: { tenderVersion: true } },
+      },
+      where: {
+        id: grantId,
+        organisationId,
+        requestedByUserId: userId,
+        runId,
+        tenderId,
+      },
+    });
+    const valid =
+      grant !== null &&
+      grant.expiresAt > now &&
+      grant.invalidatedAt === null &&
+      grant.revokedAt === null &&
+      grant.run.generationStatus === "GENERATED" &&
+      grant.run.reviewStatus === "APPROVED" &&
+      grant.run.invalidatedAt === null &&
+      grant.run.staleAt === null &&
+      grant.run.supersededAt === null &&
+      grant.run.tenderVersion.currentControlledPackageRunId === runId &&
+      grant.run.inputFingerprint === grant.runFingerprint &&
+      grant.artifact.sha256 === grant.artifactChecksum &&
+      grant.artifact.integrityVerifiedAt !== null &&
+      grant.artifact.malwareStatus === "CLEAN" &&
+      grant.artifact.promotionStatus === "PROMOTED";
+    if (!valid || grant === null)
+      throw packageError(
+        "CONTROLLED_PACKAGE_DOWNLOAD_NOT_AUTHORISED",
+        "The controlled download is not authorised.",
+      );
+    const expiresAt = new Date(now.getTime() + 60_000);
+    const downloadUrl = await getSignedUrl(
+      this.storage,
+      new GetObjectCommand({
+        Bucket: this.environment.S3_BUCKET,
+        Key: grant.artifact.privateObjectKey,
+        ResponseContentDisposition: `attachment; filename="${grant.artifact.safeFilename}"`,
+        ResponseContentType: "application/zip",
+      }),
+      { expiresIn: 60 },
+    );
+    return {
+      download_url: downloadUrl,
+      expires_at: expiresAt.toISOString(),
+      expires_in_seconds: 60,
+    };
   }
 
   public async audit(

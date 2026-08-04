@@ -29,6 +29,7 @@ vi.mock("../lib/api", () => ({
     ],
     workspace: { processingProgress: 0, sourceSectionStatus: "NOT_STARTED" },
   }),
+  formatApiError: (_error: unknown, fallback: string) => fallback,
 }));
 vi.mock("./extraction-workspace", () => ({
   ExtractionWorkspace: () => <div>Extraction module mounted</div>,
@@ -51,6 +52,9 @@ vi.mock("./draft-workspace", () => ({
 vi.mock("./final-readiness-workspace", () => ({
   FinalReadinessWorkspace: () => <div>Readiness module mounted</div>,
 }));
+vi.mock("./controlled-review-package-workspace", () => ({
+  ControlledReviewPackageWorkspace: () => <div>Export module mounted</div>,
+}));
 
 describe("tender workspace stages", () => {
   it("starts at overview, exposes only supported stages, and updates the URL", async () => {
@@ -60,9 +64,7 @@ describe("tender workspace stages", () => {
     await screen.findByText("Office equipment tender");
     expect(screen.getByText("Workspace overview")).toBeInTheDocument();
     expect(screen.queryByText("Risk module mounted")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Export" }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Export" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Risks" }));
     await waitFor(() =>
       expect(push).toHaveBeenCalledWith("/tenders/org-1/tender-1?stage=risks"),
@@ -79,13 +81,24 @@ describe("tender workspace stages", () => {
       .getAllByRole("button")
       .map((button) => button.textContent);
     expect(labels.indexOf("Readiness")).toBe(labels.indexOf("Draft") + 1);
-    expect(labels).not.toContain("Export");
+    expect(labels.indexOf("Export")).toBe(labels.indexOf("Readiness") + 1);
   });
 
   it("retains the safe overview fallback for an unsupported stage", async () => {
-    search = new URLSearchParams("stage=export");
+    search = new URLSearchParams("stage=submission");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
     expect(await screen.findByText("Workspace overview")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Readiness module mounted"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("mounts controlled review export after readiness", async () => {
+    search = new URLSearchParams("stage=export");
+    render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+    expect(
+      await screen.findByText("Export module mounted"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText("Readiness module mounted"),
     ).not.toBeInTheDocument();

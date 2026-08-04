@@ -357,6 +357,7 @@ describe("controlled review-package contracts", () => {
 
   it("keeps detail and download responses free of storage authority", () => {
     const detail = controlledPackageDetailSchema.parse({
+      artifact_id: id,
       created_at: timestamp,
       freshness: "CURRENT",
       generation_status: "GENERATED",

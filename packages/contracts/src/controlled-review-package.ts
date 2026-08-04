@@ -216,6 +216,7 @@ export const controlledPackageHistoryResponseSchema = z
   .strict();
 export const controlledPackageDetailSchema = controlledPackageSummarySchema
   .extend({
+    artifact_id: uuidSchema.nullable(),
     failure_code: safeCodeSchema.nullable(),
     input_fingerprint: fingerprintSchema,
     logical_content_fingerprint: fingerprintSchema.nullable(),
@@ -439,6 +440,13 @@ export const controlledPackageDownloadGrantResponseSchema = z
     download_path: z.string().regex(/^\/[^\s]{1,300}$/),
     expires_at: timestampSchema,
     grant_id: uuidSchema,
+  })
+  .strict();
+export const controlledPackageDownloadRedemptionResponseSchema = z
+  .object({
+    download_url: z.string().url(),
+    expires_at: timestampSchema,
+    expires_in_seconds: z.literal(60),
   })
   .strict();
 
