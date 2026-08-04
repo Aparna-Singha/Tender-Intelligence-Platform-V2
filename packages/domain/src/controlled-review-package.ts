@@ -5,6 +5,8 @@ export const CONTROLLED_REVIEW_PACKAGE_POLICY_VERSION =
   "controlled-review-package-deterministic-v1";
 export const CONTROLLED_REVIEW_PACKAGE_CONTENT_POLICY_VERSION =
   "controlled-review-package-content-v1";
+export const CONTROLLED_REVIEW_PACKAGE_RENDERER_COMPATIBILITY_VERSION =
+  "controlled-review-package-renderer-compatibility-v1";
 
 export const controlledPackageGenerationStatuses = [
   "QUEUED",

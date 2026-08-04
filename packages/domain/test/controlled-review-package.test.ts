@@ -12,6 +12,7 @@ import {
   controlledPackageFreshnessEffect,
   controlledPackageIdempotencyResult,
   controlledPackageLimitViolations,
+  CONTROLLED_REVIEW_PACKAGE_RENDERER_COMPATIBILITY_VERSION,
   evaluateControlledPackagePrerequisites,
   hasPermission,
   isControlledPackageCurrentPointerEligible,
@@ -242,6 +243,14 @@ describe("controlled review-package policy", () => {
   });
 
   it("canonicalizes authority deterministically and enforces locked limits", () => {
+    expect(CONTROLLED_REVIEW_PACKAGE_RENDERER_COMPATIBILITY_VERSION).toBe(
+      "controlled-review-package-renderer-compatibility-v1",
+    );
+    expect(
+      canonicalControlledPackageInput({ rendererCompatibilityVersion: "v1" }),
+    ).not.toBe(
+      canonicalControlledPackageInput({ rendererCompatibilityVersion: "v2" }),
+    );
     expect(canonicalControlledPackageInput({ b: 2, a: { d: 4, c: 3 } })).toBe(
       canonicalControlledPackageInput({ a: { c: 3, d: 4 }, b: 2 }),
     );

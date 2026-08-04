@@ -142,6 +142,12 @@ version form the `inputFingerprint`. Organisation/tender selectors and the clien
 idempotency key scope replay; an equivalent request returns the existing run while
 changed authority returns an idempotency conflict.
 
+Phase 12 v1 locks `rendererCompatibilityVersion` to
+`controlled-review-package-renderer-compatibility-v1`. It identifies the canonical
+renderer-facing compatibility contract independently of a future renderer
+implementation; it selects no library and makes no PDF/A conformance claim. Renderer
+selection, dependency and licence review, and PDF/A selection remain pending.
+
 The deterministic content model excludes run ID, generation time, signed-link
 expiry, storage key, and transient service version. A canonical render timestamp is
 captured once in the snapshot and used consistently. `contentFingerprint` hashes
