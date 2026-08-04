@@ -8,6 +8,7 @@ const commentSchema = z.string().trim().min(1).max(2_000);
 const safeDisplaySchema = z.string().trim().min(1).max(240);
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/);
 const fingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/);
+const relativeApiPathSchema = z.string().regex(/^\/[^\s]{1,300}$/);
 const safeCodeSchema = z
   .string()
   .regex(/^[A-Z][A-Z0-9_]*$/)
@@ -151,6 +152,17 @@ const prerequisiteIssueSchema = z
 
 export const controlledPackagePreflightResponseSchema = z
   .object({
+    active_run: z
+      .object({
+        details_path: relativeApiPathSchema,
+        freshness: controlledPackageFreshnessSchema,
+        generation_status: controlledPackageGenerationStatusSchema,
+        id: uuidSchema,
+        progress_path: relativeApiPathSchema,
+        review_status: controlledPackageReviewStatusSchema,
+      })
+      .strict()
+      .nullable(),
     eligible_independent_approver_exists: z.boolean(),
     evaluated_at: timestampSchema,
     hard_prerequisites_pass: z.boolean(),

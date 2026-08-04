@@ -23,6 +23,28 @@ const otherId = "00000000-0000-4000-8000-000000000002";
 const timestamp = "2026-08-04T12:00:00.000Z";
 const hash = "a".repeat(64);
 
+const preflight = (active_run: unknown): Record<string, unknown> => ({
+  active_run,
+  eligible_independent_approver_exists: true,
+  evaluated_at: timestamp,
+  hard_prerequisites_pass: true,
+  informational_only: true,
+  issues: [],
+  policy_version: "controlled-review-package-deterministic-v1",
+  qualifying_export_template_version_id: id,
+  tender_version_id: otherId,
+  transactional_revalidation_required: true,
+});
+
+const activeRun = {
+  details_path: `/organisations/${id}/tenders/${otherId}/controlled-review-packages/${id}`,
+  freshness: "CURRENT",
+  generation_status: "QUEUED",
+  id,
+  progress_path: `/organisations/${id}/tenders/${otherId}/controlled-review-packages/${id}/progress`,
+  review_status: "NOT_REVIEWED",
+};
+
 describe("controlled review-package contracts", () => {
   it("serializes locked enums and stable errors", () => {
     expect(controlledPackageGenerationStatusSchema.options).toEqual([
@@ -58,18 +80,68 @@ describe("controlled review-package contracts", () => {
 
   it("accepts bounded informational preflight", () => {
     expect(
-      controlledPackagePreflightResponseSchema.parse({
-        eligible_independent_approver_exists: true,
-        evaluated_at: timestamp,
-        hard_prerequisites_pass: true,
-        informational_only: true,
-        issues: [],
-        policy_version: "controlled-review-package-deterministic-v1",
-        qualifying_export_template_version_id: id,
-        tender_version_id: otherId,
-        transactional_revalidation_required: true,
-      }).informational_only,
+      controlledPackagePreflightResponseSchema.parse(preflight(null))
+        .informational_only,
     ).toBe(true);
+  });
+
+  it("accepts complete safe metadata for active generation states", () => {
+    for (const generation_status of ["QUEUED", "PROCESSING"] as const) {
+      const parsed = controlledPackagePreflightResponseSchema.parse(
+        preflight({ ...activeRun, generation_status }),
+      );
+      expect(parsed.active_run).toMatchObject({ generation_status, id });
+    }
+  });
+
+  it("requires complete strict active-run metadata", () => {
+    expect(
+      controlledPackagePreflightResponseSchema.safeParse(
+        preflight({ ...activeRun, progress_path: undefined }),
+      ).success,
+    ).toBe(false);
+    expect(
+      controlledPackagePreflightResponseSchema.safeParse(
+        preflight({ ...activeRun, actor_id: otherId }),
+      ).success,
+    ).toBe(false);
+    expect(
+      controlledPackagePreflightResponseSchema.safeParse({
+        ...preflight(activeRun),
+        queue_job_id: id,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects unsafe active-run identifiers and navigation paths", () => {
+    const invalidValues = [
+      { ...activeRun, id: "not-a-uuid" },
+      { ...activeRun, details_path: "https://example.com/package" },
+      { ...activeRun, details_path: "packages/detail" },
+      { ...activeRun, progress_path: "/packages/has whitespace" },
+      { ...activeRun, progress_path: `/${"a".repeat(301)}` },
+    ];
+    for (const value of invalidValues)
+      expect(
+        controlledPackagePreflightResponseSchema.safeParse(preflight(value))
+          .success,
+      ).toBe(false);
+  });
+
+  it("rejects authority-bearing or sensitive active-run fields", () => {
+    for (const field of [
+      "actor_id",
+      "actor_role",
+      "membership_id",
+      "input_fingerprint",
+      "object_key",
+      "signed_url",
+    ])
+      expect(
+        controlledPackagePreflightResponseSchema.safeParse(
+          preflight({ ...activeRun, [field]: "unsafe" }),
+        ).success,
+      ).toBe(false);
   });
 
   it("rejects client-supplied authority in strict requests", () => {
