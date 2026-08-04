@@ -1,6 +1,18 @@
 # Controlled Review-Package File Security
 
-Status: Phase 12 design; controls are not yet implemented.
+Status: Phase 12 renderer, worker, API and web controls are implemented on the Draft
+feature branch; final real-stack and browser validation remains pending.
+
+The passive PDF renderer is exactly pinned to `pdf-lib` 1.17.1 (MIT), uses no
+browser/native executable or network resource, fixes document metadata and layout,
+and fails closed when the embedded standard font cannot encode approved text
+exactly. V1 makes no PDF/A claim. The worker produces the locked four-member ZIP,
+uses the acyclic checksum design, verifies member and final ZIP integrity, uploads
+through opaque private temporary keys, requires a clean ClamAV result, and promotes
+before a serializable database activation. Download grants redeem to a purpose-bound
+presigned URL with a maximum 60-second lifetime; URLs are reusable until expiry and
+are not stored or logged. No download-completion event is claimed without storage
+telemetry.
 
 This threat model supplements [Security Model](SECURITY_MODEL.md) and the
 [Controlled Review-Package Policy](CONTROLLED_REVIEW_PACKAGE_POLICY.md).

@@ -389,7 +389,9 @@ eligibility or completeness, scrape portals, or submit bids.
 
 ## Phase 12: Controlled review-package export
 
-Phase 12 remains planned. Future implementation is accepted only when all of the
+Phase 12 is implemented on its Draft feature branch but remains unaccepted until
+the pending real-stack, cross-platform hosted, generated-artifact and browser
+validation completes. Final acceptance requires all of the
 following are demonstrated:
 
 - every preflight, start, read, review, approval, revocation, and download operation

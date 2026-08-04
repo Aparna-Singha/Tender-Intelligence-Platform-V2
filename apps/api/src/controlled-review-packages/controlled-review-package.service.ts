@@ -827,6 +827,41 @@ export class ControlledReviewPackageService {
           }),
         ]);
         if (approver === null) throw new NotFoundException();
+        if (input.outcome === "APPROVED_FOR_CONTROLLED_DOWNLOAD") {
+          const version = await transaction.tenderVersion.findFirst({
+            select: { currentControlledPackageRunId: true },
+            where: {
+              id: run.tenderVersionId,
+              tender: { id: tenderId, organisationId },
+            },
+          });
+          if (version === null) throw new NotFoundException();
+          const priorRunId = version.currentControlledPackageRunId;
+          if (priorRunId !== null && priorRunId !== runId) {
+            const supersededAt = new Date();
+            await transaction.controlledReviewPackageRun.updateMany({
+              data: { reviewStatus: "SUPERSEDED", supersededAt },
+              where: { id: priorRunId, organisationId, tenderId },
+            });
+            await transaction.packageApproval.updateMany({
+              data: { supersededAt },
+              where: {
+                outcome: "APPROVED_FOR_CONTROLLED_DOWNLOAD",
+                revokedAt: null,
+                runId: priorRunId,
+                supersededAt: null,
+              },
+            });
+            await transaction.packageDownloadGrant.updateMany({
+              data: { invalidatedAt: supersededAt },
+              where: { invalidatedAt: null, runId: priorRunId },
+            });
+          }
+          await transaction.tenderVersion.update({
+            data: { currentControlledPackageRunId: runId },
+            where: { id: run.tenderVersionId },
+          });
+        }
         await transaction.controlledReviewPackageRun.update({
           data: {
             reviewStatus:
@@ -914,6 +949,10 @@ export class ControlledReviewPackageService {
         data: { revokedAt: now },
         where: { revokedAt: null, runId },
       });
+      await transaction.tenderVersion.updateMany({
+        data: { currentControlledPackageRunId: null },
+        where: { currentControlledPackageRunId: runId },
+      });
       await transaction.auditEvent.create({
         data: audit(
           "CONTROLLED_PACKAGE_REVOKED",
@@ -967,6 +1006,7 @@ export class ControlledReviewPackageService {
                 supersededAt: null,
               },
             },
+            tenderVersion: { select: { currentControlledPackageRunId: true } },
           },
           where: { id: runId, organisationId, tenderId },
         });
@@ -986,7 +1026,8 @@ export class ControlledReviewPackageService {
             malwareCleared: artifact.malwareStatus === "CLEAN",
             reviewStatus: run.reviewStatus,
           }) ||
-          run.approvals.length !== 1
+          run.approvals.length !== 1 ||
+          run.tenderVersion.currentControlledPackageRunId !== runId
         )
           throw packageError(
             "CONTROLLED_PACKAGE_DOWNLOAD_NOT_AUTHORISED",

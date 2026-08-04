@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted for Phase 12 implementation; ADR 0016 remains Proposed until final validation.
+Implemented on the Phase 12 Draft feature branch; ADR 0016 remains Proposed until
+final real-stack, browser and generated-artifact validation.
 
 ## Decision
 

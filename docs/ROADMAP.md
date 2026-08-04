@@ -155,6 +155,12 @@ See [Final Readiness Policy](FINAL_READINESS_POLICY.md) and
 
 ## Phase 12: Controlled review-package export
 
+Implementation is in progress on Draft PR #13. Domain, contracts, persistence, API,
+deterministic passive PDF rendering, private worker generation, controlled review,
+approval and one-minute download redemption are present. Cross-layer hardening is
+under validation; real-stack/browser validation and PR finalisation remain pending.
+External submission remains outside Phase 12.
+
 Status: discovery is complete. Domain policy, shared contracts, and relational
 persistence and the tenant-scoped API lifecycle are implemented; worker, renderer,
 web, integration hardening, and final real-stack validation remain pending.

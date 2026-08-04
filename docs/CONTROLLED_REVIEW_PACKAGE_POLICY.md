@@ -145,7 +145,8 @@ changed authority returns an idempotency conflict.
 Phase 12 v1 locks `rendererCompatibilityVersion` to
 `controlled-review-package-renderer-compatibility-v1`. It identifies the canonical
 renderer-facing compatibility contract independently of a future renderer
-implementation; it selects no library and makes no PDF/A conformance claim. Renderer
+implementation. The Draft feature branch selects exactly pinned `pdf-lib` 1.17.1
+(MIT) for pure-JavaScript passive rendering and makes no PDF/A conformance claim. Renderer
 selection, dependency and licence review, and PDF/A selection remain pending.
 
 The deterministic content model excludes run ID, generation time, signed-link

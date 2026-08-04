@@ -130,7 +130,7 @@ export class ControlledPackageProcessor {
         checksumsBytes,
       );
       controlledPackageEmbeddedManifestSchema.parse(embedded);
-      const manifestBytes = strToU8(canonicalJson(embedded));
+      const manifestBytes = serialiseEmbeddedManifest(embedded);
       const zipBytes = createDeterministicZip(
         {
           "review.pdf": pdfBytes,
@@ -628,10 +628,64 @@ export function validateControlledPackageZip(bytes: Uint8Array): void {
       .equals(Buffer.from("%PDF-"))
   )
     throw new WorkerFailure("CONTROLLED_PACKAGE_ARCHIVE_INVALID");
-  controlledPackageEmbeddedManifestSchema.parse(
-    JSON.parse(Buffer.from(entries["manifest.json"]!).toString("utf8")),
+  const pdf = entries["review.pdf"]!;
+  const manifestBytes = entries["manifest.json"]!;
+  const checksums = entries["SHA256SUMS.txt"]!;
+  const provenance = entries["provenance-index.json"]!;
+  const manifest = controlledPackageEmbeddedManifestSchema.parse(
+    JSON.parse(Buffer.from(manifestBytes).toString("utf8")),
   );
   controlledPackageProvenanceIndexSchema.parse(
-    JSON.parse(Buffer.from(entries["provenance-index.json"]!).toString("utf8")),
+    JSON.parse(Buffer.from(provenance).toString("utf8")),
   );
+  const expectedChecksums = `${sha256(pdf)}  review.pdf\n${sha256(provenance)}  provenance-index.json\n`;
+  if (Buffer.from(checksums).toString("utf8") !== expectedChecksums)
+    throw new WorkerFailure("CONTROLLED_PACKAGE_CHECKSUM_MISMATCH");
+  const memberBytes = new Map<string, Uint8Array>([
+    ["review.pdf", pdf],
+    ["manifest.json", manifestBytes],
+    ["SHA256SUMS.txt", checksums],
+    ["provenance-index.json", provenance],
+  ]);
+  for (const declared of manifest.members) {
+    const actual = memberBytes.get(declared.logical_path);
+    if (
+      actual?.byteLength !== declared.byte_size ||
+      ("sha256" in declared && sha256(actual) !== declared.sha256)
+    )
+      throw new WorkerFailure("CONTROLLED_PACKAGE_CHECKSUM_MISMATCH");
+    if (
+      declared.kind !== "REVIEW_PDF" &&
+      Buffer.from(actual).subarray(0, 4).equals(Buffer.from("PK\u0003\u0004"))
+    )
+      throw new WorkerFailure("CONTROLLED_PACKAGE_ARCHIVE_INVALID");
+  }
+  if (
+    /\/JavaScript|\/JS\b|\/Launch|\/AcroForm|\/EmbeddedFiles|\/Filespec|\/URI\b/u.test(
+      Buffer.from(pdf).toString("latin1"),
+    )
+  )
+    throw new WorkerFailure("CONTROLLED_PACKAGE_UNSAFE_PDF");
+}
+
+function serialiseEmbeddedManifest(
+  initial: ControlledPackageEmbeddedManifest,
+): Uint8Array {
+  let manifest = initial;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const bytes = strToU8(canonicalJson(manifest));
+    const declared = manifest.members.find(
+      ({ kind }) => kind === "MANIFEST_JSON",
+    );
+    if (declared?.byte_size === bytes.byteLength) return bytes;
+    manifest = controlledPackageEmbeddedManifestSchema.parse({
+      ...manifest,
+      members: manifest.members.map((member) =>
+        member.kind === "MANIFEST_JSON"
+          ? { ...member, byte_size: bytes.byteLength }
+          : member,
+      ),
+    });
+  }
+  throw new WorkerFailure("CONTROLLED_PACKAGE_MANIFEST_UNSTABLE");
 }

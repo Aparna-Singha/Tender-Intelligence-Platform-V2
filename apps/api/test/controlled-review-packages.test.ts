@@ -97,6 +97,23 @@ describe("Phase 12 controlled review-package API boundaries", () => {
       expect(queueCall.toLowerCase()).not.toContain(prohibited.toLowerCase());
   });
 
+  it("atomically activates, supersedes and revokes current package authority", () => {
+    const source = readFileSync(
+      new URL(
+        "../src/controlled-review-packages/controlled-review-package.service.ts",
+        import.meta.url,
+      ),
+      "utf8",
+    );
+    expect(source).toContain("currentControlledPackageRunId: runId");
+    expect(source).toContain('reviewStatus: "SUPERSEDED"');
+    expect(source).toContain("currentControlledPackageRunId: null");
+    expect(source).toContain("expiresIn: 60");
+    expect(source).not.toMatch(
+      /download_url:\s*downloadUrl[\s\S]{0,300}(create|update)\(/u,
+    );
+  });
+
   it("registers explicit permissions and no storage or submission routes", () => {
     const source = readFileSync(
       new URL(
