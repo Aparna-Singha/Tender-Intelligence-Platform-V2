@@ -5,6 +5,7 @@ import {
   controlledPackageAuditEventTypeSchema,
   controlledPackageDetailSchema,
   controlledPackageDownloadGrantResponseSchema,
+  controlledPackageEmbeddedManifestSchema,
   controlledPackageErrorCodeSchema,
   controlledPackageErrorCodes,
   controlledPackageGenerationStatusSchema,
@@ -222,6 +223,114 @@ describe("controlled review-package contracts", () => {
     expect(JSON.stringify(manifest)).not.toMatch(
       /object_key|signed_url|draft_text|evidence_value/i,
     );
+  });
+
+  it("enforces the acyclic embedded manifest contract", () => {
+    const embedded = {
+      generated_at: timestamp,
+      generation_policy_version: "controlled-review-package-deterministic-v1",
+      logical_content_fingerprint: hash,
+      members: [
+        {
+          byte_size: 10,
+          kind: "REVIEW_PDF",
+          logical_path: "review.pdf",
+          mime_type: "application/pdf",
+          sha256: hash,
+        },
+        {
+          byte_size: 10,
+          kind: "MANIFEST_JSON",
+          logical_path: "manifest.json",
+          mime_type: "application/json",
+        },
+        {
+          byte_size: 10,
+          kind: "CHECKSUMS_TEXT",
+          logical_path: "SHA256SUMS.txt",
+          mime_type: "text/plain",
+          sha256: hash,
+        },
+        {
+          byte_size: 10,
+          kind: "PROVENANCE_INDEX_JSON",
+          logical_path: "provenance-index.json",
+          mime_type: "application/json",
+          sha256: hash,
+        },
+      ],
+      organisation_id: id,
+      package_id: otherId,
+      phase_11_decision_id: id,
+      phase_11_readiness_run_id: id,
+      renderer_compatibility_version:
+        "controlled-review-package-renderer-compatibility-v1",
+      schema_version: "controlled-review-package-embedded-manifest-v1",
+      template_version_id: id,
+      tender_id: otherId,
+      tender_version_id: otherId,
+      warnings: [],
+    } as const;
+    expect(
+      controlledPackageEmbeddedManifestSchema.parse(embedded).members,
+    ).toHaveLength(4);
+    const manifestMember = embedded.members[1];
+    expect(manifestMember).not.toHaveProperty("sha256");
+    expect(
+      controlledPackageEmbeddedManifestSchema.safeParse({
+        ...embedded,
+        object_key: "private/key",
+      }).success,
+    ).toBe(false);
+    expect(
+      controlledPackageEmbeddedManifestSchema.safeParse({
+        ...embedded,
+        members: embedded.members.map((member, index) =>
+          index === 1 ? { ...member, sha256: hash } : member,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      controlledPackageEmbeddedManifestSchema.safeParse({
+        ...embedded,
+        members: embedded.members.map((member, index) =>
+          index === 0 ? { ...member, sha256: undefined } : member,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      controlledPackageEmbeddedManifestSchema.safeParse({
+        ...embedded,
+        members: embedded.members.map((member, index) =>
+          index === 1
+            ? {
+                ...member,
+                kind: "REVIEW_PDF",
+                mime_type: "application/pdf",
+                sha256: hash,
+              }
+            : member,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      controlledPackageEmbeddedManifestSchema.safeParse({
+        ...embedded,
+        members: embedded.members.map((member, index) =>
+          index === 1 ? { ...member, logical_path: "review.pdf" } : member,
+        ),
+      }).success,
+    ).toBe(false);
+    expect(
+      controlledPackageEmbeddedManifestSchema.safeParse({
+        ...embedded,
+        members: embedded.members.map((member, index) =>
+          index === 0
+            ? { ...member, logical_path: "nested/review.pdf" }
+            : member,
+        ),
+      }).success,
+    ).toBe(false);
   });
 
   it("bounds provenance and rejects unsafe bodies", () => {

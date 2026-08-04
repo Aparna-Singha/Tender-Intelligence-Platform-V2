@@ -251,6 +251,96 @@ export const controlledPackageManifestMemberSchema = z
     sha256: sha256Schema,
   })
   .strict();
+
+const embeddedManifestMemberBaseSchema = z.object({
+  byte_size: z
+    .number()
+    .int()
+    .nonnegative()
+    .max(50 * 1024 * 1024),
+  logical_path: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$/),
+});
+
+export const controlledPackageEmbeddedManifestMemberSchema =
+  z.discriminatedUnion("kind", [
+    embeddedManifestMemberBaseSchema
+      .extend({
+        kind: z.literal("REVIEW_PDF"),
+        mime_type: z.literal("application/pdf"),
+        sha256: sha256Schema,
+      })
+      .strict(),
+    embeddedManifestMemberBaseSchema
+      .extend({
+        kind: z.literal("MANIFEST_JSON"),
+        mime_type: z.literal("application/json"),
+      })
+      .strict(),
+    embeddedManifestMemberBaseSchema
+      .extend({
+        kind: z.literal("CHECKSUMS_TEXT"),
+        mime_type: z.literal("text/plain"),
+        sha256: sha256Schema,
+      })
+      .strict(),
+    embeddedManifestMemberBaseSchema
+      .extend({
+        kind: z.literal("PROVENANCE_INDEX_JSON"),
+        mime_type: z.literal("application/json"),
+        sha256: sha256Schema,
+      })
+      .strict(),
+  ]);
+
+const requiredEmbeddedMemberKinds = [
+  "REVIEW_PDF",
+  "MANIFEST_JSON",
+  "CHECKSUMS_TEXT",
+  "PROVENANCE_INDEX_JSON",
+] as const;
+
+export const controlledPackageEmbeddedManifestSchema = z
+  .object({
+    generated_at: timestampSchema,
+    generation_policy_version: z.literal(
+      "controlled-review-package-deterministic-v1",
+    ),
+    logical_content_fingerprint: fingerprintSchema,
+    members: z.array(controlledPackageEmbeddedManifestMemberSchema).length(4),
+    organisation_id: uuidSchema,
+    package_id: uuidSchema,
+    phase_11_decision_id: uuidSchema,
+    phase_11_readiness_run_id: uuidSchema,
+    renderer_compatibility_version: z.literal(
+      "controlled-review-package-renderer-compatibility-v1",
+    ),
+    schema_version: z.literal("controlled-review-package-embedded-manifest-v1"),
+    template_version_id: uuidSchema,
+    tender_id: uuidSchema,
+    tender_version_id: uuidSchema,
+    warnings: z.array(safeCodeSchema).max(200),
+  })
+  .strict()
+  .superRefine((value, context) => {
+    const kinds = value.members.map(({ kind }) => kind);
+    const paths = value.members.map(({ logical_path }) => logical_path);
+    for (const kind of requiredEmbeddedMemberKinds) {
+      if (kinds.filter((candidate) => candidate === kind).length !== 1) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Embedded manifest requires exactly one ${kind} member`,
+          path: ["members"],
+        });
+      }
+    }
+    if (new Set(paths).size !== paths.length) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Embedded manifest member paths must be unique",
+        path: ["members"],
+      });
+    }
+  });
 export const controlledPackageManifestSchema = z
   .object({
     approved_draft_version_id: uuidSchema,
@@ -375,6 +465,9 @@ export type StartControlledPackageRequest = z.infer<
 >;
 export type ControlledPackageManifest = z.infer<
   typeof controlledPackageManifestSchema
+>;
+export type ControlledPackageEmbeddedManifest = z.infer<
+  typeof controlledPackageEmbeddedManifestSchema
 >;
 export type ControlledPackageErrorCode = z.infer<
   typeof controlledPackageErrorCodeSchema
