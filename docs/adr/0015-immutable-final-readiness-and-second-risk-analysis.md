@@ -1,6 +1,6 @@
 # ADR 0015: Immutable Final Readiness and Second Risk Analysis
 
-- Status: Accepted and implemented; final release validation pending
+- Status: Accepted and implemented
 - Date: 2026-08-03
 
 ## Context
@@ -89,6 +89,6 @@ readable.
 
 ## Implementation status
 
-This ADR remains the architecture decision for the implemented Phase 11 schema,
-migration, domain, contracts, API, worker, and web stage. Release still requires the
-separate final local-stack and browser validation; Phase 12 remains unimplemented.
+This ADR remains the architecture decision for the implemented and merged Phase 11
+schema, migration, domain, contracts, API, worker, and web stage. Phase 12 remains a
+separately authorised workflow.

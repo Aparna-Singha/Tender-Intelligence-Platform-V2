@@ -50,7 +50,7 @@ describe("immutable final-readiness migration", () => {
       "risk_analysis_runs_final_readiness_run_id_fkey",
     );
     expect(schema).not.toMatch(
-      /model FinalReadinessInputSnapshot[\s\S]*finalRiskRunId/,
+      /model FinalReadinessInputSnapshot\s*\{[^}]*finalRiskRunId/,
     );
   });
 

@@ -41,6 +41,11 @@ import {
   isFinalReadinessJob,
   type FinalReadinessJob,
 } from "./final-readiness-processor.js";
+import {
+  ControlledPackageProcessor,
+  isControlledPackageJob,
+  type ControlledPackageJob,
+} from "./controlled-package-processor.js";
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -109,6 +114,12 @@ async function bootstrap(): Promise<void> {
     draftGateway,
   );
   const finalReadinessProcessor = new FinalReadinessProcessor(database);
+  const controlledPackageProcessor = new ControlledPackageProcessor(
+    database,
+    storage,
+    environment.S3_BUCKET,
+    new ClamAvScanner(environment.CLAMAV_HOST, environment.CLAMAV_PORT),
+  );
   const documentWorker = new Worker<
     | DocumentJob
     | TenderDocumentJob
@@ -119,6 +130,7 @@ async function bootstrap(): Promise<void> {
     | RagJob
     | DraftGenerationJob
     | FinalReadinessJob
+    | ControlledPackageJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
@@ -187,6 +199,14 @@ async function bootstrap(): Promise<void> {
           finalReadinessProcessor.process(data, signal),
         );
       }
+      if (job.name === "generate-controlled-review-package") {
+        if (!isControlledPackageJob(job.data))
+          throw new Error("Invalid controlled package job");
+        const data = job.data;
+        return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, (signal) =>
+          controlledPackageProcessor.process(data, signal),
+        );
+      }
       if (!isCompanyDocumentJob(job.data))
         throw new Error("Invalid company document job");
       const data = job.data;
@@ -242,6 +262,18 @@ async function bootstrap(): Promise<void> {
       isFinalReadinessJob(job.data)
     )
       void finalReadinessProcessor.fail(job.data, error);
+    if (
+      job?.name === "generate-controlled-review-package" &&
+      isControlledPackageJob(job.data)
+    )
+      logger.error(
+        {
+          jobId: job.id,
+          jobName: job.name,
+          runId: job.data.controlledReviewPackageRunId,
+        },
+        "Controlled package job failed safely",
+      );
     if (
       job?.name === "process-company-document" &&
       isCompanyDocumentJob(job.data)
@@ -326,7 +358,8 @@ function isTenderDocumentJob(
     | ChecklistGenerationJob
     | RagJob
     | DraftGenerationJob
-    | FinalReadinessJob,
+    | FinalReadinessJob
+    | ControlledPackageJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
@@ -341,7 +374,8 @@ function isCompanyDocumentJob(
     | ChecklistGenerationJob
     | RagJob
     | DraftGenerationJob
-    | FinalReadinessJob,
+    | FinalReadinessJob
+    | ControlledPackageJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }
@@ -356,7 +390,8 @@ function isExtractionJob(
     | ChecklistGenerationJob
     | RagJob
     | DraftGenerationJob
-    | FinalReadinessJob,
+    | FinalReadinessJob
+    | ControlledPackageJob,
 ): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
@@ -371,7 +406,8 @@ function isRiskAnalysisJob(
     | ChecklistGenerationJob
     | RagJob
     | DraftGenerationJob
-    | FinalReadinessJob,
+    | FinalReadinessJob
+    | ControlledPackageJob,
 ): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }

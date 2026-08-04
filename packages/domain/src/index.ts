@@ -31,6 +31,7 @@ export type {
   Permission,
   Role,
 } from "./authorisation.js";
+export * from "./controlled-review-package.js";
 export {
   canDownloadDocument,
   extensionFor,

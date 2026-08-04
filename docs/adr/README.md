@@ -22,6 +22,7 @@ decisions, their context, alternatives, and trade-offs.
 | [0013](0013-fact-constrained-immutable-drafting.md)                | Fact-constrained immutable drafting                | Accepted |
 | [0014](0014-product-ui-and-cross-platform-development.md)          | Product UI and cross-platform development          | Accepted |
 | [0015](0015-immutable-final-readiness-and-second-risk-analysis.md) | Immutable final readiness and second risk analysis | Accepted |
+| [0016](0016-immutable-controlled-review-package-export.md)         | Immutable controlled review-package export         | Proposed |
 
 ## Process
 

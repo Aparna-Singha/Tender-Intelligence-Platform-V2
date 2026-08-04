@@ -24,6 +24,7 @@
     "fflate": "0.8.3",
     "file-type": "21.3.2",
     "ioredis": "5.11.1",
+    "pdf-lib": "1.17.1",
     "pdfjs-dist": "6.1.200",
     "pino": "10.3.1"
   },

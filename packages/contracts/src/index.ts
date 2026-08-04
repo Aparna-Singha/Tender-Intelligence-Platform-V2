@@ -24,6 +24,7 @@ export {
   organisationTypeSchema,
 } from "./organisations.js";
 export * from "./final-readiness.js";
+export * from "./controlled-review-package.js";
 export {
   askRagQuestionSchema,
   createRagConversationSchema,

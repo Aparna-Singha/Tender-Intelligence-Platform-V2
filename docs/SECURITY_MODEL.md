@@ -246,7 +246,7 @@ Telemetry excludes source, prompt, draft, and human-input bodies.
 
 ## Phase 11 final-readiness security boundary
 
-Phase 11 is implemented and undergoing final validation. Its preflight is informational and
+Phase 11 is implemented and merged. Its preflight is informational and
 cannot bypass the serializable start transaction. Start, reads, worker processing,
 source access, finding review, and final disposition repeat organisation,
 tender, version, run, snapshot, finding, and source predicates. Browser-provided
@@ -270,3 +270,19 @@ role-at-approval evidence from authenticated membership.
 Existing unverifiable approvals cannot satisfy Phase 11. Read-time stale detection
 is mandatory even when write paths eagerly invalidate affected runs. See
 [Final Readiness Policy](FINAL_READINESS_POLICY.md).
+
+## Phase 12 controlled-package security boundary
+
+Phase 12 is designed but not implemented. It will preserve server-derived tenant and
+role authority, immutable snapshots, fail-closed freshness, opaque queue payloads,
+private object storage, malware scanning, bounded public errors, and redacted logs.
+Final package bytes must be passive, bounded, checksummed, scanned, and atomically
+promoted before a package can enter review. Object keys and signed URLs never enter
+public package metadata or generic logs.
+
+Download authorisation is distinct from generation: only an approved, current,
+non-revoked package may receive a one-minute signed URL after a fresh tenant,
+permission, fingerprint, artifact, checksum, and approval recheck. Platform
+Administrator has no implicit tenant authority. See
+[Controlled Review-Package File Security](CONTROLLED_REVIEW_PACKAGE_SECURITY.md) and
+[Controlled Review-Package Export Policy](CONTROLLED_REVIEW_PACKAGE_POLICY.md).

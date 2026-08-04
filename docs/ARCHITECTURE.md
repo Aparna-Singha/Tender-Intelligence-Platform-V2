@@ -258,7 +258,7 @@ submission. See [Draft Policy](DRAFT_POLICY.md) and
 
 ## Phase 11 final-readiness architecture
 
-Phase 11 is implemented and undergoing final validation. The API uses one transactional
+Phase 11 is implemented and merged. The API uses one transactional
 start boundary to validate current same-tenant Phase 5–10 hard prerequisites and
 create a `FinalReadinessRun`, its relational
 `FinalReadinessInputSnapshot`, and a linked existing `RiskAnalysisRun` with
@@ -277,3 +277,23 @@ provenance, blockers, required dispositions, acknowledgements, permission, and
 separation of duties. Phase 12 export remains a separate future boundary. See
 [Final Readiness Policy](FINAL_READINESS_POLICY.md) and
 [ADR 0015](adr/0015-immutable-final-readiness-and-second-risk-analysis.md).
+
+## Phase 12 controlled review-package architecture
+
+Phase 12 is designed but not implemented. A planned
+`ControlledReviewPackageRun` aggregate owns a separate immutable package-input
+snapshot, artifacts, manifest, append-only reviews, approval, and download grants.
+The snapshot references the Phase 11 snapshot and pins its current proceed decision,
+approved consolidated draft and approval, source hashes, evidence references, final
+risk output, and an approved export-template version. It never reads newer mutable
+content into an authorised package.
+
+The API will repeat preflight checks in a serializable start transaction, persist an
+authoritative server-derived fingerprint, and enqueue opaque identifiers only. A
+deterministic worker will render bounded passive files, scan final bytes, verify
+SHA-256 checksums, and promote artifacts atomically into private object storage.
+Machine generation, human review, and freshness remain separate state dimensions.
+Downloads require a current independent approval and a fresh server recheck before a
+one-minute signed URL is issued. See
+[Controlled Review-Package Export Policy](CONTROLLED_REVIEW_PACKAGE_POLICY.md) and
+[ADR 0016](adr/0016-immutable-controlled-review-package-export.md).
