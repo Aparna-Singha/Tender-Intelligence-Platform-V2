@@ -7,6 +7,9 @@ node_modules/
 dist/
 coverage/
 .turbo/
+.playwright/
+playwright-report/
+test-results/
 *.tsbuildinfo
 
 # Environment and credentials
