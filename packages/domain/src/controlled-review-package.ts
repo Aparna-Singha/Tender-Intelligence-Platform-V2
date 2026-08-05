@@ -408,6 +408,17 @@ export function canonicalControlledPackageInput(
   return JSON.stringify(canonicalize(value));
 }
 
+export function deriveControlledPackageStableId(
+  inputFingerprint: string,
+): string {
+  const normalized = inputFingerprint.slice(0, 32).split("");
+  normalized[12] = "5";
+  const variant = Number.parseInt(normalized[16] ?? "0", 16);
+  normalized[16] = ((variant & 0x3) | 0x8).toString(16);
+  const hex = normalized.join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(canonicalize);
   if (value !== null && typeof value === "object")

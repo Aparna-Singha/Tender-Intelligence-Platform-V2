@@ -11,6 +11,7 @@ describe("controlled review package workspace", () => {
     expect(source).toContain("Generate review package");
     expect(source).toContain("Record review complete");
     expect(source).toContain("Approve for controlled download");
+    expect(source).toContain("Revoke controlled download");
     expect(source).toContain("Authorise one-minute download");
     expect(source).not.toContain("Approved for submission");
   });
@@ -28,7 +29,9 @@ describe("controlled review package workspace", () => {
       "REVIEW_BLOCKER",
       "DOWNLOAD_BLOCKER",
       "Package history",
+      "Current package",
       "Append-only review comment",
+      "Approval history",
       "aria-live",
     ])
       expect(source).toContain(value);

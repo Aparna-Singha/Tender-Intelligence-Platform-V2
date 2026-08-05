@@ -12,6 +12,7 @@ import {
   controlledPackageProvenanceIndexSchema,
   type ControlledPackageEmbeddedManifest,
 } from "@tender/contracts";
+import { deriveControlledPackageStableId } from "@tender/domain";
 import { createHash, randomUUID } from "node:crypto";
 import { strToU8, unzipSync, zipSync } from "fflate";
 import type { MalwareScanner } from "./malware-scanner.js";
@@ -93,6 +94,9 @@ export class ControlledPackageProcessor {
         await this.cancel(job);
         return;
       }
+      const stablePackageId = deriveControlledPackageStableId(
+        authority.inputFingerprint,
+      );
       const model = await this.buildRenderModel(authority);
       const pdf = await renderControlledPackagePdf(model);
       if (await this.cancelled(job)) {
@@ -105,7 +109,7 @@ export class ControlledPackageProcessor {
           record_id: provenanceRecordId(item),
           type: item.kind,
         })),
-        package_id: authority.id,
+        package_id: stablePackageId,
       });
       controlledPackageProvenanceIndexSchema.parse(JSON.parse(provenance));
       const pdfBytes = pdf.bytes;
@@ -124,6 +128,7 @@ export class ControlledPackageProcessor {
       );
       const embedded = buildEmbeddedManifest(
         authority,
+        stablePackageId,
         logicalContentFingerprint,
         pdfBytes,
         provenanceBytes,
@@ -351,7 +356,7 @@ export class ControlledPackageProcessor {
         finalRiskFindings: risks.map((finding) =>
           item(finding.title, finding.explanation),
         ),
-        packageId: run.id,
+        packageId: deriveControlledPackageStableId(run.inputFingerprint),
         packageTitle: run.tender.title,
         policyVersion: "controlled-review-package-deterministic-v1" as const,
         provenanceHandles: handles,
@@ -544,6 +549,7 @@ function member(
 }
 function buildEmbeddedManifest(
   run: CurrentAuthority,
+  stablePackageId: string,
   fingerprint: string,
   pdf: Uint8Array,
   provenance: Uint8Array,
@@ -583,7 +589,7 @@ function buildEmbeddedManifest(
       },
     ],
     organisation_id: run.organisationId,
-    package_id: run.id,
+    package_id: stablePackageId,
     phase_11_decision_id: run.inputSnapshot.finalReadinessDecisionId,
     phase_11_readiness_run_id: run.inputSnapshot.finalReadinessRunId,
     renderer_compatibility_version: CONTROLLED_PACKAGE_RENDERER_VERSION,
