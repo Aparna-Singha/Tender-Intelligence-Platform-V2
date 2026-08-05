@@ -2,9 +2,10 @@
 
 Policy version: `controlled-review-package-deterministic-v1`
 
-Status: architecture is approved for incremental implementation. Domain policy,
-shared contracts, and relational persistence are implemented; API, worker, renderer,
-web, and release validation remain pending.
+Status: architecture is approved and implemented through Phase 13 real-stack
+validation. Domain policy, shared contracts, relational persistence, API, worker,
+renderer, and web flows are implemented. Validation evidence and remaining launch
+limitations are recorded in `docs/PHASE_13_VALIDATION.md`.
 
 ## Purpose and boundary
 
