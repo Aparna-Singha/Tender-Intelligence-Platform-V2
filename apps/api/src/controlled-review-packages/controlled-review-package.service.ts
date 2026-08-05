@@ -18,6 +18,7 @@ import {
   canRetryControlledPackage,
   canReviewControlledPackage,
   controlledPackageApprovalDenials,
+  deriveControlledPackageStableId,
   CONTROLLED_REVIEW_PACKAGE_CONTENT_POLICY_VERSION,
   CONTROLLED_REVIEW_PACKAGE_POLICY_VERSION,
   CONTROLLED_REVIEW_PACKAGE_RENDERER_COMPATIBILITY_VERSION,
@@ -297,7 +298,6 @@ export class ControlledReviewPackageService {
     const inputFingerprint = createHash("sha256")
       .update(canonical)
       .digest("hex");
-    const now = new Date();
     const run = await transaction.controlledReviewPackageRun.create({
       data: {
         contentPolicyVersion: CONTROLLED_REVIEW_PACKAGE_CONTENT_POLICY_VERSION,
@@ -317,7 +317,7 @@ export class ControlledReviewPackageService {
     });
     await transaction.controlledReviewPackageInputSnapshot.create({
       data: {
-        canonicalRenderTimestamp: now,
+        canonicalRenderTimestamp: snapshot.capturedAt,
         checklistGenerationRunId: snapshot.checklistGenerationRunId,
         contentPolicyVersion: CONTROLLED_REVIEW_PACKAGE_CONTENT_POLICY_VERSION,
         draftApproverRoleAtAction:
@@ -500,7 +500,7 @@ export class ControlledReviewPackageService {
         sha256: member.sha256,
       })),
       organisation_id: organisationId,
-      package_id: run.id,
+      package_id: deriveControlledPackageStableId(run.inputFingerprint),
       phase_11_decision_id: run.inputSnapshot.finalReadinessDecisionId,
       phase_11_readiness_run_id: run.inputSnapshot.finalReadinessRunId,
       schema_version: run.manifest.schemaVersion,
@@ -535,7 +535,7 @@ export class ControlledReviewPackageService {
         record_id: provenanceRecordId(item),
         type: item.kind,
       })),
-      package_id: run.id,
+      package_id: deriveControlledPackageStableId(run.inputFingerprint),
     };
   }
 

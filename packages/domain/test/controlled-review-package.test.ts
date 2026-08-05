@@ -13,6 +13,7 @@ import {
   controlledPackageIdempotencyResult,
   controlledPackageLimitViolations,
   CONTROLLED_REVIEW_PACKAGE_RENDERER_COMPATIBILITY_VERSION,
+  deriveControlledPackageStableId,
   evaluateControlledPackagePrerequisites,
   hasPermission,
   isControlledPackageCurrentPointerEligible,
@@ -253,6 +254,14 @@ describe("controlled review-package policy", () => {
     );
     expect(canonicalControlledPackageInput({ b: 2, a: { d: 4, c: 3 } })).toBe(
       canonicalControlledPackageInput({ a: { c: 3, d: 4 }, b: 2 }),
+    );
+    expect(
+      deriveControlledPackageStableId(
+        "0123456789abcdef0123456789abcdef" + "0".repeat(32),
+      ),
+    ).toBe("01234567-89ab-5def-8123-456789abcdef");
+    expect(deriveControlledPackageStableId("f".repeat(64))).toBe(
+      "ffffffff-ffff-5fff-bfff-ffffffffffff",
     );
     expect(
       controlledPackageLimitViolations({

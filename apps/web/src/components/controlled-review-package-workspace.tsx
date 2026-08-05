@@ -19,6 +19,7 @@ interface Issue {
     | "REVIEW_BLOCKER"
     | "DOWNLOAD_BLOCKER";
 }
+
 interface Preflight {
   active_run: { id: string } | null;
   eligible_independent_approver_exists: boolean;
@@ -27,6 +28,7 @@ interface Preflight {
   qualifying_export_template_version_id: string | null;
   transactional_revalidation_required: true;
 }
+
 interface PackageRun {
   artifact_id: string | null;
   created_at: string;
@@ -40,9 +42,11 @@ interface PackageRun {
   review_status: string;
   review_version?: number;
 }
+
 interface History {
   items: readonly PackageRun[];
 }
+
 interface Reviews {
   items: readonly {
     actor: { display_name: string; role_at_action: string };
@@ -51,6 +55,18 @@ interface Reviews {
     id: string;
     outcome: string;
     review_version: number;
+  }[];
+}
+
+interface Decisions {
+  items: readonly {
+    actor: { display_name: string; role_at_action: string };
+    created_at: string;
+    id: string;
+    outcome: string;
+    rationale: string;
+    revoked_at: string | null;
+    superseded_at: string | null;
   }[];
 }
 
@@ -71,7 +87,8 @@ export function ControlledReviewPackageWorkspace({
   const [history, setHistory] = useState<readonly PackageRun[]>([]);
   const [selected, setSelected] = useState<PackageRun | null>(null);
   const [reviews, setReviews] = useState<Reviews["items"]>([]);
-  const [message, setMessage] = useState("Loading controlled-review status…");
+  const [decisions, setDecisions] = useState<Decisions["items"]>([]);
+  const [message, setMessage] = useState("Loading controlled-review status...");
   const root = base(organisationId, tenderId);
 
   async function load(preferredId?: string): Promise<void> {
@@ -99,10 +116,17 @@ export function ControlledReviewPackageWorkspace({
           : await apiRequest<Reviews>(
               `${root}/controlled-review-packages/${id}/reviews`,
             );
+      const decisionHistory =
+        id === undefined
+          ? { items: [] }
+          : await apiRequest<Decisions>(
+              `${root}/controlled-review-packages/${id}/decisions`,
+            );
       setPreflight(nextPreflight);
       setHistory(nextHistory.items);
       setSelected(detail);
       setReviews(reviewHistory.items);
+      setDecisions(decisionHistory.items);
       setMessage("");
     } catch (error) {
       setMessage(
@@ -139,13 +163,16 @@ export function ControlledReviewPackageWorkspace({
       );
     }
   }
+
   async function generate(): Promise<void> {
     if (
       !window.confirm(
         "Generate an immutable package for controlled human review only? This does not submit the tender.",
       )
-    )
+    ) {
       return;
+    }
+
     await mutate(
       `${root}/controlled-review-packages`,
       "POST",
@@ -153,11 +180,13 @@ export function ControlledReviewPackageWorkspace({
       "Generation requested. Transactional prerequisites were revalidated.",
     );
   }
+
   async function submitReview(
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
     event.preventDefault();
     if (selected === null) return;
+
     const data = new FormData(event.currentTarget);
     await mutate(
       `${root}/controlled-review-packages/${selected.id}/reviews`,
@@ -170,16 +199,19 @@ export function ControlledReviewPackageWorkspace({
       "Append-only review recorded.",
     );
   }
+
   async function decide(
     outcome: "APPROVED_FOR_CONTROLLED_DOWNLOAD" | "REJECTED",
   ): Promise<void> {
     if (selected === null) return;
+
     const rationale = window.prompt(
       outcome === "REJECTED"
         ? "Rejection rationale (correction requires regeneration)"
         : "Independent approval rationale",
     );
     if (rationale === null) return;
+
     await mutate(
       `${root}/controlled-review-packages/${selected.id}/decisions`,
       "POST",
@@ -194,8 +226,10 @@ export function ControlledReviewPackageWorkspace({
         : "Approved for controlled download.",
     );
   }
+
   async function download(): Promise<void> {
     if (selected?.artifact_id === null || selected === null) return;
+
     try {
       const grant = await apiRequest<{ download_path: string }>(
         `${root}/controlled-review-packages/${selected.id}/download-grants`,
@@ -218,8 +252,26 @@ export function ControlledReviewPackageWorkspace({
     }
   }
 
+  async function revoke(): Promise<void> {
+    if (selected === null) return;
+
+    const rationale = window.prompt("Revocation rationale");
+    if (rationale === null) return;
+
+    await mutate(
+      `${root}/controlled-review-packages/${selected.id}/revocations`,
+      "POST",
+      {
+        rationale,
+        reason: "APPROVAL_WITHDRAWN",
+      },
+      "Controlled-download approval revoked.",
+    );
+  }
+
   const grouped = (treatment: Issue["treatment"]): readonly Issue[] =>
     preflight?.issues.filter((issue) => issue.treatment === treatment) ?? [];
+
   return (
     <section aria-labelledby="controlled-package-heading">
       <h2 id="controlled-package-heading">Controlled review package</h2>
@@ -233,7 +285,7 @@ export function ControlledReviewPackageWorkspace({
       </Alert>
       <p aria-live="polite">{message}</p>
       {preflight === null ? (
-        <p>Loading informational preflight…</p>
+        <p>Loading informational preflight...</p>
       ) : (
         <>
           <Card>
@@ -293,9 +345,10 @@ export function ControlledReviewPackageWorkspace({
           {history.map((run) => (
             <li key={run.id}>
               <button onClick={() => void load(run.id)} type="button">
-                {new Date(run.created_at).toLocaleString()} ·{" "}
-                {humanizeEnum(run.generation_status)} ·{" "}
+                {new Date(run.created_at).toLocaleString()} -{" "}
+                {humanizeEnum(run.generation_status)} -{" "}
                 {humanizeEnum(run.review_status)}
+                {run.is_current ? " - Current package" : ""}
               </button>
             </li>
           ))}
@@ -307,7 +360,10 @@ export function ControlledReviewPackageWorkspace({
           <p>
             <Badge>{humanizeEnum(selected.generation_status)}</Badge>{" "}
             <Badge>{humanizeEnum(selected.freshness)}</Badge>{" "}
-            <Badge>{humanizeEnum(selected.review_status)}</Badge>
+            <Badge>{humanizeEnum(selected.review_status)}</Badge>{" "}
+            {selected.is_current && (
+              <Badge tone="success">Current package</Badge>
+            )}
           </p>
           <p>
             Requested by {selected.requested_by.display_name} (
@@ -377,8 +433,8 @@ export function ControlledReviewPackageWorkspace({
               {reviews.map((review) => (
                 <p key={review.id}>
                   {review.actor.display_name} (
-                  {humanizeEnum(review.actor.role_at_action)}) ·{" "}
-                  {humanizeEnum(review.outcome)} · {review.comment}
+                  {humanizeEnum(review.actor.role_at_action)}) -{" "}
+                  {humanizeEnum(review.outcome)} - {review.comment}
                 </p>
               ))}
               <Button
@@ -390,11 +446,30 @@ export function ControlledReviewPackageWorkspace({
                 Reject package
               </Button>
               {selected.review_status === "APPROVED" && (
+                <Button variant="secondary" onClick={() => void revoke()}>
+                  Revoke controlled download
+                </Button>
+              )}
+              {selected.review_status === "APPROVED" && (
                 <Button onClick={() => void download()}>
                   Authorise one-minute download
                 </Button>
               )}
             </>
+          )}
+          <h4>Approval history</h4>
+          {decisions.length === 0 ? (
+            <p>No approval decisions have been recorded yet.</p>
+          ) : (
+            decisions.map((decision) => (
+              <p key={decision.id}>
+                {decision.actor.display_name} (
+                {humanizeEnum(decision.actor.role_at_action)}) -{" "}
+                {humanizeEnum(decision.outcome)}
+                {decision.revoked_at === null ? "" : " - Revoked"} -{" "}
+                {decision.rationale}
+              </p>
+            ))
           )}
         </article>
       )}
