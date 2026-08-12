@@ -10,6 +10,7 @@ export interface WorkerDependencies {
 }
 
 type CheckName = "postgresql" | "queue" | "redis";
+const readinessTimeoutMs = 2_000;
 
 export class WorkerReadiness {
   public constructor(private readonly dependencies: WorkerDependencies) {}
@@ -17,17 +18,16 @@ export class WorkerReadiness {
   public async check(): Promise<Readiness> {
     const entries = await Promise.all([
       this.runCheck("postgresql", async () => {
-        await this.dependencies.database.$queryRaw`SELECT 1`;
+        await withTimeout(
+          this.dependencies.database.$queryRaw`SELECT 1`,
+          readinessTimeoutMs,
+        );
       }),
       this.runCheck("redis", async () => {
-        if (this.dependencies.redis.status === "wait") {
-          await this.dependencies.redis.connect();
-        }
-        await this.dependencies.redis.ping();
+        await withTimeout(this.pingRedis(), readinessTimeoutMs);
       }),
       this.runCheck("queue", async () => {
-        await this.dependencies.queue.waitUntilReady();
-        await this.dependencies.queue.getJobCounts();
+        await withTimeout(this.checkQueue(), readinessTimeoutMs);
       }),
     ]);
     const checks = Object.fromEntries(entries) as Record<
@@ -52,6 +52,39 @@ export class WorkerReadiness {
       return [name, "up"];
     } catch {
       return [name, "down"];
+    }
+  }
+
+  private async pingRedis(): Promise<void> {
+    if (this.dependencies.redis.status === "wait") {
+      await this.dependencies.redis.connect();
+    }
+    await this.dependencies.redis.ping();
+  }
+
+  private async checkQueue(): Promise<void> {
+    await this.dependencies.queue.waitUntilReady();
+    await this.dependencies.queue.getJobCounts();
+  }
+}
+
+async function withTimeout<T>(
+  operation: Promise<T>,
+  timeoutMs: number,
+): Promise<T> {
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<never>((_resolve, reject) => {
+        timeout = setTimeout(() => {
+          reject(new Error("Readiness check timed out"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout !== undefined) {
+      clearTimeout(timeout);
     }
   }
 }

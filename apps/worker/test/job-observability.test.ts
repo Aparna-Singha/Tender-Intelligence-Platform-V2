@@ -3,7 +3,10 @@ import { Writable } from "node:stream";
 import { pino } from "pino";
 import { describe, expect, it, vi } from "vitest";
 
-import { startJobLifecycle } from "../src/job-observability.js";
+import {
+  hasBullMqRetryRemaining,
+  startJobLifecycle,
+} from "../src/job-observability.js";
 
 function metrics(): {
   readonly jobFinished: ReturnType<typeof vi.fn>;
@@ -91,5 +94,27 @@ describe("job lifecycle observability", () => {
     );
     expect(output).toContain("job_timeout");
     expect(output).not.toContain("private provider payload");
+  });
+
+  it("detects an authoritative BullMQ retry only when attempts remain", () => {
+    expect(
+      hasBullMqRetryRemaining({
+        attemptsMade: 1,
+        opts: { attempts: 3 },
+      } as Job),
+    ).toBe(true);
+    expect(
+      hasBullMqRetryRemaining({
+        attemptsMade: 3,
+        opts: { attempts: 3 },
+      } as Job),
+    ).toBe(false);
+    expect(
+      hasBullMqRetryRemaining({
+        attemptsMade: 1,
+        opts: {},
+      } as Job),
+    ).toBe(false);
+    expect(hasBullMqRetryRemaining(undefined)).toBe(false);
   });
 });

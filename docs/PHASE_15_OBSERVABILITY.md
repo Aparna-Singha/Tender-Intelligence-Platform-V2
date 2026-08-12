@@ -112,6 +112,10 @@ Metric labels must never contain request IDs, session IDs, organisation IDs,
 tender IDs, document IDs, job IDs, run IDs, user IDs, emails, object keys, raw
 URLs, prompts, source excerpts, or raw error messages.
 
+API route labels use registered Fastify route templates. Unmatched requests are
+collapsed to the fixed `__unmatched__` label. Arbitrary 404 paths and query
+strings must never become Prometheus label values.
+
 ## Health And Readiness
 
 Liveness answers whether the process is alive. Readiness answers whether the
@@ -144,6 +148,10 @@ closed in those processors; their outage behavior is documented in the runbook.
 Retries were not broadly changed. Where retry safety depends on domain state,
 processors continue to use existing authoritative records rather than metrics or
 logs.
+
+`tip_worker_job_retries_total` increments only when BullMQ has recorded a failed
+attempt and the same job still has attempts remaining. First attempts, terminal
+failures, and manually recreated jobs are not counted as retries.
 
 ## SLIs
 
@@ -208,11 +216,16 @@ Dependency guidance:
   work, then verify authoritative state before replaying.
 - Repeated job failure: inspect safe error category/type, dependency readiness,
   and domain run state. Do not delete data as a first response.
+- Stalled metrics: BullMQ's stalled event supplies only the job ID in the
+  current worker event path. The metric uses bounded `job_name="unknown"` rather
+  than performing extra Redis lookups during an already degraded condition.
 
 ## Known Limitations
 
 - API readiness metrics are request-derived; dependency-specific readiness
   gauges are not yet exposed for every dependency.
+- Worker readiness dependency checks are bounded by a short timeout so Redis or
+  queue outages return promptly as `not_ready`.
 - Real-stack outage validation must be recorded in the PR from the executing
   environment.
 - OpenTelemetry traces are intentionally deferred.

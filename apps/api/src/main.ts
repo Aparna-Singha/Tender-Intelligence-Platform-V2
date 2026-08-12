@@ -14,13 +14,18 @@ import {
   parseEnvironment,
   type ApiEnvironment,
 } from "@tender/config";
-import { createApiMetrics, type ApiMetrics } from "@tender/observability";
+import {
+  createApiMetrics,
+  createLogger,
+  type ApiMetrics,
+} from "@tender/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { Logger } from "nestjs-pino";
 
 import { AppModule } from "./app.module.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { ApiResponseInterceptor } from "./common/api-response.interceptor.js";
+import { metricRouteForRequest } from "./common/metric-routes.js";
 import { resolveRequestId } from "./common/request-id.js";
 import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
 
@@ -48,6 +53,11 @@ async function bootstrap(): Promise<void> {
   const environment = app.get<ApiEnvironment>(API_ENVIRONMENT);
   const metrics = createApiMetrics();
   const metricsServer = createMetricsServer(metrics);
+  const operationalLogger = createLogger({
+    environment: environment.NODE_ENV,
+    level: environment.LOG_LEVEL,
+    service: "api",
+  });
   const fastify: FastifyInstance = app.getHttpAdapter().getInstance();
 
   await app.register(helmet, {
@@ -68,7 +78,7 @@ async function bootstrap(): Promise<void> {
     done();
   });
   fastify.addHook("onResponse", (request, reply, done) => {
-    const route = getRouteTemplate(request);
+    const route = metricRouteForRequest(request);
     const duration = elapsedSeconds(requestStartTimes.get(request));
     metrics.requestFinished(
       {
@@ -83,6 +93,23 @@ async function bootstrap(): Promise<void> {
     }
     if (reply.statusCode >= 500 && reply.statusCode !== 503) {
       metrics.unexpectedError(route);
+    }
+    if (reply.statusCode >= 500) {
+      operationalLogger.error(
+        {
+          error_category:
+            reply.statusCode === 503
+              ? "dependency_unavailable"
+              : "unexpected_error",
+          error_type: "Http5xxResponse",
+          method: request.method,
+          request_id: request.id,
+          route,
+          status_class: `${Math.trunc(reply.statusCode / 100)}xx`,
+          status_code: reply.statusCode,
+        },
+        "Request failed",
+      );
     }
     done();
   });
@@ -142,19 +169,4 @@ function elapsedSeconds(startedAt: bigint | undefined): number {
     return 0;
   }
   return Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
-}
-
-function getRouteTemplate(request: FastifyRequest): string {
-  return (
-    request.routeOptions.url ?? normalizePath(request.url.split("?")[0] ?? "/")
-  );
-}
-
-function normalizePath(path: string): string {
-  return path
-    .replace(
-      /\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?=\/|$)/gi,
-      "/:id",
-    )
-    .replace(/\/\d+(?=\/|$)/g, "/:id");
 }

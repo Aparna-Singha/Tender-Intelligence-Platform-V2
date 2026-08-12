@@ -51,6 +51,14 @@ export function startJobLifecycle(
   };
 }
 
+export function hasBullMqRetryRemaining(job: Job | undefined): boolean {
+  if (job === undefined) {
+    return false;
+  }
+  const attempts = Number(job.opts.attempts ?? 1);
+  return Number.isFinite(attempts) && job.attemptsMade < attempts;
+}
+
 function buildJobContext(job: Job): Record<string, unknown> {
   return {
     attempt: job.attemptsMade + 1,

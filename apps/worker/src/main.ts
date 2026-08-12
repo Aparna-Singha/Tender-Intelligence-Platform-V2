@@ -11,7 +11,10 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { Redis } from "ioredis";
 
 import { createHealthServer } from "./health-server.js";
-import { startJobLifecycle } from "./job-observability.js";
+import {
+  hasBullMqRetryRemaining,
+  startJobLifecycle,
+} from "./job-observability.js";
 import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
@@ -244,6 +247,18 @@ async function bootstrap(): Promise<void> {
     );
   });
   documentWorker.on("failed", (job, error) => {
+    if (job !== undefined && hasBullMqRetryRemaining(job)) {
+      metrics.jobRetried({ jobName: job.name });
+      logger.warn(
+        {
+          attempt: job.attemptsMade,
+          event: "job_retry_scheduled",
+          job_id: job.id,
+          job_name: job.name,
+        },
+        "Worker job retry scheduled",
+      );
+    }
     logger.error(
       { errorType: error.name, jobId: job?.id, jobName: job?.name },
       "Document job failed",
