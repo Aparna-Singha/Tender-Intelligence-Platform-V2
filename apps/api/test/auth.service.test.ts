@@ -38,6 +38,44 @@ function uniqueEmailError(): Prisma.PrismaClientKnownRequestError {
   });
 }
 
+function uniqueEmailIndexError(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+    clientVersion: "test",
+    code: "P2002",
+    meta: { target: "users_email_key" },
+  });
+}
+
+function driverAdapterUniqueEmailError(): Prisma.PrismaClientKnownRequestError {
+  return new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+    clientVersion: "test",
+    code: "P2002",
+    meta: {
+      driverAdapterError: {
+        cause: {
+          constraint: {
+            fields: ["email"],
+          },
+          kind: "UniqueConstraintViolation",
+          originalCode: "23505",
+        },
+        name: "DriverAdapterError",
+      },
+      modelName: "User",
+    },
+  });
+}
+
+function postgresUniqueEmailError(): Error & {
+  readonly code: string;
+  readonly constraint: string;
+} {
+  return Object.assign(new Error("unique violation"), {
+    code: "23505",
+    constraint: "users_email_key",
+  });
+}
+
 function databaseAuthError(): Prisma.PrismaClientInitializationError {
   return new Prisma.PrismaClientInitializationError(
     "Authentication failed against database server at db.example.test",
@@ -93,6 +131,47 @@ describe("AuthService registration reliability", () => {
   it("maps a true duplicate email constraint to conflict", async () => {
     const transaction = {
       user: { create: vi.fn().mockRejectedValue(uniqueEmailError()) },
+    };
+    const database = {
+      $transaction: transactionMock(transaction),
+    };
+
+    await expect(
+      createService(database).register(registerInput, context),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("maps a named email unique index to conflict", async () => {
+    const transaction = {
+      user: { create: vi.fn().mockRejectedValue(uniqueEmailIndexError()) },
+    };
+    const database = {
+      $transaction: transactionMock(transaction),
+    };
+
+    await expect(
+      createService(database).register(registerInput, context),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("maps a PostgreSQL email unique violation to conflict", async () => {
+    const transaction = {
+      user: { create: vi.fn().mockRejectedValue(postgresUniqueEmailError()) },
+    };
+    const database = {
+      $transaction: transactionMock(transaction),
+    };
+
+    await expect(
+      createService(database).register(registerInput, context),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it("maps Prisma driver-adapter email unique metadata to conflict", async () => {
+    const transaction = {
+      user: {
+        create: vi.fn().mockRejectedValue(driverAdapterUniqueEmailError()),
+      },
     };
     const database = {
       $transaction: transactionMock(transaction),
