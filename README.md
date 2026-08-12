@@ -133,13 +133,29 @@ The repository pins pnpm through the `packageManager` field.
    ./infrastructure/scripts/start-local.sh
    ```
 
-6. Apply database migrations:
+6. Run the non-destructive local diagnostic:
+
+   ```sh
+   pnpm run doctor
+   ```
+
+   The doctor checks local tooling, environment alignment, PostgreSQL, Redis,
+   MinIO, ClamAV, Docker Compose, and migration status without changing data or
+   configuration. If PostgreSQL credentials are rejected, remember that changing
+   `.env` does not change credentials already initialized inside an existing
+   local Docker volume.
+
+7. Apply database migrations:
 
    ```sh
    pnpm db:migrate:deploy
    ```
 
-7. Start the web, API, and worker processes:
+8. Run the diagnostic again, then start the web, API, and worker processes:
+
+   ```sh
+   pnpm run doctor
+   ```
 
    ```sh
    pnpm dev
@@ -275,6 +291,7 @@ before running any type-aware validation:
 ```sh
 pnpm install --frozen-lockfile
 pnpm db:generate
+pnpm run doctor
 pnpm format:check
 pnpm lint
 pnpm typecheck

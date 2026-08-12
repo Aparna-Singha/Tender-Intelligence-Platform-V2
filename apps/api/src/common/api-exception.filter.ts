@@ -46,7 +46,8 @@ const publicErrors: Readonly<
   },
   [HttpStatus.SERVICE_UNAVAILABLE]: {
     code: "SERVICE_UNAVAILABLE",
-    message: "The service is not ready.",
+    message:
+      "The service is temporarily unavailable. Please try again shortly.",
   },
 };
 

@@ -10,8 +10,13 @@ import type {
   PasswordResetConfirm,
   RegisterRequest,
 } from "@tender/contracts";
-import type { PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 
+import {
+  dependencyUnavailable,
+  isDatabaseUnavailableError,
+  isPrismaUniqueConstraintError,
+} from "../common/database-errors.js";
 import {
   createOpaqueToken,
   privacyHash,
@@ -20,7 +25,7 @@ import {
 } from "../common/security-crypto.js";
 import { API_ENVIRONMENT, PRISMA_CLIENT } from "../infrastructure.tokens.js";
 import { NotificationService } from "./notification.service.js";
-import { SessionService, type NewSession } from "./session.service.js";
+import type { NewSession } from "./session.service.js";
 
 export interface AuthenticationContext {
   readonly ip: string;
@@ -52,7 +57,6 @@ export class AuthService {
     @Inject(API_ENVIRONMENT) private readonly environment: ApiEnvironment,
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     private readonly notifications: NotificationService,
-    private readonly sessions: SessionService,
   ) {}
 
   public async register(
@@ -60,88 +64,119 @@ export class AuthService {
     context: AuthenticationContext,
   ): Promise<AuthenticationResult> {
     const passwordHash = await this.passwordHasher.hash(input.password);
-    let user;
     try {
-      user = await this.database.user.create({
-        data: {
-          displayName: input.display_name,
-          email: input.email,
-          passwordHash,
-        },
-        select: { displayName: true, email: true, id: true },
+      return await this.database.$transaction(async (transaction) => {
+        const user = await transaction.user.create({
+          data: {
+            displayName: input.display_name,
+            email: input.email,
+            passwordHash,
+          },
+          select: { displayName: true, email: true, id: true },
+        });
+        const session = await this.createSession(
+          transaction,
+          user.id,
+          this.sessionContext(context),
+        );
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: user.id,
+            eventType: "LOGIN_SUCCEEDED",
+            ipHash: this.hashPrivate(context.ip),
+            outcome: "SUCCESS",
+            requestId: context.requestId,
+            subjectId: session.id,
+            subjectType: "session",
+          },
+        });
+        return {
+          session,
+          user: {
+            display_name: user.displayName,
+            email: user.email,
+            id: user.id,
+          },
+        };
       });
-    } catch {
-      throw new ConflictException();
+    } catch (error: unknown) {
+      if (isPrismaUniqueConstraintError(error, "email")) {
+        throw new ConflictException(
+          "An account with this email already exists.",
+        );
+      }
+      if (isDatabaseUnavailableError(error)) throw dependencyUnavailable();
+      throw error;
     }
-    const session = await this.sessions.create(
-      user.id,
-      this.sessionContext(context),
-    );
-    await this.database.auditEvent.create({
-      data: {
-        actorUserId: user.id,
-        eventType: "LOGIN_SUCCEEDED",
-        ipHash: this.hashPrivate(context.ip),
-        outcome: "SUCCESS",
-        requestId: context.requestId,
-        subjectId: session.id,
-        subjectType: "session",
-      },
-    });
-    return {
-      session,
-      user: { display_name: user.displayName, email: user.email, id: user.id },
-    };
   }
 
   public async login(
     input: LoginRequest,
     context: AuthenticationContext,
   ): Promise<AuthenticationResult | null> {
-    const user = await this.database.user.findUnique({
-      where: { email: input.email },
-    });
+    let user;
+    try {
+      user = await this.database.user.findUnique({
+        where: { email: input.email },
+      });
+    } catch (error: unknown) {
+      if (isDatabaseUnavailableError(error)) throw dependencyUnavailable();
+      throw error;
+    }
     const passwordMatches = await this.passwordHasher.verify(
       input.password,
       user?.passwordHash ?? (await this.dummyHash),
     );
     if (user === null || !passwordMatches) {
-      await this.database.auditEvent.create({
-        data: {
-          eventType: "LOGIN_FAILED",
-          ipHash: this.hashPrivate(context.ip),
-          metadata: { email_hash: this.hashPrivate(input.email) },
-          outcome: "DENIED",
-          requestId: context.requestId,
-          subjectType: "user",
-        },
-      });
+      try {
+        await this.database.auditEvent.create({
+          data: {
+            eventType: "LOGIN_FAILED",
+            ipHash: this.hashPrivate(context.ip),
+            metadata: { email_hash: this.hashPrivate(input.email) },
+            outcome: "DENIED",
+            requestId: context.requestId,
+            subjectType: "user",
+          },
+        });
+      } catch (error: unknown) {
+        if (isDatabaseUnavailableError(error)) throw dependencyUnavailable();
+        throw error;
+      }
       return null;
     }
 
-    const session = await this.sessions.create(
-      user.id,
-      this.sessionContext(context),
-    );
-    await this.database.auditEvent.create({
-      data: {
-        actorUserId: user.id,
-        eventType: "LOGIN_SUCCEEDED",
-        ipHash: this.hashPrivate(context.ip),
-        outcome: "SUCCESS",
-        requestId: context.requestId,
-        subjectId: session.id,
-        subjectType: "session",
-      },
-    });
-    return {
-      session,
-      user: {
-        display_name: user.displayName,
-        email: user.email,
-        id: user.id,
-      },
-    };
+    try {
+      return await this.database.$transaction(async (transaction) => {
+        const session = await this.createSession(
+          transaction,
+          user.id,
+          this.sessionContext(context),
+        );
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: user.id,
+            eventType: "LOGIN_SUCCEEDED",
+            ipHash: this.hashPrivate(context.ip),
+            outcome: "SUCCESS",
+            requestId: context.requestId,
+            subjectId: session.id,
+            subjectType: "session",
+          },
+        });
+        return {
+          session,
+          user: {
+            display_name: user.displayName,
+            email: user.email,
+            id: user.id,
+          },
+        };
+      });
+    } catch (error: unknown) {
+      if (isDatabaseUnavailableError(error)) throw dependencyUnavailable();
+      throw error;
+    }
   }
 
   public async logout(
@@ -264,5 +299,28 @@ export class AuthService {
           ? null
           : this.hashPrivate(context.userAgent),
     };
+  }
+
+  private async createSession(
+    database: Prisma.TransactionClient,
+    userId: string,
+    context: { readonly ipHash: string; readonly userAgentHash: string | null },
+  ): Promise<NewSession> {
+    const token = createOpaqueToken();
+    const expiresAt = new Date(
+      Date.now() + this.environment.SESSION_TTL_SECONDS * 1_000,
+    );
+    const session = await database.session.create({
+      data: {
+        expiresAt,
+        ipHash: context.ipHash,
+        tokenHash: sha256(token),
+        userAgentHash: context.userAgentHash,
+        userId,
+      },
+      select: { id: true },
+    });
+
+    return { expiresAt, id: session.id, token };
   }
 }
