@@ -1,11 +1,17 @@
-import { Queue, Worker } from "bullmq";
+import { Queue, Worker, type Job } from "bullmq";
 import { S3Client } from "@aws-sdk/client-s3";
 import { parseEnvironment, workerEnvironmentSchema } from "@tender/config";
 import { createPrismaClient, type PrismaClient } from "@tender/database";
-import { createLogger } from "@tender/observability";
+import {
+  createLogger,
+  createWorkerMetrics,
+  type WorkerMetrics,
+} from "@tender/observability";
+import Fastify, { type FastifyInstance } from "fastify";
 import { Redis } from "ioredis";
 
 import { createHealthServer } from "./health-server.js";
+import { startJobLifecycle } from "./job-observability.js";
 import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
@@ -47,6 +53,18 @@ import {
   type ControlledPackageJob,
 } from "./controlled-package-processor.js";
 
+type PlatformJob =
+  | DocumentJob
+  | TenderDocumentJob
+  | ExtractionJob
+  | RiskAnalysisJob
+  | EvidenceAssessmentJob
+  | ChecklistGenerationJob
+  | RagJob
+  | DraftGenerationJob
+  | FinalReadinessJob
+  | ControlledPackageJob;
+
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
     "worker",
@@ -58,6 +76,8 @@ async function bootstrap(): Promise<void> {
     level: environment.LOG_LEVEL,
     service: "worker",
   });
+  const metrics = createWorkerMetrics();
+  const metricsServer = createMetricsServer(metrics);
   const database: PrismaClient = createPrismaClient(environment.DATABASE_URL);
   const redis = new Redis(environment.REDIS_URL, {
     lazyConnect: true,
@@ -120,103 +140,109 @@ async function bootstrap(): Promise<void> {
     environment.S3_BUCKET,
     new ClamAvScanner(environment.CLAMAV_HOST, environment.CLAMAV_PORT),
   );
-  const documentWorker = new Worker<
-    | DocumentJob
-    | TenderDocumentJob
-    | ExtractionJob
-    | RiskAnalysisJob
-    | EvidenceAssessmentJob
-    | ChecklistGenerationJob
-    | RagJob
-    | DraftGenerationJob
-    | FinalReadinessJob
-    | ControlledPackageJob
-  >(
+  const documentWorker = new Worker<PlatformJob>(
     environment.QUEUE_NAME,
     async (job) => {
-      if (job.name === "process-tender-document") {
-        if (!isTenderDocumentJob(job.data))
-          throw new Error("Invalid tender document job");
-        const data = job.data;
-        return runWithTimeout(
-          environment.DOCUMENT_JOB_TIMEOUT_MS,
-          async (signal) => tenderProcessor.process(data, signal),
-        );
+      const lifecycle = startJobLifecycle(job, logger, metrics);
+      try {
+        const result = await dispatchJob(job);
+        lifecycle.complete();
+        return result;
+      } catch (error: unknown) {
+        lifecycle.fail(error);
+        throw error;
       }
-      if (job.name === "extract-tender-version") {
-        if (!isExtractionJob(job.data))
-          throw new Error("Invalid extraction job");
-        const data = job.data;
-        return runWithTimeout(
-          environment.EXTRACTION_JOB_TIMEOUT_MS,
-          async (signal) => extractionProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "analyse-early-tender-risk") {
-        if (!isRiskAnalysisJob(job.data))
-          throw new Error("Invalid risk analysis job");
-        const data = job.data;
-        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
-          riskAnalysisProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "compare-company-evidence") {
-        if (!isEvidenceAssessmentJob(job.data))
-          throw new Error("Invalid evidence assessment job");
-        const data = job.data;
-        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
-          evidenceAssessmentProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "generate-missing-action-checklist") {
-        if (!isChecklistGenerationJob(job.data))
-          throw new Error("Invalid checklist generation job");
-        const data = job.data;
-        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
-          checklistGenerationProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "index-tender-rag" || job.name === "answer-tender-rag") {
-        if (!isRagJob(job.data)) throw new Error("Invalid RAG job");
-        const data = job.data;
-        return runWithTimeout(environment.RAG_JOB_TIMEOUT_MS, (signal) =>
-          ragProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "generate-fact-constrained-draft") {
-        if (!isDraftGenerationJob(job.data))
-          throw new Error("Invalid draft generation job");
-        const data = job.data;
-        return runWithTimeout(environment.DRAFT_JOB_TIMEOUT_MS, (signal) =>
-          draftGenerationProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "run-final-readiness-audit") {
-        if (!isFinalReadinessJob(job.data))
-          throw new Error("Invalid final readiness job");
-        const data = job.data;
-        return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
-          finalReadinessProcessor.process(data, signal),
-        );
-      }
-      if (job.name === "generate-controlled-review-package") {
-        if (!isControlledPackageJob(job.data))
-          throw new Error("Invalid controlled package job");
-        const data = job.data;
-        return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, (signal) =>
-          controlledPackageProcessor.process(data, signal),
-        );
-      }
-      if (!isCompanyDocumentJob(job.data))
-        throw new Error("Invalid company document job");
-      const data = job.data;
-      return runWithTimeout(
-        environment.DOCUMENT_JOB_TIMEOUT_MS,
-        async (signal) => processor.process(job.name, data, signal),
-      );
     },
     { connection: redis, concurrency: 2 },
   );
+  async function dispatchJob(job: Job<PlatformJob>): Promise<unknown> {
+    if (job.name === "process-tender-document") {
+      if (!isTenderDocumentJob(job.data))
+        throw new Error("Invalid tender document job");
+      const data = job.data;
+      return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, (signal) =>
+        tenderProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "extract-tender-version") {
+      if (!isExtractionJob(job.data)) throw new Error("Invalid extraction job");
+      const data = job.data;
+      return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+        extractionProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "analyse-early-tender-risk") {
+      if (!isRiskAnalysisJob(job.data))
+        throw new Error("Invalid risk analysis job");
+      const data = job.data;
+      return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+        riskAnalysisProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "compare-company-evidence") {
+      if (!isEvidenceAssessmentJob(job.data))
+        throw new Error("Invalid evidence assessment job");
+      const data = job.data;
+      return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+        evidenceAssessmentProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "generate-missing-action-checklist") {
+      if (!isChecklistGenerationJob(job.data))
+        throw new Error("Invalid checklist generation job");
+      const data = job.data;
+      return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+        checklistGenerationProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "index-tender-rag" || job.name === "answer-tender-rag") {
+      if (!isRagJob(job.data)) throw new Error("Invalid RAG job");
+      const data = job.data;
+      return runWithTimeout(environment.RAG_JOB_TIMEOUT_MS, (signal) =>
+        ragProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "generate-fact-constrained-draft") {
+      if (!isDraftGenerationJob(job.data))
+        throw new Error("Invalid draft generation job");
+      const data = job.data;
+      return runWithTimeout(environment.DRAFT_JOB_TIMEOUT_MS, (signal) =>
+        draftGenerationProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "run-final-readiness-audit") {
+      if (!isFinalReadinessJob(job.data))
+        throw new Error("Invalid final readiness job");
+      const data = job.data;
+      return runWithTimeout(environment.EXTRACTION_JOB_TIMEOUT_MS, (signal) =>
+        finalReadinessProcessor.process(data, signal),
+      );
+    }
+    if (job.name === "generate-controlled-review-package") {
+      if (!isControlledPackageJob(job.data))
+        throw new Error("Invalid controlled package job");
+      const data = job.data;
+      return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, (signal) =>
+        controlledPackageProcessor.process(data, signal),
+      );
+    }
+    if (!isCompanyDocumentJob(job.data))
+      throw new Error("Invalid company document job");
+    const data = job.data;
+    return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, (signal) =>
+      processor.process(job.name, data, signal),
+    );
+  }
+  documentWorker.on("stalled", (jobId) => {
+    logger.warn({ event: "job_stalled", jobId }, "Worker job stalled");
+    metrics.jobStalled({ jobName: "unknown" });
+  });
+  documentWorker.on("error", (error) => {
+    logger.error(
+      { error_type: error.name, event: "worker_error" },
+      "Worker infrastructure error",
+    );
+  });
   documentWorker.on("failed", (job, error) => {
     logger.error(
       { errorType: error.name, jobId: job?.id, jobName: job?.name },
@@ -301,6 +327,7 @@ async function bootstrap(): Promise<void> {
   const readiness = new WorkerReadiness({ database, queue, redis });
   const server = createHealthServer({
     logger,
+    metrics,
     readiness,
     requestIdHeader: environment.REQUEST_ID_HEADER,
   });
@@ -315,6 +342,7 @@ async function bootstrap(): Promise<void> {
 
     const results = await Promise.allSettled([
       server.close(),
+      metricsServer.close(),
       queue.close(),
       documentWorker.close(),
       redis.quit(),
@@ -339,76 +367,33 @@ async function bootstrap(): Promise<void> {
     host: environment.WORKER_HEALTH_HOST,
     port: environment.WORKER_HEALTH_PORT,
   });
+  await metricsServer.listen({
+    host: environment.WORKER_METRICS_HOST,
+    port: environment.WORKER_METRICS_PORT,
+  });
   logger.info(
     {
       healthPort: environment.WORKER_HEALTH_PORT,
+      metricsPort: environment.WORKER_METRICS_PORT,
       queue: environment.QUEUE_NAME,
     },
     "Worker infrastructure and document consumer are ready",
   );
 }
 
-function isTenderDocumentJob(
-  value:
-    | DocumentJob
-    | TenderDocumentJob
-    | ExtractionJob
-    | RiskAnalysisJob
-    | EvidenceAssessmentJob
-    | ChecklistGenerationJob
-    | RagJob
-    | DraftGenerationJob
-    | FinalReadinessJob
-    | ControlledPackageJob,
-): value is TenderDocumentJob {
+function isTenderDocumentJob(value: PlatformJob): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
 
-function isCompanyDocumentJob(
-  value:
-    | DocumentJob
-    | TenderDocumentJob
-    | ExtractionJob
-    | RiskAnalysisJob
-    | EvidenceAssessmentJob
-    | ChecklistGenerationJob
-    | RagJob
-    | DraftGenerationJob
-    | FinalReadinessJob
-    | ControlledPackageJob,
-): value is DocumentJob {
+function isCompanyDocumentJob(value: PlatformJob): value is DocumentJob {
   return "documentVersionId" in value;
 }
 
-function isExtractionJob(
-  value:
-    | DocumentJob
-    | TenderDocumentJob
-    | ExtractionJob
-    | RiskAnalysisJob
-    | EvidenceAssessmentJob
-    | ChecklistGenerationJob
-    | RagJob
-    | DraftGenerationJob
-    | FinalReadinessJob
-    | ControlledPackageJob,
-): value is ExtractionJob {
+function isExtractionJob(value: PlatformJob): value is ExtractionJob {
   return "extractionRunId" in value && "requestId" in value;
 }
 
-function isRiskAnalysisJob(
-  value:
-    | DocumentJob
-    | TenderDocumentJob
-    | ExtractionJob
-    | RiskAnalysisJob
-    | EvidenceAssessmentJob
-    | ChecklistGenerationJob
-    | RagJob
-    | DraftGenerationJob
-    | FinalReadinessJob
-    | ControlledPackageJob,
-): value is RiskAnalysisJob {
+function isRiskAnalysisJob(value: PlatformJob): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
 }
 
@@ -417,3 +402,12 @@ void bootstrap().catch((error: unknown) => {
   process.stderr.write(`Worker startup failed (${errorType}).\n`);
   process.exitCode = 1;
 });
+
+function createMetricsServer(metrics: WorkerMetrics): FastifyInstance {
+  const server = Fastify({ logger: false });
+  server.get("/metrics", async (_request, reply) => {
+    void reply.header("content-type", metrics.registry.contentType);
+    return metrics.registry.metrics();
+  });
+  return server;
+}

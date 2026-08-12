@@ -28,6 +28,8 @@ describe("parseEnvironment", () => {
     );
 
     expect(result.API_PORT).toBe(4000);
+    expect(result.API_METRICS_HOST).toBe("127.0.0.1");
+    expect(result.API_METRICS_PORT).toBe(4100);
     expect(result.REQUEST_ID_HEADER).toBe("x-request-id");
     expect(result.S3_FORCE_PATH_STYLE).toBe(true);
   });

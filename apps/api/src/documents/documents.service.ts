@@ -283,6 +283,7 @@ export class DocumentsService {
       {
         documentVersionId: session.documentVersion.id,
         organisationId,
+        requestId,
       },
       { attempts: 3, jobId: session.documentVersion.id, removeOnComplete: 100 },
     );
@@ -397,6 +398,7 @@ export class DocumentsService {
       {
         documentVersionId: documentId,
         organisationId,
+        requestId,
       },
       {
         jobId: `delete-${documentId}`,
