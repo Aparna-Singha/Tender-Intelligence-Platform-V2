@@ -14,13 +14,22 @@ import {
   parseEnvironment,
   type ApiEnvironment,
 } from "@tender/config";
+import {
+  createApiMetrics,
+  createLogger,
+  type ApiMetrics,
+} from "@tender/observability";
+import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { Logger } from "nestjs-pino";
 
 import { AppModule } from "./app.module.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { ApiResponseInterceptor } from "./common/api-response.interceptor.js";
+import { metricRouteForRequest } from "./common/metric-routes.js";
 import { resolveRequestId } from "./common/request-id.js";
 import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
+
+const requestStartTimes = new WeakMap<FastifyRequest, bigint>();
 
 async function bootstrap(): Promise<void> {
   const startupEnvironment = parseEnvironment(
@@ -42,6 +51,14 @@ async function bootstrap(): Promise<void> {
     },
   );
   const environment = app.get<ApiEnvironment>(API_ENVIRONMENT);
+  const metrics = createApiMetrics();
+  const metricsServer = createMetricsServer(metrics);
+  const operationalLogger = createLogger({
+    environment: environment.NODE_ENV,
+    level: environment.LOG_LEVEL,
+    service: "api",
+  });
+  const fastify: FastifyInstance = app.getHttpAdapter().getInstance();
 
   await app.register(helmet, {
     contentSecurityPolicy: false,
@@ -54,6 +71,47 @@ async function bootstrap(): Promise<void> {
     credentials: true,
     methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
     origin: environment.WEB_ORIGIN,
+  });
+  fastify.addHook("onRequest", (request, _reply, done) => {
+    requestStartTimes.set(request, process.hrtime.bigint());
+    metrics.requestStarted();
+    done();
+  });
+  fastify.addHook("onResponse", (request, reply, done) => {
+    const route = metricRouteForRequest(request);
+    const duration = elapsedSeconds(requestStartTimes.get(request));
+    metrics.requestFinished(
+      {
+        method: request.method,
+        route,
+        statusCode: reply.statusCode,
+      },
+      duration,
+    );
+    if (reply.statusCode === 503) {
+      metrics.dependencyUnavailable(route);
+    }
+    if (reply.statusCode >= 500 && reply.statusCode !== 503) {
+      metrics.unexpectedError(route);
+    }
+    if (reply.statusCode >= 500) {
+      operationalLogger.error(
+        {
+          error_category:
+            reply.statusCode === 503
+              ? "dependency_unavailable"
+              : "unexpected_error",
+          error_type: "Http5xxResponse",
+          method: request.method,
+          request_id: request.id,
+          route,
+          status_class: `${Math.trunc(reply.statusCode / 100)}xx`,
+          status_code: reply.statusCode,
+        },
+        "Request failed",
+      );
+    }
+    done();
   });
 
   const openApiConfig = new DocumentBuilder()
@@ -70,10 +128,25 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.createDocument(app, openApiConfig),
   );
 
-  await app.listen({
-    host: environment.API_HOST,
-    port: environment.API_PORT,
+  await metricsServer.listen({
+    host: environment.API_METRICS_HOST,
+    port: environment.API_METRICS_PORT,
   });
+  process.once("SIGINT", () => {
+    void metricsServer.close();
+  });
+  process.once("SIGTERM", () => {
+    void metricsServer.close();
+  });
+  try {
+    await app.listen({
+      host: environment.API_HOST,
+      port: environment.API_PORT,
+    });
+  } catch (error: unknown) {
+    await metricsServer.close();
+    throw error;
+  }
 }
 
 void bootstrap().catch((error: unknown) => {
@@ -81,3 +154,19 @@ void bootstrap().catch((error: unknown) => {
   process.stderr.write(`API startup failed (${errorType}).\n`);
   process.exitCode = 1;
 });
+
+function createMetricsServer(metrics: ApiMetrics): FastifyInstance {
+  const server = Fastify({ logger: false });
+  server.get("/metrics", async (_request, reply) => {
+    void reply.header("content-type", metrics.registry.contentType);
+    return metrics.registry.metrics();
+  });
+  return server;
+}
+
+function elapsedSeconds(startedAt: bigint | undefined): number {
+  if (startedAt === undefined) {
+    return 0;
+  }
+  return Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+}

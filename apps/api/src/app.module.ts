@@ -1,6 +1,7 @@
 import { Module } from "@nestjs/common";
 import { APP_GUARD } from "@nestjs/core";
 import type { ApiEnvironment } from "@tender/config";
+import { redactionPaths } from "@tender/observability";
 import { LoggerModule } from "nestjs-pino";
 
 import { HealthModule } from "./health/health.module.js";
@@ -41,11 +42,7 @@ import { RateLimitService } from "./common/rate-limit.service.js";
           level: environment.LOG_LEVEL,
           redact: {
             censor: "[REDACTED]",
-            paths: [
-              "req.headers.authorization",
-              "req.headers.cookie",
-              "res.headers.set-cookie",
-            ],
+            paths: redactionPaths,
           },
         },
       }),
