@@ -37,9 +37,9 @@ successful page; it creates a review-safe issue and bounded status.
 ## Evaluation
 
 The synthetic golden manifest lives in `eval/fixtures/golden/manifest.json`.
-It covers extraction fields, requirements, citation validation, OCR regression
-metrics, RAG answer outcomes, prompt-injection-like evidence, and controlled
-draft grounding/placeholder behavior.
+It covers extraction fields, requirements, citation validation, OCR fixture
+policy metrics, RAG policy-fixture outcomes, prompt-injection-like evidence, and
+controlled draft grounding/placeholder behavior.
 
 Run:
 
@@ -48,9 +48,17 @@ pnpm eval:offline
 ```
 
 The deterministic report contains policy version, fixture checksum, case count,
-field/requirement recall, citation validation rate, OCR character and word error
-rates, RAG outcomes, draft grounding checks, and failure cases. Generated reports
-under `eval/results/` are transient unless intentionally promoted.
+field/requirement recall, citation validation rate, OCR fixture character and
+word error rates, RAG fixture-policy outcomes, draft grounding checks, and
+failure cases. Extraction, citation, chunking, prompt-injection detection, and
+draft support checks call repository implementation code. OCR CER/WER currently
+compare synthetic manifest strings, and RAG outcomes use a small deterministic
+fixture policy rather than provider-backed retrieval or answer generation.
+Generated reports under `eval/results/` are transient unless intentionally
+promoted.
+
+`pnpm eval:offline` is part of hosted CI. `pnpm eval:provider` is intentionally
+not run in CI.
 
 Provider-backed evaluation is opt-in:
 

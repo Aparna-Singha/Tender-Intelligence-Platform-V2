@@ -222,7 +222,7 @@ const report = {
   failure_cases: failures,
   fixture_checksum: createHash("sha256").update(manifestText).digest("hex"),
   fixture_version: manifest.fixture_version,
-  ocr_metrics: {
+  ocr_fixture_policy_metrics: {
     low_confidence_pages: ocrResults.filter(
       (result) => result.confidence < 0.65,
     ).length,
@@ -234,7 +234,7 @@ const report = {
     results: ocrResults,
   },
   provider: null,
-  rag_metrics: {
+  rag_fixture_policy_metrics: {
     cases: ragResults.length,
     outcomes: ragResults,
     prompt_injection_cases_detected: units.filter((unit) =>
