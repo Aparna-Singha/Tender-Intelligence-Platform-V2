@@ -47,8 +47,18 @@ export interface ParsedUnit {
   readonly confidence: Confidence;
   readonly label?: string;
   readonly language?: string;
+  readonly ocrConfidence?: number;
+  readonly ocrEngine?: string;
+  readonly ocrEngineVersion?: string;
+  readonly ocrConfiguration?: Readonly<
+    Record<string, string | number | boolean>
+  >;
   readonly ocrStatus:
-    "NOT_REQUIRED" | "OCR_UNAVAILABLE" | "HUMAN_REVIEW_REQUIRED";
+    | "NOT_REQUIRED"
+    | "OCR_PERFORMED"
+    | "OCR_FAILED"
+    | "OCR_UNAVAILABLE"
+    | "HUMAN_REVIEW_REQUIRED";
   readonly unitIndex: number;
   readonly unitType: "ARCHIVE_MEMBER" | "PAGE" | "SHEET";
 }

@@ -35,6 +35,14 @@ export interface WorkerJobResultLabels extends WorkerJobLabels {
 }
 
 export interface WorkerMetrics {
+  aiOperationFinished(
+    labels: {
+      readonly operation: "embedding" | "rag_answer" | "draft_generation";
+      readonly outcome: "success" | "failure";
+      readonly provider: string;
+    },
+    durationSeconds: number,
+  ): void;
   readonly registry: ServiceMetricsRegistry;
   jobStarted(labels: WorkerJobLabels, queueWaitSeconds?: number): void;
   jobFinished(labels: WorkerJobResultLabels, durationSeconds: number): void;
@@ -162,8 +170,25 @@ export function createWorkerMetrics(): WorkerMetrics {
     name: "tip_worker_ready",
     registers: [registry],
   });
+  const aiOperationDuration = new Histogram({
+    buckets: durationBuckets,
+    help: "AI provider operation duration in seconds with bounded labels.",
+    labelNames: ["operation", "outcome", "provider"] as const,
+    name: "tip_worker_ai_operation_duration_seconds",
+    registers: [registry],
+  });
 
   return {
+    aiOperationFinished: (labels, durationSeconds) => {
+      aiOperationDuration.observe(
+        {
+          operation: labels.operation,
+          outcome: labels.outcome,
+          provider: labels.provider,
+        },
+        durationSeconds,
+      );
+    },
     jobFinished: (labels, durationSeconds) => {
       active.dec({ job_name: labels.jobName });
       finished.inc({ job_name: labels.jobName, outcome: labels.outcome });

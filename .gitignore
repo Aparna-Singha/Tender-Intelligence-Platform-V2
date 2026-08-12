@@ -10,6 +10,7 @@ coverage/
 .playwright/
 playwright-report/
 test-results/
+eval/results/
 *.tsbuildinfo
 
 # Environment and credentials

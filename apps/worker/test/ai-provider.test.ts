@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { GeminiGateway, ProviderUnavailableError } from "../src/ai-provider.js";
+import {
+  GeminiGateway,
+  ProviderResponseError,
+  ProviderUnavailableError,
+} from "../src/ai-provider.js";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -31,7 +35,9 @@ describe("Gemini provider adapter", () => {
     );
     await expect(
       gateway.embedDocuments(["evidence"], new AbortController().signal),
-    ).rejects.toThrow("EMBEDDING_DIMENSION_MISMATCH");
+    ).rejects.toMatchObject({
+      code: "EMBEDDING_DIMENSION_MISMATCH",
+    });
   });
 
   it("uses distinct embedding task types for documents and queries", async () => {
@@ -95,7 +101,65 @@ describe("Gemini provider adapter", () => {
         [{ handle: "C1", text: "Evidence" }],
         new AbortController().signal,
       ),
-    ).rejects.toThrow("INVALID_PROVIDER_RESPONSE");
+    ).rejects.toBeInstanceOf(ProviderResponseError);
+  });
+
+  it("classifies rate limits without leaking provider bodies", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("raw provider details", { status: 429 }),
+        ),
+    );
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    await expect(
+      gateway.embedQuery("question", new AbortController().signal),
+    ).rejects.toMatchObject({ code: "PROVIDER_RATE_LIMITED" });
+  });
+
+  it("classifies provider 5xx as dependency unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("raw provider details", { status: 503 }),
+        ),
+    );
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    await expect(
+      gateway.embedQuery("question", new AbortController().signal),
+    ).rejects.toMatchObject({ code: "PROVIDER_DEPENDENCY_UNAVAILABLE" });
+  });
+
+  it("classifies aborted provider requests safely", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValue(new DOMException("aborted", "AbortError")),
+    );
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    await expect(
+      gateway.embedQuery("question", controller.signal),
+    ).rejects.toMatchObject({ code: "PROVIDER_REQUEST_ABORTED" });
   });
 
   it("generates only structured source-constrained draft sections", async () => {

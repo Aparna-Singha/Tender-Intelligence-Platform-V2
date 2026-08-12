@@ -21,6 +21,8 @@
     "dev:infra:down": "docker compose down",
     "dev:web": "cross-env NODE_ENV=development dotenv -e .env -- pnpm --filter @tender/web dev",
     "dev:worker": "cross-env NODE_ENV=development dotenv -e .env -- pnpm --filter @tender/worker dev",
+    "eval:offline": "cross-env NODE_ENV=test tsx tools/eval-offline.mjs",
+    "eval:provider": "cross-env NODE_ENV=test dotenv -e .env -- tsx tools/eval-provider.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "dotenv -e .env -- turbo run lint && markdownlint-cli2 \"**/*.md\"",

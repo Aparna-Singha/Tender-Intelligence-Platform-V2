@@ -2,9 +2,11 @@ import {
   getDocument,
   version as pdfJsVersion,
 } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { createCanvas } from "@napi-rs/canvas";
 import { unzipSync } from "fflate";
 import type {
   ExtractionIssueCandidate,
+  OcrEngine,
   ParsedBlock,
   ParsedDocument,
   ParsedTableCell,
@@ -13,9 +15,18 @@ import type {
 } from "@tender/domain";
 import { validateZipEntries } from "@tender/domain";
 import { createHash } from "node:crypto";
+import {
+  OCR_LANGUAGE,
+  OCR_PAGE_TIMEOUT_MS,
+  OCR_POLICY_VERSION,
+  TesseractOcrEngine,
+} from "./ocr-engine.js";
 import { readZipDirectory } from "./tender-processor.js";
 
 const MAX_PDF_PAGES = 500;
+const MIN_EMBEDDED_TEXT_CHARACTERS = 20;
+const MAX_OCR_PAGE_PIXELS = 6_000_000;
+const OCR_RENDER_SCALE = 2;
 const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 const MAX_SHEETS = 50;
 const MAX_ROWS = 20_000;
@@ -25,6 +36,10 @@ const MAX_FIELD_CHARS = 32_000;
 
 export class PdfParser implements TenderDocumentParser {
   public readonly supportedExtensions = [".pdf"] as const;
+
+  public constructor(
+    private readonly ocr: OcrEngine = new TesseractOcrEngine(),
+  ) {}
 
   public async parse(
     content: Uint8Array,
@@ -68,24 +83,99 @@ export class PdfParser implements TenderDocumentParser {
         (total, block) => total + block.text.length,
         0,
       );
-      const needsOcr = characterCount < 20;
-      if (needsOcr)
-        issues.push({
-          issueType: "OCR_UNAVAILABLE",
-          requiresHumanReview: true,
-          safeMessage:
-            "This page has insufficient embedded text and no OCR engine is configured.",
-          severity: "WARNING",
+      const needsOcr = characterCount < MIN_EMBEDDED_TEXT_CHARACTERS;
+      if (!needsOcr) {
+        units.push({
+          blocks,
+          characterCount,
+          confidence: "HIGH",
+          label: `Page ${pageNumber}`,
+          ocrStatus: "NOT_REQUIRED",
           unitIndex: pageNumber,
+          unitType: "PAGE",
         });
+        page.cleanup();
+        continue;
+      }
+      let unit: ParsedUnit | undefined;
+      if (this.ocr.available) {
+        try {
+          const image = await imageForOcr(page, this.ocr);
+          const result = await this.ocr.recognize(
+            {
+              image,
+              languageHints: [OCR_LANGUAGE],
+              pageNumber,
+            },
+            signal,
+          );
+          const ocrBlocks = buildOcrBlocks(result.text, result.confidence);
+          if (ocrBlocks.length === 0) throw new ParserFailure("OCR_EMPTY_TEXT");
+          const confidence = confidenceFromOcr(result.confidence);
+          if (confidence !== "HIGH")
+            issues.push({
+              issueType: "LOW_CONFIDENCE",
+              requiresHumanReview: true,
+              safeMessage:
+                "OCR completed with low confidence and requires human review.",
+              severity: "WARNING",
+              unitIndex: pageNumber,
+            });
+          unit = {
+            blocks: ocrBlocks,
+            characterCount: result.text.length,
+            confidence,
+            label: `Page ${pageNumber}`,
+            language: result.language,
+            ocrConfidence: result.confidence,
+            ocrConfiguration: {
+              max_page_pixels: MAX_OCR_PAGE_PIXELS,
+              page_timeout_ms: OCR_PAGE_TIMEOUT_MS,
+              policy: OCR_POLICY_VERSION,
+              render_scale: OCR_RENDER_SCALE,
+            },
+            ocrEngine: result.engineName,
+            ocrEngineVersion: result.engineVersion,
+            ocrStatus:
+              confidence === "HUMAN_REVIEW_REQUIRED"
+                ? "HUMAN_REVIEW_REQUIRED"
+                : "OCR_PERFORMED",
+            unitIndex: pageNumber,
+            unitType: "PAGE",
+          };
+        } catch {
+          issues.push({
+            issueType: "OCR_UNAVAILABLE",
+            requiresHumanReview: true,
+            safeMessage:
+              "This page has insufficient embedded text and OCR failed safely.",
+            severity: "WARNING",
+            unitIndex: pageNumber,
+          });
+        }
+      }
+      if (unit === undefined) {
+        if (!this.ocr.available)
+          issues.push({
+            issueType: "OCR_UNAVAILABLE",
+            requiresHumanReview: true,
+            safeMessage:
+              "This page has insufficient embedded text and no OCR engine is configured.",
+            severity: "WARNING",
+            unitIndex: pageNumber,
+          });
+        unit = {
+          blocks,
+          characterCount,
+          confidence: "HUMAN_REVIEW_REQUIRED",
+          label: `Page ${pageNumber}`,
+          ocrStatus: this.ocr.available ? "OCR_FAILED" : "OCR_UNAVAILABLE",
+          unitIndex: pageNumber,
+          unitType: "PAGE",
+        };
+      }
       units.push({
-        blocks,
-        characterCount,
-        confidence: needsOcr ? "HUMAN_REVIEW_REQUIRED" : "HIGH",
-        label: `Page ${pageNumber}`,
-        ocrStatus: needsOcr ? "OCR_UNAVAILABLE" : "NOT_REQUIRED",
-        unitIndex: pageNumber,
-        unitType: "PAGE",
+        ...unit,
       });
       page.cleanup();
     }
@@ -98,6 +188,60 @@ export class PdfParser implements TenderDocumentParser {
       units,
     };
   }
+}
+
+async function imageForOcr(
+  page: Awaited<
+    ReturnType<Awaited<ReturnType<typeof getDocument>["promise"]>["getPage"]>
+  >,
+  ocr: OcrEngine,
+): Promise<Uint8Array> {
+  if (!(ocr instanceof TesseractOcrEngine)) return new Uint8Array([0]);
+  const viewport = page.getViewport({ scale: OCR_RENDER_SCALE });
+  if (viewport.width * viewport.height > MAX_OCR_PAGE_PIXELS)
+    throw new ParserFailure("OCR_PAGE_DIMENSION_LIMIT");
+  const canvas = createCanvas(
+    Math.ceil(viewport.width),
+    Math.ceil(viewport.height),
+  );
+  await page.render({
+    canvas: canvas as never,
+    canvasContext: canvas.getContext("2d") as never,
+    viewport,
+  }).promise;
+  return canvas.toBuffer("image/png");
+}
+
+function buildOcrBlocks(
+  text: string,
+  confidence: number,
+): readonly ParsedBlock[] {
+  let offset = 0;
+  return text
+    .split(/\n+|(?<=\.)\s+/u)
+    .map((line) => line.replace(/\s+/gu, " ").trim())
+    .filter((line) => line.length > 0)
+    .map((line, readingOrder) => {
+      const start = offset;
+      offset += line.length + 1;
+      return {
+        confidence: confidenceFromOcr(confidence),
+        readingOrder,
+        sourceEndOffset: start + line.length,
+        sourceStartOffset: start,
+        text: line,
+        type:
+          readingOrder === 0 && line.length <= 200 ? "HEADING" : "PARAGRAPH",
+        warnings: confidence < 0.65 ? ["LOW_OCR_CONFIDENCE"] : [],
+      } satisfies ParsedBlock;
+    });
+}
+
+function confidenceFromOcr(confidence: number): ParsedBlock["confidence"] {
+  if (confidence >= 0.85) return "HIGH";
+  if (confidence >= 0.65) return "MEDIUM";
+  if (confidence >= 0.45) return "LOW";
+  return "HUMAN_REVIEW_REQUIRED";
 }
 
 export class DocxParser implements TenderDocumentParser {
@@ -322,12 +466,16 @@ export class CsvParser implements TenderDocumentParser {
 }
 
 export class ParserRegistry {
-  private readonly parsers = [
-    new PdfParser(),
-    new DocxParser(),
-    new SpreadsheetParser(),
-    new CsvParser(),
-  ] as const;
+  private readonly parsers: readonly TenderDocumentParser[];
+
+  public constructor(ocr?: OcrEngine) {
+    this.parsers = [
+      new PdfParser(ocr),
+      new DocxParser(),
+      new SpreadsheetParser(),
+      new CsvParser(),
+    ] as const;
+  }
 
   public async parse(
     extension: string,
