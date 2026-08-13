@@ -96,6 +96,22 @@ export class ProviderUnavailableError extends Error {
   }
 }
 
+export type ProviderFailureCode =
+  | "AI_PROVIDER_UNAVAILABLE"
+  | "PROVIDER_REQUEST_ABORTED"
+  | "PROVIDER_TIMEOUT"
+  | "PROVIDER_RATE_LIMITED"
+  | "PROVIDER_DEPENDENCY_UNAVAILABLE"
+  | "INVALID_PROVIDER_RESPONSE"
+  | "EMBEDDING_DIMENSION_MISMATCH";
+
+export class ProviderResponseError extends Error {
+  public constructor(public readonly code: ProviderFailureCode) {
+    super(code);
+    this.name = "ProviderResponseError";
+  }
+}
+
 interface GeminiEmbeddingResponse {
   readonly embedding?: { readonly values?: readonly number[] };
 }
@@ -149,7 +165,7 @@ export class GeminiGateway
       values?.length !== this.dimensions ||
       values.some((value) => !Number.isFinite(value))
     )
-      throw new Error("EMBEDDING_DIMENSION_MISMATCH");
+      throw new ProviderResponseError("EMBEDDING_DIMENSION_MISMATCH");
     return [...values];
   }
 
@@ -191,7 +207,8 @@ export class GeminiGateway
       signal,
     );
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text === undefined) throw new Error("INVALID_PROVIDER_RESPONSE");
+    if (text === undefined)
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     return parseGeneratedAnswer(text);
   }
 
@@ -248,7 +265,8 @@ export class GeminiGateway
       signal,
     );
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (text === undefined) throw new Error("INVALID_PROVIDER_RESPONSE");
+    if (text === undefined)
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     return parseGeneratedDraftSection(text, plan.sectionKey);
   }
 
@@ -258,20 +276,38 @@ export class GeminiGateway
     body: object,
     signal: AbortSignal,
   ): Promise<T> {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:${method}`,
-      {
-        body: JSON.stringify(body),
-        headers: {
-          "content-type": "application/json",
-          "x-goog-api-key": this.apiKey ?? "",
+    let response: Response;
+    try {
+      response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:${method}`,
+        {
+          body: JSON.stringify(body),
+          headers: {
+            "content-type": "application/json",
+            "x-goog-api-key": this.apiKey ?? "",
+          },
+          method: "POST",
+          signal,
         },
-        method: "POST",
-        signal,
-      },
-    );
-    if (!response.ok) throw new Error(`PROVIDER_HTTP_${response.status}`);
-    return (await response.json()) as T;
+      );
+    } catch (error: unknown) {
+      if (signal.aborted)
+        throw new ProviderResponseError("PROVIDER_REQUEST_ABORTED");
+      if (error instanceof DOMException && error.name === "AbortError")
+        throw new ProviderResponseError("PROVIDER_REQUEST_ABORTED");
+      throw new ProviderResponseError("PROVIDER_DEPENDENCY_UNAVAILABLE");
+    }
+    if (response.status === 429)
+      throw new ProviderResponseError("PROVIDER_RATE_LIMITED");
+    if (response.status >= 500)
+      throw new ProviderResponseError("PROVIDER_DEPENDENCY_UNAVAILABLE");
+    if (!response.ok)
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+    try {
+      return (await response.json()) as T;
+    } catch {
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+    }
   }
 }
 
@@ -283,10 +319,10 @@ function parseGeneratedDraftSection(
   try {
     value = JSON.parse(text);
   } catch {
-    throw new Error("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
   }
   if (typeof value !== "object" || value === null)
-    throw new Error("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
   const item = value as Record<string, unknown>;
   if (
     item.section_key !== expectedSectionKey ||
@@ -297,7 +333,7 @@ function parseGeneratedDraftSection(
     !Array.isArray(item.placeholders) ||
     item.placeholders.length > 80
   )
-    throw new Error("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
   const allowedClaims = new Set([
     "TENDER_SOURCE_STATEMENT",
     "APPROVED_COMPANY_FACT",
@@ -323,7 +359,7 @@ function parseGeneratedDraftSection(
   ]);
   const claims = item.claims.map((entry: unknown) => {
     if (typeof entry !== "object" || entry === null)
-      throw new Error("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     const fields = entry as Record<string, unknown>;
     if (
       typeof fields.claim !== "string" ||
@@ -335,7 +371,7 @@ function parseGeneratedDraftSection(
       !Array.isArray(fields.handles) ||
       !fields.handles.every((handle) => typeof handle === "string")
     )
-      throw new Error("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     return {
       claim: fields.claim,
       claimClass: fields.claim_class as GeneratedDraftClaim["claimClass"],
@@ -345,7 +381,7 @@ function parseGeneratedDraftSection(
   });
   const placeholders = item.placeholders.map((entry: unknown) => {
     if (typeof entry !== "object" || entry === null)
-      throw new Error("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     const fields = entry as Record<string, unknown>;
     if (
       typeof fields.explanation !== "string" ||
@@ -354,7 +390,7 @@ function parseGeneratedDraftSection(
       typeof fields.type !== "string" ||
       !allowedPlaceholders.has(fields.type)
     )
-      throw new Error("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     return {
       explanation: fields.explanation,
       marker: fields.marker,
@@ -370,9 +406,14 @@ function parseGeneratedDraftSection(
 }
 
 function parseGeneratedAnswer(text: string): GeneratedAnswer {
-  const value: unknown = JSON.parse(text);
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+  }
   if (typeof value !== "object" || value === null)
-    throw new Error("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
   const item = value as Record<string, unknown>;
   if (
     typeof item.answer !== "string" ||
@@ -381,10 +422,10 @@ function parseGeneratedAnswer(text: string): GeneratedAnswer {
     ) ||
     !Array.isArray(item.citation_claims)
   )
-    throw new Error("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
   const claims = item.citation_claims.map((claim: unknown) => {
     if (typeof claim !== "object" || claim === null)
-      throw new Error("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
     const fields = claim as Record<string, unknown>;
     if (
       typeof fields.claim !== "string" ||

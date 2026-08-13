@@ -28,6 +28,10 @@ describe("service metrics", () => {
     const metrics = createWorkerMetrics();
 
     metrics.setReady(true);
+    metrics.aiOperationFinished(
+      { operation: "embedding", outcome: "success", provider: "gemini" },
+      0.2,
+    );
     metrics.jobStarted({ jobName: "extract-tender-version" }, 1.5);
     metrics.jobFinished(
       { jobName: "extract-tender-version", outcome: "completed" },
@@ -42,6 +46,9 @@ describe("service metrics", () => {
       'tip_worker_jobs_finished_total{job_name="extract-tender-version",outcome="completed",service="worker"} 1',
     );
     expect(output).toContain('tip_worker_ready{service="worker"} 1');
+    expect(output).toContain(
+      'tip_worker_ai_operation_duration_seconds_count{service="worker",operation="embedding",outcome="success",provider="gemini"} 1',
+    );
     expect(output).not.toContain("job-id");
     expect(output).not.toContain("run-id");
   });

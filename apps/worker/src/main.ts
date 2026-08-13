@@ -38,7 +38,12 @@ import {
   isChecklistGenerationJob,
   type ChecklistGenerationJob,
 } from "./checklist-generation-processor.js";
-import { GeminiGateway } from "./ai-provider.js";
+import {
+  GeminiGateway,
+  type AnswerGateway,
+  type DraftGenerationGateway,
+  type EmbeddingGateway,
+} from "./ai-provider.js";
 import { isRagJob, RagProcessor, type RagJob } from "./rag-processor.js";
 import {
   DraftGenerationProcessor,
@@ -125,7 +130,11 @@ async function bootstrap(): Promise<void> {
     environment.GEMINI_CHAT_MODEL,
     environment.GEMINI_EMBEDDING_MODEL,
   );
-  const ragProcessor = new RagProcessor(database, gemini, gemini);
+  const ragProcessor = new RagProcessor(
+    database,
+    observedEmbeddings(gemini, metrics),
+    observedAnswers(gemini, metrics),
+  );
   const draftGateway = new GeminiGateway(
     environment.GEMINI_API_KEY,
     environment.DRAFT_MODEL,
@@ -133,8 +142,8 @@ async function bootstrap(): Promise<void> {
   );
   const draftGenerationProcessor = new DraftGenerationProcessor(
     database,
-    gemini,
-    draftGateway,
+    observedEmbeddings(gemini, metrics),
+    observedDrafts(draftGateway, metrics),
   );
   const finalReadinessProcessor = new FinalReadinessProcessor(database);
   const controlledPackageProcessor = new ControlledPackageProcessor(
@@ -425,4 +434,74 @@ function createMetricsServer(metrics: WorkerMetrics): FastifyInstance {
     return metrics.registry.metrics();
   });
   return server;
+}
+
+function observedEmbeddings(
+  gateway: EmbeddingGateway,
+  metrics: WorkerMetrics,
+): EmbeddingGateway {
+  return {
+    dimensions: gateway.dimensions,
+    model: gateway.model,
+    provider: gateway.provider,
+    embedDocuments: async (texts, signal) =>
+      observeAi(metrics, gateway.provider, "embedding", () =>
+        gateway.embedDocuments(texts, signal),
+      ),
+    embedQuery: async (text, signal) =>
+      observeAi(metrics, gateway.provider, "embedding", () =>
+        gateway.embedQuery(text, signal),
+      ),
+  };
+}
+
+function observedAnswers(
+  gateway: AnswerGateway,
+  metrics: WorkerMetrics,
+): AnswerGateway {
+  return {
+    model: gateway.model,
+    provider: gateway.provider,
+    answer: async (question, contexts, signal) =>
+      observeAi(metrics, gateway.provider, "rag_answer", () =>
+        gateway.answer(question, contexts, signal),
+      ),
+  };
+}
+
+function observedDrafts(
+  gateway: DraftGenerationGateway,
+  metrics: WorkerMetrics,
+): DraftGenerationGateway {
+  return {
+    model: gateway.model,
+    provider: gateway.provider,
+    generateDraftSection: async (plan, contexts, signal) =>
+      observeAi(metrics, gateway.provider, "draft_generation", () =>
+        gateway.generateDraftSection(plan, contexts, signal),
+      ),
+  };
+}
+
+async function observeAi<T>(
+  metrics: WorkerMetrics,
+  provider: string,
+  operation: "embedding" | "rag_answer" | "draft_generation",
+  action: () => Promise<T>,
+): Promise<T> {
+  const started = Date.now();
+  try {
+    const result = await action();
+    metrics.aiOperationFinished(
+      { operation, outcome: "success", provider },
+      (Date.now() - started) / 1000,
+    );
+    return result;
+  } catch (error) {
+    metrics.aiOperationFinished(
+      { operation, outcome: "failure", provider },
+      (Date.now() - started) / 1000,
+    );
+    throw error;
+  }
 }

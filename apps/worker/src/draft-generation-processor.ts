@@ -19,6 +19,7 @@ import type {
   EmbeddingGateway,
   GeneratedDraftSection,
 } from "./ai-provider.js";
+import { ProviderResponseError } from "./ai-provider.js";
 
 export interface DraftGenerationJob {
   readonly draftGenerationRunId: string;
@@ -253,7 +254,9 @@ export class DraftGenerationProcessor {
         safeFailureCode:
           error.message === "AI_PROVIDER_UNAVAILABLE"
             ? "PROVIDER_UNAVAILABLE"
-            : error.message.slice(0, 80),
+            : error instanceof ProviderResponseError
+              ? error.code
+              : error.message.slice(0, 80),
         status: "FAILED",
       },
       where: {

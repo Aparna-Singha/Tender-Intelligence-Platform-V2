@@ -177,7 +177,7 @@ export class ExtractionProcessor {
             parserConfiguration: {
               active_content_execution: false,
               external_fetch: false,
-              ocr: "unavailable",
+              ocr: parserOcrConfiguration(source.parsed.units),
             },
             parserName: source.parsed.parserName,
             parserVersion: source.parsed.parserVersion,
@@ -197,7 +197,7 @@ export class ExtractionProcessor {
               extractionRunId: runId,
               label: unit.label ?? null,
               language: unit.language ?? null,
-              ocrConfidence: null,
+              ocrConfidence: unit.ocrConfidence ?? null,
               ocrStatus: unit.ocrStatus,
               parserConfidence: unit.confidence,
               unitIndex: unit.unitIndex,
@@ -205,7 +205,11 @@ export class ExtractionProcessor {
             },
           });
           unitsProcessed += 1;
-          if (unit.ocrStatus === "OCR_UNAVAILABLE") ocrUnavailable += 1;
+          if (
+            unit.ocrStatus === "OCR_UNAVAILABLE" ||
+            unit.ocrStatus === "OCR_FAILED"
+          )
+            ocrUnavailable += 1;
           const blockIds = new Map<number, string>();
           for (const block of unit.blocks) {
             const storedBlock = await transaction.extractedBlock.create({
@@ -354,6 +358,28 @@ export class ExtractionProcessor {
             fields_extracted: fieldCount,
             low_confidence_items: lowConfidenceItems,
             ocr_pages_unavailable: ocrUnavailable,
+            ocr_pages_attempted: parsedSources.reduce(
+              (total, source) =>
+                total +
+                source.parsed.units.filter((unit) =>
+                  [
+                    "OCR_FAILED",
+                    "OCR_PERFORMED",
+                    "HUMAN_REVIEW_REQUIRED",
+                  ].includes(unit.ocrStatus),
+                ).length,
+              0,
+            ),
+            ocr_pages_succeeded: parsedSources.reduce(
+              (total, source) =>
+                total +
+                source.parsed.units.filter(
+                  (unit) =>
+                    unit.ocrStatus === "OCR_PERFORMED" ||
+                    unit.ocrStatus === "HUMAN_REVIEW_REQUIRED",
+                ).length,
+              0,
+            ),
             requirements_extracted: requirementCount,
             unresolved_issues: issueCount,
             units_processed: unitsProcessed,
@@ -645,6 +671,26 @@ function citationData(
     tenderDocumentId: anchor.documentId,
     ...target,
     validationStatus: "VALID",
+  };
+}
+
+function parserOcrConfiguration(
+  units: readonly ParsedDocument["units"][number][],
+): object {
+  const ocrUnits = units.filter(
+    (unit) =>
+      unit.ocrStatus === "OCR_PERFORMED" ||
+      unit.ocrStatus === "HUMAN_REVIEW_REQUIRED" ||
+      unit.ocrStatus === "OCR_FAILED",
+  );
+  if (ocrUnits.length === 0) return { status: "not_required" };
+  const firstConfigured = ocrUnits.find((unit) => unit.ocrEngine !== undefined);
+  return {
+    attempted_pages: ocrUnits.length,
+    configuration: firstConfigured?.ocrConfiguration ?? null,
+    engine: firstConfigured?.ocrEngine ?? null,
+    engine_version: firstConfigured?.ocrEngineVersion ?? null,
+    status: "performed_when_embedded_text_insufficient",
   };
 }
 
