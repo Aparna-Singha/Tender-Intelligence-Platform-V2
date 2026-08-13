@@ -61,7 +61,7 @@ test.afterAll(async () => {
   await prisma.$disconnect();
 });
 
-test("validates the real controlled-review lifecycle and downloaded artifact", async ({
+test("validates the release golden business workflow and downloaded artifact", async ({
   browser,
 }) => {
   const owner = await loginAs(browser, fixture.users.owner, {
@@ -69,7 +69,10 @@ test("validates the real controlled-review lifecycle and downloaded artifact", a
     height: 900,
   });
   const ownerPage = owner.page;
+  const ownerTelemetry = captureBrowserQuality(ownerPage);
+  await assertSeededGoldenWorkflowState();
   await navigateToExport(ownerPage, fixture);
+  await assertWorkspaceStages(ownerPage, fixture);
 
   await expect(
     ownerPage.getByRole("heading", { name: "Controlled review package" }),
@@ -80,6 +83,8 @@ test("validates the real controlled-review lifecycle and downloaded artifact", a
   await expect(
     ownerPage.getByRole("button", { name: "Authorise one-minute download" }),
   ).toHaveCount(0);
+  expect(ownerTelemetry.errors).toEqual([]);
+  expect(ownerTelemetry.failedRequests).toEqual([]);
 
   const existingRunCount = await prisma.controlledReviewPackageRun.count({
     where: { tenderId: fixture.tenderId },
@@ -115,6 +120,7 @@ test("validates the real controlled-review lifecycle and downloaded artifact", a
     width: 1440,
     height: 900,
   });
+  const reviewerTelemetry = captureBrowserQuality(reviewer.page);
   await navigateToExport(reviewer.page, fixture);
   await reviewer.page
     .getByRole("textbox", { name: "Append-only review comment" })
@@ -154,6 +160,8 @@ test("validates the real controlled-review lifecycle and downloaded artifact", a
     })
     .toBe("APPROVED");
   await expect(reviewer.page.getByText(/Approval history/i)).toBeVisible();
+  expect(reviewerTelemetry.errors).toEqual([]);
+  expect(reviewerTelemetry.failedRequests).toEqual([]);
 
   const firstDownload = await downloadCurrentPackage(ownerPage);
   const firstInspection = inspectControlledPackageZip(firstDownload);
@@ -228,6 +236,7 @@ test("validates the real controlled-review lifecycle and downloaded artifact", a
     width: 1440,
     height: 900,
   });
+  const adminTelemetry = captureBrowserQuality(admin.page);
   await navigateToExport(admin.page, fixture);
   await admin.page.once("dialog", (dialog) =>
     dialog.accept("Administrative withdrawal of current controlled download."),
@@ -244,6 +253,8 @@ test("validates the real controlled-review lifecycle and downloaded artifact", a
   await expect(
     ownerPage.getByRole("button", { name: "Authorise one-minute download" }),
   ).toHaveCount(0);
+  expect(adminTelemetry.errors).toEqual([]);
+  expect(adminTelemetry.failedRequests).toEqual([]);
 
   await owner.context.close();
   await reviewer.context.close();
@@ -1169,6 +1180,228 @@ async function loginAs(
 }
 
 async function navigateToExport(page: Page, data: FixtureData): Promise<void> {
+  await page.goto(
+    `/tenders/${data.organisationId}/${data.tenderId}?stage=export`,
+  );
+}
+
+function captureBrowserQuality(page: Page): {
+  readonly errors: string[];
+  readonly failedRequests: string[];
+} {
+  const errors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("console", (message) => {
+    const text = message.text();
+    if (message.type() !== "error") return;
+    if (/favicon|next start does not work with output: standalone/iu.test(text))
+      return;
+    errors.push(text);
+  });
+  page.on("pageerror", (error) => {
+    errors.push(error.message);
+  });
+  page.on("requestfailed", (request) => {
+    const url = request.url();
+    if (/favicon.ico$/u.test(url)) return;
+    if (request.failure()?.errorText === "net::ERR_ABORTED") return;
+    failedRequests.push(`${request.method()} ${url}`);
+  });
+  return { errors, failedRequests };
+}
+
+async function assertSeededGoldenWorkflowState(): Promise<void> {
+  const tender = await prisma.tender.findUniqueOrThrow({
+    include: {
+      currentVersion: true,
+      organisation: true,
+      workspace: true,
+    },
+    where: { id: fixture.tenderId },
+  });
+  const documents = await prisma.tenderDocument.findMany({
+    where: { tenderVersionId: fixture.tenderVersionId },
+  });
+  expect(tender.organisationId).toBe(fixture.organisationId);
+  expect(tender.workspace?.sourceSectionStatus).toBe("READY");
+  expect(documents).toEqual([
+    expect.objectContaining({
+      organisationId: fixture.organisationId,
+      status: "READY",
+    }),
+  ]);
+  expect(tender.currentVersion?.activeExtractionRunId).toEqual(
+    expect.any(String),
+  );
+  expect(tender.currentVersion?.activeEarlyRiskRunId).toEqual(
+    expect.any(String),
+  );
+  expect(tender.currentVersion?.activeEligibilityAssessmentRunId).toEqual(
+    expect.any(String),
+  );
+  expect(tender.currentVersion?.activeFinalReadinessRunId).toEqual(
+    expect.any(String),
+  );
+
+  await expect
+    .poll(async () =>
+      prisma.extractedUnit.count({
+        where: {
+          extractionRunId: tender.currentVersion?.activeExtractionRunId ?? "",
+          ocrStatus: { in: ["NOT_REQUIRED", "OCR_PERFORMED"] },
+        },
+      }),
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () =>
+      prisma.extractionCitation.count({
+        where: {
+          extractionRunId: tender.currentVersion?.activeExtractionRunId ?? "",
+          validationStatus: "VALIDATED",
+        },
+      }),
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () =>
+      prisma.riskAnalysisRun.count({
+        where: {
+          gateType: "EARLY",
+          organisationId: fixture.organisationId,
+          status: "COMPLETE",
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () =>
+      prisma.earlyPursuitDecision.count({
+        where: {
+          decision: "CONTINUE",
+          organisationId: fixture.organisationId,
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () =>
+      prisma.eligibilityAssessment.count({
+        where: {
+          assessmentRunId:
+            tender.currentVersion?.activeEligibilityAssessmentRunId ?? "",
+          reviewState: "FINALISED",
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBeGreaterThan(0);
+  await expect
+    .poll(async () =>
+      prisma.checklistGenerationRun.count({
+        where: {
+          organisationId: fixture.organisationId,
+          status: "COMPLETE",
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () =>
+      prisma.ragIndexRun.count({
+        where: {
+          activatedAt: { not: null },
+          organisationId: fixture.organisationId,
+          status: "COMPLETE",
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () =>
+      prisma.draftVersion.count({
+        where: {
+          organisationId: fixture.organisationId,
+          reviewState: "APPROVED",
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBe(1);
+  await expect
+    .poll(async () =>
+      prisma.finalReadinessDecision.count({
+        where: {
+          disposition: "PROCEED_TO_CONTROLLED_EXPORT_REVIEW",
+          organisationId: fixture.organisationId,
+          tenderId: fixture.tenderId,
+        },
+      }),
+    )
+    .toBe(1);
+}
+
+async function assertWorkspaceStages(
+  page: Page,
+  data: FixtureData,
+): Promise<void> {
+  await expect(
+    page.getByRole("heading", { name: /Phase 13 Controlled Package/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Extraction" }).click();
+  await expect(page).toHaveURL(/stage=extraction/u);
+  await expect(page.getByRole("heading", { name: "Extraction" })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Valid GST registration" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Risks" }).click();
+  await expect(page.getByRole("heading", { name: "Risks" })).toBeVisible();
+  await expect(
+    page.getByText("Registration evidence remains relevant"),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Evidence" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Evidence matrix" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Valid GST registration/u)).toBeVisible();
+
+  await page.getByRole("button", { name: "Checklist" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Missing documents and actions" }),
+  ).toBeVisible();
+  await expect(page.getByText("Confirm GST evidence")).toBeVisible();
+
+  await page.getByRole("button", { name: "Ask" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Cited tender chatbot" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Answers are limited to authorised tender and evidence/u),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Draft" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Version 1 · Approved" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(/Approved fixture draft text for controlled review/u),
+  ).toBeVisible();
+
+  await page.getByRole("button", { exact: true, name: "Readiness" }).click();
+  await expect(
+    page.getByRole("heading", { name: "Final readiness review" }),
+  ).toBeVisible();
+  await expect(page.getByText(/Current .* Completed/u)).toBeVisible();
+  await expect(
+    page.getByText("Proceed to controlled export review"),
+  ).toBeVisible();
+
   await page.goto(
     `/tenders/${data.organisationId}/${data.tenderId}?stage=export`,
   );
