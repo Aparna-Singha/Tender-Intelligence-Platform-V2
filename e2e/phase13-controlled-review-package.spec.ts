@@ -5,6 +5,7 @@ import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "@playwright/test";
 import { createPrismaClient } from "../packages/database/src/index";
 import { unzipSync } from "fflate";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 
 const databaseUrl = process.env.DATABASE_URL;
 
@@ -70,6 +71,7 @@ test("validates the release golden business workflow and downloaded artifact", a
   });
   const ownerPage = owner.page;
   const ownerTelemetry = captureBrowserQuality(ownerPage);
+  await assertRealApplicationPathUpstreamWorkflow(ownerPage);
   await assertSeededGoldenWorkflowState();
   await navigateToExport(ownerPage, fixture);
   await assertWorkspaceStages(ownerPage, fixture);
@@ -1208,6 +1210,719 @@ function captureBrowserQuality(page: Page): {
     failedRequests.push(`${request.method()} ${url}`);
   });
   return { errors, failedRequests };
+}
+
+async function assertRealApplicationPathUpstreamWorkflow(
+  page: Page,
+): Promise<void> {
+  const tag = Date.now().toString(36);
+  const organisation = await apiRequestFromPage<{ id: string }>(
+    page,
+    "/organisations",
+    {
+      body: JSON.stringify({
+        name: `Release Golden Upstream ${tag}`,
+        type: "MSME",
+      }),
+      method: "POST",
+    },
+  );
+  await prisma.organisationMembership.createMany({
+    data: [
+      {
+        organisationId: organisation.id,
+        role: "REVIEWER",
+        userId: await userIdFor(fixture.users.reviewer.email),
+      },
+      {
+        organisationId: organisation.id,
+        role: "ADMIN",
+        userId: await userIdFor(fixture.users.admin.email),
+      },
+    ],
+  });
+
+  const companyPdf = await searchablePdf([
+    "GST registration certificate. GST registration is valid for the bidder.",
+  ]);
+  const companyUpload = await uploadCompanyDocument(
+    page,
+    organisation.id,
+    "release-golden-gst.pdf",
+    companyPdf,
+  );
+  await expect
+    .poll(
+      async () =>
+        prisma.document.findUnique({
+          select: { status: true },
+          where: { id: companyUpload.documentId },
+        }),
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
+    .toMatchObject({ status: "READY" });
+
+  const tender = await apiRequestFromPage<{
+    tender_id: string;
+    version_id: string;
+  }>(page, `/organisations/${organisation.id}/tenders`, {
+    body: JSON.stringify({
+      buyer: "Release Golden Buyer",
+      official_source_url: "https://example.test/tenders/release-golden",
+      source_tender_number: `REL-${tag}`,
+      submission_deadline: "2026-09-30T10:00:00.000Z",
+      title: `Release Golden Tender ${tag}`,
+    }),
+    method: "POST",
+  });
+  const tenderId = tender.tender_id;
+  const versionId = tender.version_id;
+  expect(versionId).toEqual(expect.any(String));
+
+  const tenderPdf = await searchablePdf([
+    "Clause 4.1: The bidder shall maintain valid GST registration.",
+    "The bidder should confirm GST evidence before submission.",
+  ]);
+  const tenderDocument = await uploadTenderDocument(
+    page,
+    organisation.id,
+    tenderId,
+    versionId!,
+    "release-golden-tender.pdf",
+    tenderPdf,
+  );
+  await expect
+    .poll(
+      async () =>
+        prisma.tenderDocument.findUnique({
+          select: { status: true },
+          where: { id: tenderDocument.documentId },
+        }),
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
+    .toMatchObject({ status: "READY" });
+
+  const extraction = await apiRequestFromPage<{ id: string }>(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/versions/${versionId}/extractions`,
+    {
+      body: JSON.stringify({ idempotency_key: `release-extraction-${tag}` }),
+      method: "POST",
+    },
+  );
+  await waitForRecordStatus("extractionRun", extraction.id, "status", [
+    "COMPLETE",
+  ]);
+
+  const risk = await apiRequestFromPage<{ id: string }>(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/versions/${versionId}/risk-analyses`,
+    {
+      body: JSON.stringify({ idempotency_key: `release-risk-${tag}` }),
+      method: "POST",
+    },
+  );
+  await waitForRecordStatus("riskAnalysisRun", risk.id, "status", ["COMPLETE"]);
+
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/risk-analyses/${risk.id}/decisions`,
+    {
+      body: JSON.stringify({
+        acknowledged_limitations: true,
+        decision: "CONTINUE",
+        rationale:
+          "Synthetic release validation continues after reviewing bounded early-risk output.",
+      }),
+      method: "POST",
+    },
+  );
+
+  const fact = await apiRequestFromPage<{
+    currentVersionId: string;
+    id: string;
+  }>(page, `/organisations/${organisation.id}/company-evidence-facts`, {
+    body: JSON.stringify({
+      document_id: companyUpload.documentId,
+      document_version_id: companyUpload.versionId,
+      fact_type: "GST_REGISTRATION",
+      value: {
+        text_value: "GST registration is valid",
+        value_type: "TEXT",
+      },
+    }),
+    method: "POST",
+  });
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisation.id}/company-evidence-facts/${fact.id}/citations`,
+    {
+      body: JSON.stringify({
+        bounded_excerpt: "GST registration is valid",
+        document_id: companyUpload.documentId,
+        document_version_id: companyUpload.versionId,
+        page_number: 1,
+        section_label: "Synthetic GST certificate",
+      }),
+      method: "POST",
+    },
+  );
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisation.id}/company-evidence-facts/${fact.id}/reviews`,
+    {
+      body: JSON.stringify({
+        action: "ACCEPT",
+        rationale: "Accepted for synthetic release validation evidence.",
+      }),
+      method: "POST",
+    },
+  );
+
+  const assessment = await apiRequestFromPage<{ id: string }>(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/versions/${versionId}/eligibility-assessments`,
+    {
+      body: JSON.stringify({ idempotency_key: `release-evidence-${tag}` }),
+      method: "POST",
+    },
+  );
+  await waitForRecordStatus(
+    "eligibilityAssessmentRun",
+    assessment.id,
+    "status",
+    ["COMPLETE"],
+  );
+  const assessmentItem = await prisma.eligibilityAssessment.findFirstOrThrow({
+    where: { assessmentRunId: assessment.id, organisationId: organisation.id },
+  });
+  const factVersion = await prisma.companyEvidenceFactVersion.findFirstOrThrow({
+    where: { evidenceFactId: fact.id, reviewState: "ACCEPTED" },
+  });
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/eligibility-assessments/${assessment.id}/items/${assessmentItem.id}/evidence-links`,
+    {
+      body: JSON.stringify({
+        evidence_fact_version_id: factVersion.id,
+        link_type: "DIRECT_SUPPORT",
+      }),
+      method: "POST",
+    },
+  );
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/eligibility-assessments/${assessment.id}/items/${assessmentItem.id}/reviews`,
+    {
+      body: JSON.stringify({
+        action: "MARK_VERIFIED",
+        rationale: "Verified for synthetic release validation.",
+      }),
+      method: "POST",
+    },
+  );
+
+  const checklist = await apiRequestFromPage<{ id: string }>(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/versions/${versionId}/checklists`,
+    {
+      body: JSON.stringify({ idempotency_key: `release-checklist-${tag}` }),
+      method: "POST",
+    },
+  );
+  await waitForRecordStatus("checklistGenerationRun", checklist.id, "status", [
+    "COMPLETE",
+  ]);
+
+  await seedProviderBackedRagAndDraftBridge({
+    checklistRunId: checklist.id,
+    organisationId: organisation.id,
+    tag,
+    tenderId,
+    versionId: versionId!,
+  });
+
+  const readiness = await apiRequestFromPage<{ run_id?: string; id?: string }>(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/final-readiness`,
+    {
+      body: JSON.stringify({ idempotency_key: `release-readiness-${tag}` }),
+      method: "POST",
+    },
+  );
+  const readinessId = readiness.run_id ?? readiness.id;
+  expect(readinessId).toEqual(expect.any(String));
+  await waitForRecordStatus("finalReadinessRun", readinessId!, "status", [
+    "COMPLETED",
+  ]);
+  const completed = await prisma.finalReadinessRun.findUniqueOrThrow({
+    where: { id: readinessId },
+  });
+  await loginExistingPageAs(page, fixture.users.reviewer);
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisation.id}/tenders/${tenderId}/final-readiness/${readinessId}/decisions`,
+    {
+      body: JSON.stringify({
+        acknowledgement_ids: [],
+        disposition: "PROCEED_TO_CONTROLLED_EXPORT_REVIEW",
+        expected_fingerprint: completed.inputFingerprint,
+        rationale:
+          "Independent reviewer disposition for synthetic release validation.",
+        run_id: readinessId,
+      }),
+      method: "POST",
+    },
+  );
+  await loginExistingPageAs(page, fixture.users.owner);
+
+  await expect
+    .poll(async () =>
+      prisma.finalReadinessDecision.count({
+        where: {
+          disposition: "PROCEED_TO_CONTROLLED_EXPORT_REVIEW",
+          organisationId: organisation.id,
+          runId: readinessId,
+        },
+      }),
+    )
+    .toBe(1);
+}
+
+async function apiRequestFromPage<T = unknown>(
+  page: Page,
+  path: string,
+  init: { readonly body?: string; readonly method?: string } = {},
+): Promise<T> {
+  const apiBaseUrl =
+    process.env.API_PUBLIC_URL ??
+    process.env.NEXT_PUBLIC_API_URL ??
+    "http://127.0.0.1:4000";
+  return page.evaluate(
+    async ({ apiBaseUrl, init, path }) => {
+      async function parse(response: Response): Promise<unknown> {
+        const text = await response.text();
+        return text === "" ? null : (JSON.parse(text) as unknown);
+      }
+      const method = init.method?.toUpperCase() ?? "GET";
+      const headers: Record<string, string> = {};
+      if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+        const csrfResponse = await fetch(`${apiBaseUrl}/auth/csrf`, {
+          credentials: "include",
+        });
+        const csrfBody = (await parse(csrfResponse)) as {
+          data?: { csrf_token?: string };
+        };
+        headers["x-csrf-token"] = csrfBody.data?.csrf_token ?? "";
+        if (init.body !== undefined)
+          headers["content-type"] = "application/json";
+      }
+      const response = await fetch(`${apiBaseUrl}${path}`, {
+        body: init.body,
+        credentials: "include",
+        headers,
+        method,
+      });
+      const body = (await parse(response)) as { data?: unknown };
+      if (!response.ok)
+        throw new Error(
+          `API ${method} ${path} failed with ${response.status}: ${JSON.stringify(body)}`,
+        );
+      return body.data;
+    },
+    { apiBaseUrl, init, path },
+  ) as Promise<T>;
+}
+
+async function uploadCompanyDocument(
+  page: Page,
+  organisationId: string,
+  filename: string,
+  bytes: Uint8Array,
+): Promise<{ documentId: string; versionId: string }> {
+  const checksum = sha256(Buffer.from(bytes));
+  const session = await apiRequestFromPage<{
+    document_id: string;
+    upload_session_id: string;
+    upload_url: string;
+    version_id: string;
+  }>(page, `/organisations/${organisationId}/documents/upload-sessions`, {
+    body: JSON.stringify({
+      category: "GST",
+      checksum_sha256: checksum,
+      filename,
+      mime_type: "application/pdf",
+      size_bytes: bytes.byteLength,
+    }),
+    method: "POST",
+  });
+  await putSignedUpload(session.upload_url, bytes);
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisationId}/documents/upload-sessions/${session.upload_session_id}/complete`,
+    {
+      body: JSON.stringify({ checksum_sha256: checksum }),
+      method: "POST",
+    },
+  );
+  return { documentId: session.document_id, versionId: session.version_id };
+}
+
+async function uploadTenderDocument(
+  page: Page,
+  organisationId: string,
+  tenderId: string,
+  versionId: string,
+  filename: string,
+  bytes: Uint8Array,
+): Promise<{ documentId: string }> {
+  const checksum = sha256(Buffer.from(bytes));
+  const session = await apiRequestFromPage<{
+    document_id: string;
+    upload_url: string;
+  }>(
+    page,
+    `/organisations/${organisationId}/tenders/${tenderId}/versions/${versionId}/upload-sessions`,
+    {
+      body: JSON.stringify({
+        checksum_sha256: checksum,
+        filename,
+        mime_type: "application/pdf",
+        role: "PRIMARY",
+        size_bytes: bytes.byteLength,
+      }),
+      method: "POST",
+    },
+  );
+  await putSignedUpload(session.upload_url, bytes, checksum);
+  await apiRequestFromPage(
+    page,
+    `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
+    {
+      body: JSON.stringify({ checksum_sha256: checksum }),
+      method: "POST",
+    },
+  );
+  return { documentId: session.document_id };
+}
+
+async function putSignedUpload(
+  uploadUrl: string,
+  bytes: Uint8Array,
+  checksum?: string,
+): Promise<void> {
+  const headers: Record<string, string> = {
+    "content-length": String(bytes.byteLength),
+    "content-type": "application/pdf",
+  };
+  if (checksum !== undefined) headers["x-amz-meta-sha256"] = checksum;
+  const response = await fetch(uploadUrl, {
+    body: Buffer.from(bytes),
+    headers,
+    method: "PUT",
+  });
+  expect(response.ok).toBe(true);
+}
+
+async function waitForRecordStatus(
+  model:
+    | "checklistGenerationRun"
+    | "eligibilityAssessmentRun"
+    | "extractionRun"
+    | "finalReadinessRun"
+    | "riskAnalysisRun",
+  id: string,
+  field: "state" | "status",
+  terminal: readonly string[],
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        let value: string | undefined;
+        switch (model) {
+          case "checklistGenerationRun":
+            value = (
+              await prisma.checklistGenerationRun.findUnique({
+                select: { [field]: true },
+                where: { id },
+              })
+            )?.[field];
+            break;
+          case "eligibilityAssessmentRun":
+            value = (
+              await prisma.eligibilityAssessmentRun.findUnique({
+                select: { [field]: true },
+                where: { id },
+              })
+            )?.[field];
+            break;
+          case "extractionRun":
+            value = (
+              await prisma.extractionRun.findUnique({
+                select: { [field]: true },
+                where: { id },
+              })
+            )?.[field];
+            break;
+          case "finalReadinessRun":
+            value = (
+              await prisma.finalReadinessRun.findUnique({
+                select: { [field]: true },
+                where: { id },
+              })
+            )?.[field];
+            break;
+          case "riskAnalysisRun":
+            value = (
+              await prisma.riskAnalysisRun.findUnique({
+                select: { [field]: true },
+                where: { id },
+              })
+            )?.[field];
+            break;
+        }
+        return terminal.includes(value ?? "");
+      },
+      { timeout: REQUEST_TIMEOUT_MS },
+    )
+    .toBe(true);
+}
+
+async function seedProviderBackedRagAndDraftBridge({
+  checklistRunId,
+  organisationId,
+  tag,
+  tenderId,
+  versionId,
+}: {
+  readonly checklistRunId: string;
+  readonly organisationId: string;
+  readonly tag: string;
+  readonly tenderId: string;
+  readonly versionId: string;
+}): Promise<void> {
+  const version = await prisma.tenderVersion.findUniqueOrThrow({
+    include: {
+      activeEarlyRiskRun: true,
+      activeEligibilityAssessmentRun: true,
+      activeExtractionRun: true,
+    },
+    where: { id: versionId },
+  });
+  const owner = await userIdFor(fixture.users.owner.email);
+  const reviewer = await userIdFor(fixture.users.reviewer.email);
+  const draftCreator = await userIdFor(fixture.users.draftCreator.email);
+  const decision = await prisma.earlyPursuitDecision.findFirstOrThrow({
+    where: {
+      decision: "CONTINUE",
+      organisationId,
+      riskAnalysisRunId: version.activeEarlyRiskRunId ?? "",
+      tenderId,
+    },
+  });
+  const assessmentRun = await prisma.eligibilityAssessmentRun.findUniqueOrThrow(
+    {
+      where: { id: version.activeEligibilityAssessmentRunId ?? "" },
+    },
+  );
+  const ragIndexRun = await prisma.ragIndexRun.create({
+    data: {
+      activatedAt: FIXTURE_NOW,
+      chunkCount: 0,
+      chunkPolicyVersion: "fixture-backed-rag-chunk-v1",
+      completedAt: FIXTURE_NOW,
+      currentStage: "COMPLETE",
+      embeddingDimensions: 768,
+      embeddingModel: "fixture-embedding-model",
+      embeddingProvider: "fixture",
+      extractionRunId: version.activeExtractionRunId!,
+      idempotencyKey: `release-rag-fixture-${tag}`,
+      organisationId,
+      requestedByUserId: owner,
+      retrievalPolicyVersion: "fixture-backed-rag-retrieval-v1",
+      sourceFingerprint: version.activeExtractionRun!.sourceFingerprint,
+      sourceMode: "FULL_AUTHORISED_TENDER_CONTEXT",
+      startedAt: FIXTURE_NOW,
+      status: "COMPLETE",
+      tenderId,
+      tenderVersionId: versionId,
+    },
+  });
+  const draftTemplate = await prisma.draftTemplate.create({
+    data: {
+      createdByUserId: owner,
+      draftType: "CONSOLIDATED_FIRST_DRAFT",
+      name: `Release fixture draft template ${tag}`,
+      organisationId,
+    },
+  });
+  const templateVersion = await prisma.draftTemplateVersion.create({
+    data: {
+      activatedAt: FIXTURE_NOW,
+      createdByUserId: owner,
+      requiredReviewRole: "REVIEWER",
+      sections: [{ key: "overview", title: "Overview" }],
+      sourceFingerprint: version.activeExtractionRun!.sourceFingerprint,
+      templateId: draftTemplate.id,
+      templatePolicyVersion: "fixture-backed-draft-template-v1",
+      versionNumber: 1,
+    },
+  });
+  const draftGenerationRun = await prisma.draftGenerationRun.create({
+    data: {
+      assessmentRunId: assessmentRun.id,
+      checklistGenerationRunId: checklistRunId,
+      citationCount: 0,
+      currentStage: "COMPLETE",
+      draftingPolicyVersion: "fixture-backed-draft-v1",
+      evidenceSnapshotId: assessmentRun.snapshotId,
+      extractionRunId: version.activeExtractionRunId!,
+      idempotencyKey: `release-draft-fixture-${tag}`,
+      model: "fixture-model",
+      organisationId,
+      placeholderCount: 0,
+      progressPercentage: 100,
+      promptPolicyVersion: "fixture-backed-draft-prompt-v1",
+      provider: "fixture",
+      pursuitDecisionId: decision.id,
+      ragIndexRunId: ragIndexRun.id,
+      requestedByUserId: owner,
+      retrievalPolicyVersion: "fixture-backed-draft-retrieval-v1",
+      riskAnalysisRunId: version.activeEarlyRiskRunId!,
+      sectionCount: 1,
+      sourceFingerprint: version.activeExtractionRun!.sourceFingerprint,
+      sourceMode: "FULL_AUTHORISED_TENDER_CONTEXT",
+      startedAt: FIXTURE_NOW,
+      status: "COMPLETE",
+      tenderId,
+      tenderVersionId: versionId,
+      templatePolicyVersion: "fixture-backed-draft-template-v1",
+      templateVersionId: templateVersion.id,
+      title: "Release fixture controlled draft",
+      draftType: "CONSOLIDATED_FIRST_DRAFT",
+      trigger: "USER",
+      validatedClaimCount: 0,
+    },
+  });
+  const snapshot = await prisma.draftInputSnapshot.create({
+    data: {
+      assessmentRunId: assessmentRun.id,
+      checklistGenerationRunId: checklistRunId,
+      draftingPolicyVersion: "fixture-backed-draft-v1",
+      evidenceSnapshotId: assessmentRun.snapshotId,
+      extractionRunId: version.activeExtractionRunId!,
+      generationRunId: draftGenerationRun.id,
+      model: "fixture-model",
+      organisationId,
+      promptPolicyVersion: "fixture-backed-draft-prompt-v1",
+      provider: "fixture",
+      pursuitDecisionId: decision.id,
+      ragIndexRunId: ragIndexRun.id,
+      retrievalPolicyVersion: "fixture-backed-draft-retrieval-v1",
+      riskAnalysisRunId: version.activeEarlyRiskRunId!,
+      sourceFingerprint: version.activeExtractionRun!.sourceFingerprint,
+      sourceMode: "FULL_AUTHORISED_TENDER_CONTEXT",
+      tenderId,
+      tenderVersionId: versionId,
+      templatePolicyVersion: "fixture-backed-draft-template-v1",
+      templateVersionId: templateVersion.id,
+      draftType: "CONSOLIDATED_FIRST_DRAFT",
+    },
+  });
+  const draft = await prisma.draft.create({
+    data: {
+      createdByUserId: draftCreator,
+      draftType: "CONSOLIDATED_FIRST_DRAFT",
+      organisationId,
+      tenderId,
+      title: "Release fixture approved consolidated draft",
+    },
+  });
+  const draftVersion = await prisma.draftVersion.create({
+    data: {
+      approvalRationale:
+        "Fixture-backed provider draft approved for final-readiness validation.",
+      approvedAt: FIXTURE_NOW,
+      approvedByUserId: reviewer,
+      createdByUserId: draftCreator,
+      draftId: draft.id,
+      generationRunId: draftGenerationRun.id,
+      inputSnapshotId: snapshot.id,
+      organisationId,
+      reviewState: "APPROVED",
+      sourceFingerprint: version.activeExtractionRun!.sourceFingerprint,
+      templateVersionId: templateVersion.id,
+      tenderId,
+      tenderVersionId: versionId,
+      versionNumber: 1,
+    },
+  });
+  await prisma.draft.update({
+    data: { currentVersionId: draftVersion.id },
+    where: { id: draft.id },
+  });
+  await prisma.draftSection.create({
+    data: {
+      content:
+        "Fixture-backed provider draft bridge for release validation. Human review remains required.",
+      contentOrigin: "GENERATED",
+      draftVersionId: draftVersion.id,
+      heading: "Tender response overview",
+      requirementIds: [],
+      reviewState: "APPROVED",
+      sectionKey: "overview",
+      sectionOrder: 1,
+    },
+  });
+  await prisma.draftReviewEvent.create({
+    data: {
+      action: "APPROVE_VERSION",
+      actorRoleAtAction: "REVIEWER",
+      actorUserId: reviewer,
+      draftVersionId: draftVersion.id,
+      eventSequence: 1,
+      newState: "APPROVED",
+      organisationId,
+      priorState: "IN_REVIEW",
+      rationale: "Fixture-backed draft approval for release validation.",
+      sourceFingerprint: version.activeExtractionRun!.sourceFingerprint,
+      tenderId,
+    },
+  });
+}
+
+async function searchablePdf(lines: readonly string[]): Promise<Uint8Array> {
+  const pdf = await PDFDocument.create();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  for (const line of lines) {
+    const page = pdf.addPage([612, 792]);
+    page.drawText(line, { font, size: 12, x: 72, y: 720 });
+  }
+  return pdf.save();
+}
+
+async function userIdFor(email: string): Promise<string> {
+  const user = await prisma.user.findUniqueOrThrow({
+    select: { id: true },
+    where: { email },
+  });
+  return user.id;
+}
+
+async function loginExistingPageAs(
+  page: Page,
+  user: FixtureUser,
+): Promise<void> {
+  try {
+    await apiRequestFromPage(page, "/auth/logout", { method: "POST" });
+  } catch {
+    // The following login is authoritative even if the prior session expired.
+  }
+  await page.goto("/login");
+  await page.getByLabel("Email address").fill(user.email);
+  await page.locator("#auth-password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Log in" }).click();
+  await page.waitForURL("**/dashboard");
 }
 
 async function assertSeededGoldenWorkflowState(): Promise<void> {
