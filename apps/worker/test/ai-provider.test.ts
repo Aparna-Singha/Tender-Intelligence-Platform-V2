@@ -9,6 +9,8 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe("Gemini provider adapter", () => {
   it("fails clearly without a provider key", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
     const gateway = new GeminiGateway(
       undefined,
       "gemini-2.5-flash",
@@ -17,6 +19,7 @@ describe("Gemini provider adapter", () => {
     await expect(
       gateway.embedDocuments(["evidence"], new AbortController().signal),
     ).rejects.toBeInstanceOf(ProviderUnavailableError);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("rejects embedding dimension mismatches", async () => {

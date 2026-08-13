@@ -27,6 +27,7 @@
     "format:check": "prettier --check .",
     "lint": "dotenv -e .env -- turbo run lint && markdownlint-cli2 \"**/*.md\"",
     "playwright:install": "playwright install chromium",
+    "test:security": "cross-env NODE_ENV=test dotenv -e .env -- pnpm --filter @tender/config exec vitest run test/environment.test.ts && cross-env NODE_ENV=test dotenv -e .env -- pnpm --filter @tender/domain exec vitest run test/authorisation.test.ts test/rag-policy.test.ts test/drafting-policy.test.ts test/controlled-review-package.test.ts && cross-env NODE_ENV=test dotenv -e .env -- pnpm --filter @tender/api exec vitest run test/security.test.ts test/documents.test.ts test/tenders.test.ts test/rag.test.ts test/drafts.test.ts test/final-readiness.test.ts test/controlled-review-packages.test.ts && cross-env NODE_ENV=test dotenv -e .env -- pnpm --filter @tender/worker exec vitest run test/rag-security.test.ts test/ai-provider.test.ts test/malware-scanner.test.ts test/controlled-package-processor.test.ts",
     "test:browser": "cross-env NODE_ENV=test dotenv -e .env -- playwright test",
     "test": "cross-env NODE_ENV=test dotenv -e .env -- turbo run test",
     "typecheck": "dotenv -e .env -- turbo run typecheck"
