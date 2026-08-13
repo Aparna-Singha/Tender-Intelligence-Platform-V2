@@ -41,11 +41,14 @@ Playwright:
 - ClamAV remains part of the real local stack readiness expected by the browser
   suite.
 
-The golden path has two deliberate segments.
+The primary release golden test uses one continuous synthetic tender/workflow
+graph. The same tender ID created through the real upstream application path is
+used for final readiness and for controlled package generation, review, approval,
+download, supersession, revocation, and history.
 
 ### Real Application-Path Stages
 
-The first segment creates and advances upstream workflow state through supported
+The primary test creates and advances upstream workflow state through supported
 application paths wherever those paths already exist:
 
 1. authentication/session through the browser login flow and authenticated API
@@ -69,16 +72,13 @@ application paths wherever those paths already exist:
     through APIs;
 11. checklist generation through the checklist API and worker-backed completion;
 12. final-readiness start through the final-readiness API, worker-backed
-    completion, and independent human disposition through the decision API.
-
-The second segment keeps the existing controlled-package validation unchanged and
-exercises the real browser/API/worker path for:
-
-1. controlled review-package generation;
-2. independent review and approval;
-3. authorised controlled download and ZIP artifact inspection;
-4. supersession after regeneration;
-5. revocation and history visibility.
+    completion, and independent human disposition through the decision API;
+13. controlled review-package generation for the same tender;
+14. independent review and approval for the same tender;
+15. authorised controlled download and ZIP artifact inspection for the same
+    tender;
+16. supersession after regeneration for the same tender;
+17. revocation and history visibility for the same tender.
 
 ### Fixture-Backed Provider Stages
 
@@ -90,10 +90,9 @@ belongs to the provider release-validation path, not this browser suite:
 - approved draft generation and human draft review records use explicit
   fixture-backed policy/provider metadata.
 
-The controlled-package segment still uses the existing deterministic Phase 13
-fixture graph for its package prerequisites so the previously validated package
-lifecycle remains stable while the upstream application-path workflow is covered
-independently in the same golden test.
+The separate responsive/forbidden-access regression still uses the existing
+deterministic Phase 13 fixture graph because it provides stable tenant and role
+coverage independent of the primary release golden workflow.
 
 ### Direct Database Use
 
@@ -104,7 +103,8 @@ Direct Prisma access is limited to:
 - adding test-only reviewer/admin membership wiring for synthetic users after
   organisation creation;
 - deterministic fixture-backed RAG/draft bridge records;
-- the existing controlled-package fixture data used by the package lifecycle.
+- the existing Phase 13 fixture data used only by the separate
+  responsive/forbidden-access regression.
 
 ## Assertions
 
