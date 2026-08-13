@@ -299,6 +299,8 @@ export class GeminiGateway
     }
     if (response.status === 429)
       throw new ProviderResponseError("PROVIDER_RATE_LIMITED");
+    if (response.status === 401 || response.status === 403)
+      throw new ProviderResponseError("AI_PROVIDER_UNAVAILABLE");
     if (response.status >= 500)
       throw new ProviderResponseError("PROVIDER_DEPENDENCY_UNAVAILABLE");
     if (!response.ok)

@@ -147,6 +147,26 @@ describe("Gemini provider adapter", () => {
     ).rejects.toMatchObject({ code: "PROVIDER_DEPENDENCY_UNAVAILABLE" });
   });
 
+  it("classifies denied provider projects as unavailable", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response("raw provider details", { status: 403 }),
+        ),
+    );
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    await expect(
+      gateway.embedQuery("question", new AbortController().signal),
+    ).rejects.toMatchObject({ code: "AI_PROVIDER_UNAVAILABLE" });
+  });
+
   it("classifies aborted provider requests safely", async () => {
     const controller = new AbortController();
     controller.abort();
