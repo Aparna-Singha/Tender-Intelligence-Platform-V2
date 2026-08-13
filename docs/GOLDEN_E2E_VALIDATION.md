@@ -28,8 +28,7 @@ validates the release golden business workflow and downloaded artifact
 
 ## Workflow Covered
 
-The test uses synthetic data and the real local stack configured by
-Playwright:
+The test uses synthetic data and the real local stack configured by Playwright:
 
 - PostgreSQL for authoritative workflow state;
 - API for authenticated browser actions and package/download operations;
@@ -41,54 +40,28 @@ Playwright:
 - ClamAV remains part of the real local stack readiness expected by the browser
   suite.
 
-The primary release golden test uses one continuous synthetic tender/workflow
-graph. The same tender ID created through the real upstream application path is
-used for final readiness and for controlled package generation, review, approval,
-download, supersession, revocation, and history.
+The primary golden E2E now uses one continuous synthetic tender/workflow graph.
 
-### Real Application-Path Stages
+The same tender is exercised through:
 
-The primary test creates and advances upstream workflow state through supported
-application paths wherever those paths already exist:
+- authenticated application access;
+- organisation creation;
+- company evidence upload and worker-backed security processing;
+- tender creation;
+- tender document upload and ClamAV processing;
+- extraction/OCR;
+- early risk analysis;
+- human pursuit decision;
+- evidence fact/review and eligibility assessment;
+- checklist generation;
+- final readiness and independent human disposition;
+- controlled review-package generation;
+- independent review and approval;
+- controlled download and artifact inspection;
+- package supersession;
+- revocation and history.
 
-1. authentication/session through the browser login flow and authenticated API
-   calls with CSRF handling;
-2. organisation creation through the organisation API;
-3. company evidence upload through the upload-session API, signed object-storage
-   upload, completion API, worker-backed security processing, and `READY`
-   document state;
-4. tender creation through the tender API;
-5. tender document upload through the tender upload-session API, signed
-   object-storage upload, completion API, worker-backed ClamAV/security
-   processing, and `READY` tender-document state;
-6. extraction/OCR job start through the extraction API and worker-backed
-   completion;
-7. early risk job start through the risk API and worker-backed completion;
-8. human pursuit decision through the decision API;
-9. company evidence fact creation, citation creation, and human evidence review
-   through evidence APIs;
-10. eligibility/evidence assessment start through the assessment API,
-    worker-backed completion, evidence linking, and human assessment review
-    through APIs;
-11. checklist generation through the checklist API and worker-backed completion;
-12. final-readiness start through the final-readiness API, worker-backed
-    completion, and independent human disposition through the decision API;
-13. controlled review-package generation for the same tender;
-14. independent review and approval for the same tender;
-15. authorised controlled download and ZIP artifact inspection for the same
-    tender;
-16. supersession after regeneration for the same tender;
-17. revocation and history visibility for the same tender.
-
-### Fixture-Backed Provider Stages
-
-Live provider-backed RAG and drafting are not run in this release-validation E2E.
-Those segments remain deterministic fixture-backed because live Gemini validation
-belongs to the provider release-validation path, not this browser suite:
-
-- completed RAG index records use explicit fixture provider/model metadata;
-- approved draft generation and human draft review records use explicit
-  fixture-backed policy/provider metadata.
+The workflow uses the real API/worker/database/storage paths where supported.
 
 The separate responsive/forbidden-access regression still uses the existing
 deterministic Phase 13 fixture graph because it provides stable tenant and role
@@ -113,7 +86,7 @@ The golden test asserts more than route loading:
 - organisation and tender IDs remain tenant-scoped;
 - the source document is usable only after `READY` processing state;
 - extraction/OCR-compatible extracted units exist;
-- validated citations and provenance exist;
+- extraction provenance exists where produced by the real extraction path;
 - early risk, pursuit decision, eligibility, checklist, RAG, draft, readiness, and
   final disposition records are authoritative;
 - workspace stages render the expected user-facing surfaces;
@@ -138,10 +111,13 @@ The browser suite also keeps focused negative coverage:
 
 ## Provider Handling
 
-No live Gemini validation is performed by this E2E. Provider-dependent RAG and
-drafting artifacts are represented by deterministic synthetic fixture records with
-fixture provider/policy metadata. The real application path is used for upstream
-non-provider stages and for the controlled package lifecycle.
+Live Gemini/provider validation is intentionally not part of this PR.
+
+RAG index and draft generation/review are the only deterministic fixture-backed
+stages in the primary golden flow. They are tied to the same organisation, tender
+and tender version used by the real upstream and controlled-package workflow.
+
+Live provider validation will be handled separately.
 
 ## Browser Quality
 
