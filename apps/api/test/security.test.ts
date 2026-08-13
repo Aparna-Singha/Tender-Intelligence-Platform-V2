@@ -184,4 +184,81 @@ describe("deny-by-default organisation access", () => {
       }),
     );
   });
+
+  it("gives Platform Admin no implicit organisation membership", async () => {
+    const reflector = {
+      getAllAndOverride: vi.fn().mockReturnValue({
+        kind: "organisation",
+        permission: "DOCUMENT_READ",
+      }),
+    };
+    const platformAdmin = {
+      ...user,
+      platformRole: "PLATFORM_ADMIN",
+      userId: "platform-admin",
+    };
+    const database = {
+      organisationMembership: { findFirst: vi.fn().mockResolvedValue(null) },
+    };
+    const guard = new AccessGuard(
+      reflector as never,
+      { readSession: vi.fn().mockReturnValue("opaque") } as never,
+      { authenticate: vi.fn().mockResolvedValue(platformAdmin) } as never,
+      database as never,
+    );
+
+    await expect(
+      guard.canActivate(
+        httpContext({
+          headers: {},
+          params: { organisationId: "organisation-a" },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it("ignores browser-supplied user and role authority", async () => {
+    const reflector = {
+      getAllAndOverride: vi.fn().mockReturnValue({
+        kind: "organisation",
+        permission: "TENDER_UPLOAD",
+      }),
+    };
+    const database = {
+      organisationMembership: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: "membership-a", role: "REVIEWER" }),
+      },
+    };
+    const guard = new AccessGuard(
+      reflector as never,
+      { readSession: vi.fn().mockReturnValue("opaque") } as never,
+      { authenticate: vi.fn().mockResolvedValue(user) } as never,
+      database as never,
+    );
+
+    await expect(
+      guard.canActivate(
+        httpContext({
+          body: {
+            actor_user_id: "owner-a",
+            organisation_role: "OWNER",
+            user_id: "owner-a",
+          },
+          headers: {},
+          params: { organisationId: "organisation-a" },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(database.organisationMembership.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          organisationId: "organisation-a",
+          revokedAt: null,
+          userId: "user-a",
+        },
+      }),
+    );
+  });
 });
