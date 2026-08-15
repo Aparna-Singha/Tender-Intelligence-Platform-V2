@@ -106,7 +106,10 @@ export type ProviderFailureCode =
   | "EMBEDDING_DIMENSION_MISMATCH";
 
 export class ProviderResponseError extends Error {
-  public constructor(public readonly code: ProviderFailureCode) {
+  public constructor(
+    public readonly code: ProviderFailureCode,
+    public readonly safeReason?: string,
+  ) {
     super(code);
     this.name = "ProviderResponseError";
   }
@@ -184,6 +187,7 @@ export class GeminiGateway
       "Repeat each claim exactly in answer and append every handle as [C1].",
       "If support is absent, outcome must be INSUFFICIENT_EVIDENCE.",
       "Ambiguous legal/compliance conclusions require HUMAN_REVIEW_REQUIRED.",
+      "If supplied passages conflict on the requested fact, outcome must be HUMAN_REVIEW_REQUIRED and cite every conflicting handle.",
       `QUESTION: ${question}`,
       ...contexts.map(({ handle, text }) => `[${handle}] ${text}`),
     ].join("\n");
@@ -201,6 +205,34 @@ export class GeminiGateway
         generationConfig: {
           maxOutputTokens: 1200,
           responseMimeType: "application/json",
+          responseSchema: {
+            properties: {
+              answer: { type: "STRING" },
+              citation_claims: {
+                items: {
+                  properties: {
+                    claim: { type: "STRING" },
+                    handles: { items: { type: "STRING" }, type: "ARRAY" },
+                  },
+                  propertyOrdering: ["claim", "handles"],
+                  required: ["claim", "handles"],
+                  type: "OBJECT",
+                },
+                type: "ARRAY",
+              },
+              outcome: {
+                enum: [
+                  "ANSWERED",
+                  "HUMAN_REVIEW_REQUIRED",
+                  "INSUFFICIENT_EVIDENCE",
+                ],
+                type: "STRING",
+              },
+            },
+            propertyOrdering: ["outcome", "answer", "citation_claims"],
+            required: ["outcome", "answer", "citation_claims"],
+            type: "OBJECT",
+          },
           temperature: 0,
         },
       },
@@ -208,7 +240,10 @@ export class GeminiGateway
     );
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
     if (text === undefined)
-      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError(
+        "INVALID_PROVIDER_RESPONSE",
+        "missing_structured_content",
+      );
     return parseGeneratedAnswer(text);
   }
 
@@ -259,6 +294,79 @@ export class GeminiGateway
         generationConfig: {
           maxOutputTokens: 2_400,
           responseMimeType: "application/json",
+          responseSchema: {
+            properties: {
+              claims: {
+                items: {
+                  properties: {
+                    claim: { type: "STRING" },
+                    claim_class: {
+                      enum: [
+                        "TENDER_SOURCE_STATEMENT",
+                        "APPROVED_COMPANY_FACT",
+                        "HUMAN_AUTHORED_COMMITMENT",
+                        "DERIVED_ASSESSMENT_REFERENCE",
+                        "RISK_OR_CHECKLIST_WARNING",
+                        "INFERENCE_REQUIRING_REVIEW",
+                        "PLACEHOLDER",
+                      ],
+                      type: "STRING",
+                    },
+                    handles: { items: { type: "STRING" }, type: "ARRAY" },
+                    material: { type: "BOOLEAN" },
+                  },
+                  propertyOrdering: [
+                    "claim",
+                    "claim_class",
+                    "material",
+                    "handles",
+                  ],
+                  required: ["claim", "claim_class", "material", "handles"],
+                  type: "OBJECT",
+                },
+                type: "ARRAY",
+              },
+              content: { type: "STRING" },
+              placeholders: {
+                items: {
+                  properties: {
+                    explanation: { type: "STRING" },
+                    marker: { type: "STRING" },
+                    type: {
+                      enum: [
+                        "MISSING_APPROVED_COMPANY_FACT",
+                        "MISSING_DOCUMENT_EVIDENCE",
+                        "UNRESOLVED_CONFLICT",
+                        "HUMAN_REVIEW_REQUIRED",
+                        "TECHNICAL_INPUT_REQUIRED",
+                        "COMMERCIAL_INPUT_REQUIRED",
+                        "SIGNATORY_INPUT_REQUIRED",
+                        "CLARIFICATION_REQUIRED",
+                        "SOURCE_EXTRACTION_UNAVAILABLE",
+                        "EXPIRED_EVIDENCE",
+                        "UNSUPPORTED_COMMITMENT",
+                        "OTHER",
+                      ],
+                      type: "STRING",
+                    },
+                  },
+                  propertyOrdering: ["type", "marker", "explanation"],
+                  required: ["type", "marker", "explanation"],
+                  type: "OBJECT",
+                },
+                type: "ARRAY",
+              },
+              section_key: { type: "STRING" },
+            },
+            propertyOrdering: [
+              "section_key",
+              "content",
+              "claims",
+              "placeholders",
+            ],
+            required: ["section_key", "content", "claims", "placeholders"],
+            type: "OBJECT",
+          },
           temperature: 0,
         },
       },
@@ -266,7 +374,10 @@ export class GeminiGateway
     );
     const text = response.candidates?.[0]?.content?.parts?.[0]?.text;
     if (text === undefined)
-      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError(
+        "INVALID_PROVIDER_RESPONSE",
+        "missing_structured_content",
+      );
     return parseGeneratedDraftSection(text, plan.sectionKey);
   }
 
@@ -308,7 +419,10 @@ export class GeminiGateway
     try {
       return (await response.json()) as T;
     } catch {
-      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError(
+        "INVALID_PROVIDER_RESPONSE",
+        "invalid_json_body",
+      );
     }
   }
 }
@@ -321,10 +435,16 @@ function parseGeneratedDraftSection(
   try {
     value = JSON.parse(text);
   } catch {
-    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError(
+      "INVALID_PROVIDER_RESPONSE",
+      "invalid_draft_json",
+    );
   }
   if (typeof value !== "object" || value === null)
-    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError(
+      "INVALID_PROVIDER_RESPONSE",
+      "draft_not_object",
+    );
   const item = value as Record<string, unknown>;
   if (
     item.section_key !== expectedSectionKey ||
@@ -424,17 +544,26 @@ function parseGeneratedAnswer(text: string): GeneratedAnswer {
     ) ||
     !Array.isArray(item.citation_claims)
   )
-    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+    throw new ProviderResponseError(
+      "INVALID_PROVIDER_RESPONSE",
+      "answer_schema_invalid",
+    );
   const claims = item.citation_claims.map((claim: unknown) => {
     if (typeof claim !== "object" || claim === null)
-      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError(
+        "INVALID_PROVIDER_RESPONSE",
+        "answer_claim_not_object",
+      );
     const fields = claim as Record<string, unknown>;
     if (
       typeof fields.claim !== "string" ||
       !Array.isArray(fields.handles) ||
       !fields.handles.every((handle) => typeof handle === "string")
     )
-      throw new Error("INVALID_PROVIDER_RESPONSE");
+      throw new ProviderResponseError(
+        "INVALID_PROVIDER_RESPONSE",
+        "answer_claim_schema_invalid",
+      );
     return {
       claim: fields.claim,
       handles: fields.handles,

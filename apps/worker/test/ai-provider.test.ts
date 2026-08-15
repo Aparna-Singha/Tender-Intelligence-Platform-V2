@@ -80,19 +80,17 @@ describe("Gemini provider adapter", () => {
   });
 
   it("rejects unknown or malformed structured output", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            candidates: [
-              { content: { parts: [{ text: '{"answer":"unsafe"}' }] } },
-            ],
-          }),
-          { status: 200 },
-        ),
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            { content: { parts: [{ text: '{"answer":"unsafe"}' }] } },
+          ],
+        }),
+        { status: 200 },
       ),
     );
+    vi.stubGlobal("fetch", fetchMock);
     const gateway = new GeminiGateway(
       "safe-test-key-value",
       "gemini-2.5-flash",
@@ -105,6 +103,51 @@ describe("Gemini provider adapter", () => {
         new AbortController().signal,
       ),
     ).rejects.toBeInstanceOf(ProviderResponseError);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"responseSchema"'),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"INSUFFICIENT_EVIDENCE"'),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining("cite every conflicting handle"),
+      }),
+    );
+  });
+
+  it("rejects missing structured content with the provider error model", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ candidates: [{}] }), {
+          status: 200,
+        }),
+      ),
+    );
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    await expect(
+      gateway.answer(
+        "Question",
+        [{ handle: "C1", text: "Evidence" }],
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: "INVALID_PROVIDER_RESPONSE",
+      safeReason: "missing_structured_content",
+    });
   });
 
   it("classifies rate limits without leaking provider bodies", async () => {
@@ -247,6 +290,18 @@ describe("Gemini provider adapter", () => {
         body: expect.stringContaining(
           "Do not approve, export, submit, decide eligibility",
         ),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"responseSchema"'),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"UNSUPPORTED_COMMITMENT"'),
       }),
     );
   });

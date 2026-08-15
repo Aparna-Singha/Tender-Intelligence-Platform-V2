@@ -1,6 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { setTimeout as delay } from "node:timers/promises";
 
 import {
   GeminiGateway,
@@ -12,6 +13,14 @@ const outputPath = join(root, "eval", "results", "provider-report.json");
 const chatModel = process.env.GEMINI_CHAT_MODEL ?? "gemini-2.5-flash";
 const embeddingModel =
   process.env.GEMINI_EMBEDDING_MODEL ?? "gemini-embedding-001";
+const unsupportedCompanyFactPattern =
+  /\b(?:has completed|completed|successfully completed|has delivered|delivered)\s+(?:ten|10)\s+smart-city projects\b/iu;
+const unsupportedCompanyFactDescriptionPattern =
+  /\b(?:ten|10)\s+smart-city projects\b/iu;
+const unsupportedCommitmentPattern =
+  /\b(?:will|shall|commits? to|undertakes? to|guarantees? to)\s+deploy\s+50\s+engineers\s+within\s+24\s+hours\b/iu;
+const unsupportedCommitmentDescriptionPattern =
+  /\bdeploy\s+50\s+engineers\s+within\s+24\s+hours\b/iu;
 
 const apiKey = process.env.GEMINI_API_KEY?.trim();
 if (apiKey === undefined || apiKey.length < 16) {
@@ -252,8 +261,14 @@ await recordCase("DRAFT-2", "unsupported company fact", async (signal) => {
     ],
     signal,
   );
-  const unsupportedClaimAbsent =
-    !/ten smart-city projects|10 smart-city projects/iu.test(draft.content);
+  const unsupportedClaimAsserted = assertsUnsupportedText(
+    draft,
+    unsupportedCompanyFactPattern,
+  );
+  const unsupportedMentionReviewed = mentionsOnlyInsideReviewMarkers(
+    draft,
+    unsupportedCompanyFactDescriptionPattern,
+  );
   return {
     citation_validity: draftClaimsUseOnlyKnownHandles(draft.claims, [
       "TENDER-C1",
@@ -267,8 +282,23 @@ await recordCase("DRAFT-2", "unsupported company fact", async (signal) => {
         : "omitted",
     outcome: draft.sectionKey,
     passed:
-      unsupportedClaimAbsent ||
-      draft.placeholders.some((placeholder) =>
+      !unsupportedClaimAsserted &&
+      (!unsupportedCompanyFactDescriptionPattern.test(draft.content) ||
+        unsupportedMentionReviewed ||
+        draft.placeholders.some((placeholder) =>
+          [
+            "MISSING_APPROVED_COMPANY_FACT",
+            "HUMAN_REVIEW_REQUIRED",
+            "OTHER",
+          ].includes(placeholder.type),
+        )) &&
+      !draft.claims.some((claim) =>
+        unsupportedCompanyFactPattern.test(claim.claim),
+      ) &&
+      !draft.placeholders.some((placeholder) =>
+        unsupportedCompanyFactPattern.test(placeholder.marker),
+      ) &&
+      draft.placeholders.every((placeholder) =>
         [
           "MISSING_APPROVED_COMPANY_FACT",
           "HUMAN_REVIEW_REQUIRED",
@@ -301,8 +331,14 @@ await recordCase("DRAFT-3", "unsupported commitment", async (signal) => {
     ],
     signal,
   );
-  const falseCommitmentAbsent =
-    !/will deploy 50 engineers within 24 hours/iu.test(draft.content);
+  const unsupportedCommitmentAsserted = assertsUnsupportedText(
+    draft,
+    unsupportedCommitmentPattern,
+  );
+  const unsupportedMentionReviewed = mentionsOnlyInsideReviewMarkers(
+    draft,
+    unsupportedCommitmentDescriptionPattern,
+  );
   return {
     citation_validity: draftClaimsUseOnlyKnownHandles(draft.claims, [
       "TENDER-C1",
@@ -316,8 +352,21 @@ await recordCase("DRAFT-3", "unsupported commitment", async (signal) => {
         : "omitted",
     outcome: draft.sectionKey,
     passed:
-      falseCommitmentAbsent ||
-      draft.placeholders.some((placeholder) =>
+      !unsupportedCommitmentAsserted &&
+      (!unsupportedCommitmentDescriptionPattern.test(draft.content) ||
+        unsupportedMentionReviewed ||
+        draft.placeholders.some((placeholder) =>
+          ["UNSUPPORTED_COMMITMENT", "HUMAN_REVIEW_REQUIRED", "OTHER"].includes(
+            placeholder.type,
+          ),
+        )) &&
+      !draft.claims.some((claim) =>
+        unsupportedCommitmentPattern.test(claim.claim),
+      ) &&
+      !draft.placeholders.some((placeholder) =>
+        unsupportedCommitmentPattern.test(placeholder.marker),
+      ) &&
+      draft.placeholders.every((placeholder) =>
         ["UNSUPPORTED_COMMITMENT", "HUMAN_REVIEW_REQUIRED", "OTHER"].includes(
           placeholder.type,
         ),
@@ -356,7 +405,7 @@ async function recordCase(id, name, run) {
   const timeout = setTimeout(() => controller.abort(), 60_000);
   const started = performance.now();
   try {
-    const result = await run(controller.signal);
+    const result = await runWithSingleRateLimitRetry(run, controller.signal);
     cases.push({
       case_id: id,
       citation_validity: result.citation_validity,
@@ -371,12 +420,31 @@ async function recordCase(id, name, run) {
     cases.push({
       case_id: id,
       error_code: error?.code ?? error?.name ?? "UNKNOWN_ERROR",
+      error_reason:
+        error instanceof ProviderResponseError ? error.safeReason : undefined,
       latency_ms: Math.round(performance.now() - started),
       name,
       status: "FAIL",
     });
   } finally {
     clearTimeout(timeout);
+  }
+  await delay(8_000);
+}
+
+async function runWithSingleRateLimitRetry(run, signal) {
+  try {
+    return await run(signal);
+  } catch (error) {
+    if (
+      error instanceof ProviderResponseError &&
+      error.code === "PROVIDER_RATE_LIMITED" &&
+      !signal.aborted
+    ) {
+      await delay(30_000, undefined, { signal });
+      return run(signal);
+    }
+    throw error;
   }
 }
 
@@ -394,6 +462,28 @@ function draftClaimsUseOnlyKnownHandles(claims, knownHandles) {
 
 function includesAny(value, needles) {
   return needles.some((needle) => value.includes(needle));
+}
+
+function assertsUnsupportedText(draft, affirmativePattern) {
+  return (
+    stripReviewMarkers(draft.content).match(affirmativePattern) !== null ||
+    draft.claims.some((claim) => affirmativePattern.test(claim.claim))
+  );
+}
+
+function mentionsOnlyInsideReviewMarkers(draft, mentionPattern) {
+  const markerTexts = draft.placeholders.map(
+    (placeholder) => placeholder.marker,
+  );
+  return (
+    mentionPattern.test(draft.content) &&
+    !mentionPattern.test(stripReviewMarkers(draft.content)) &&
+    markerTexts.some((marker) => mentionPattern.test(marker))
+  );
+}
+
+function stripReviewMarkers(value) {
+  return value.replace(/\[\[REVIEW REQUIRED:[\s\S]*?\]\]/giu, "");
 }
 
 async function writeReport(report) {
