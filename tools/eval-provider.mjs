@@ -7,6 +7,7 @@ import {
   GeminiGateway,
   ProviderResponseError,
 } from "../apps/worker/src/ai-provider.ts";
+import { canonicalCompanyEvidenceSourceText } from "../packages/domain/src/index.ts";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const outputPath = join(root, "eval", "results", "provider-report.json");
@@ -21,6 +22,13 @@ const unsupportedCommitmentPattern =
   /\b(?:will|shall|commits? to|undertakes? to|guarantees? to)\s+deploy\s+50\s+engineers\s+within\s+24\s+hours\b/iu;
 const unsupportedCommitmentDescriptionPattern =
   /\bdeploy\s+50\s+engineers\s+within\s+24\s+hours\b/iu;
+const validGstCompanyEvidenceContext = canonicalCompanyEvidenceSourceText({
+  boundedExcerpt: "GST registration certificate confirms validity.",
+  factType: "GST_REGISTRATION",
+  value: companyEvidenceValue({
+    textValue: "The bidder has valid GST registration.",
+  }),
+});
 
 const apiKey = process.env.GEMINI_API_KEY?.trim();
 if (apiKey === undefined || apiKey.length < 16) {
@@ -210,7 +218,7 @@ await recordCase("DRAFT-1", "supported draft", async (signal) => {
       {
         handle: "COMPANY-C1",
         sourceClass: "COMPANY_EVIDENCE",
-        text: "The bidder has valid GST registration.",
+        text: validGstCompanyEvidenceContext,
       },
     ],
     signal,
@@ -256,7 +264,7 @@ await recordCase("DRAFT-2", "unsupported company fact", async (signal) => {
       {
         handle: "COMPANY-C1",
         sourceClass: "COMPANY_EVIDENCE",
-        text: "The bidder has valid GST registration.",
+        text: validGstCompanyEvidenceContext,
       },
     ],
     signal,
@@ -326,7 +334,7 @@ await recordCase("DRAFT-3", "unsupported commitment", async (signal) => {
       {
         handle: "COMPANY-C1",
         sourceClass: "COMPANY_EVIDENCE",
-        text: "The bidder has valid GST registration.",
+        text: validGstCompanyEvidenceContext,
       },
     ],
     signal,
@@ -484,6 +492,21 @@ function mentionsOnlyInsideReviewMarkers(draft, mentionPattern) {
 
 function stripReviewMarkers(value) {
   return value.replace(/\[\[REVIEW REQUIRED:[\s\S]*?\]\]/giu, "");
+}
+
+function companyEvidenceValue(overrides) {
+  return {
+    booleanValue: null,
+    currency: null,
+    dateValue: null,
+    financialYear: null,
+    numberValue: null,
+    scope: null,
+    textListValue: [],
+    textValue: null,
+    unit: null,
+    ...overrides,
+  };
 }
 
 async function writeReport(report) {

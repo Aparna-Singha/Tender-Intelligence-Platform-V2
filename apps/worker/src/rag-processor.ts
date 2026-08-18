@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@tender/database";
 import {
   createStructureAwareChunks,
+  canonicalCompanyEvidenceSourceText,
   isPromptInjectionText,
   RAG_ANSWER_POLICY_VERSION,
   RAG_CANDIDATE_LIMIT,
@@ -404,12 +405,6 @@ export class RagProcessor {
         );
         if (version === null || version === undefined || citation === undefined)
           continue;
-        const value =
-          version.textValue ??
-          version.numberValue?.toString() ??
-          version.dateValue?.toISOString().slice(0, 10) ??
-          version.booleanValue?.toString() ??
-          version.textListValue.join(", ");
         sourceMetadata.set(`COMPANY_EVIDENCE:${fact.id}`, {
           citationId: null,
           coordinates: {
@@ -427,7 +422,11 @@ export class RagProcessor {
           pageNumber: citation.pageNumber,
           sourceClass: "COMPANY_EVIDENCE",
           sourceRecordId: fact.id,
-          text: `${fact.factType}: ${value}. Evidence: ${citation.boundedExcerpt}`,
+          text: canonicalCompanyEvidenceSourceText({
+            boundedExcerpt: citation.boundedExcerpt,
+            factType: fact.factType,
+            value: version,
+          }),
         });
       }
     }

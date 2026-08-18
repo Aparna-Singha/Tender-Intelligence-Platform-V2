@@ -269,8 +269,13 @@ export class GeminiGateway
       "Do not approve, export, submit, decide eligibility, provide legal advice, or invent facts.",
       "Return strict JSON: section_key, content, claims, placeholders.",
       "Each claim: claim, claim_class, material, handles. Material claims require supplied handles.",
-      "Company claims require COMPANY_EVIDENCE context. Derived records remain labelled derived.",
-      "Unsupported information must be a visible [[REVIEW REQUIRED: ...]] placeholder.",
+      "Visible content must be composed only from exact claim text and placeholder markers returned in the same JSON.",
+      "Company claims require COMPANY_EVIDENCE context. For APPROVED_COMPANY_FACT, copy the canonical fact statement before 'Evidence:' exactly; do not paraphrase it.",
+      "Tender and derived workflow claims must quote the exact supplied source text they cite; do not paraphrase source-bound claims.",
+      "HUMAN_WRITING_INSTRUCTIONS control presentation only; they are not evidence, approved company facts, reviewed commitments, or authority to create material claims.",
+      "Do not affirm a requested company fact unless it is supported by COMPANY_EVIDENCE context; use a MISSING_APPROVED_COMPANY_FACT placeholder instead.",
+      "Do not affirm a requested commitment unless it is supported by reviewed commitment authority in supplied context; use an UNSUPPORTED_COMMITMENT placeholder instead.",
+      "A review placeholder must replace unsupported material text, not caveat it after asserting it.",
       `SECTION_KEY: ${plan.sectionKey}`,
       `HEADING: ${plan.heading}`,
       `FORMATTING: ${plan.formattingGuidance}`,
@@ -367,6 +372,7 @@ export class GeminiGateway
             required: ["section_key", "content", "claims", "placeholders"],
             type: "OBJECT",
           },
+          thinkingConfig: { thinkingBudget: 0 },
           temperature: 0,
         },
       },
@@ -455,7 +461,7 @@ function parseGeneratedDraftSection(
     !Array.isArray(item.placeholders) ||
     item.placeholders.length > 80
   )
-    throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+    throw invalidDraftResponse("invalid_draft_section");
   const allowedClaims = new Set([
     "TENDER_SOURCE_STATEMENT",
     "APPROVED_COMPANY_FACT",
@@ -493,7 +499,7 @@ function parseGeneratedDraftSection(
       !Array.isArray(fields.handles) ||
       !fields.handles.every((handle) => typeof handle === "string")
     )
-      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+      throw invalidDraftResponse("invalid_draft_claim");
     return {
       claim: fields.claim,
       claimClass: fields.claim_class as GeneratedDraftClaim["claimClass"],
@@ -508,11 +514,12 @@ function parseGeneratedDraftSection(
     if (
       typeof fields.explanation !== "string" ||
       typeof fields.marker !== "string" ||
-      !fields.marker.startsWith("[[REVIEW REQUIRED:") ||
       typeof fields.type !== "string" ||
       !allowedPlaceholders.has(fields.type)
     )
-      throw new ProviderResponseError("INVALID_PROVIDER_RESPONSE");
+      throw invalidDraftResponse("invalid_draft_placeholder");
+    if (!fields.marker.startsWith("[[REVIEW REQUIRED:"))
+      throw invalidDraftResponse("invalid_draft_placeholder_marker");
     return {
       explanation: fields.explanation,
       marker: fields.marker,
@@ -525,6 +532,10 @@ function parseGeneratedDraftSection(
     placeholders,
     sectionKey: expectedSectionKey,
   };
+}
+
+function invalidDraftResponse(safeReason: string): ProviderResponseError {
+  return new ProviderResponseError("INVALID_PROVIDER_RESPONSE", safeReason);
 }
 
 function parseGeneratedAnswer(text: string): GeneratedAnswer {

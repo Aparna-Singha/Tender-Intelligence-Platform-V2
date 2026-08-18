@@ -304,5 +304,201 @@ describe("Gemini provider adapter", () => {
         body: expect.stringContaining('"UNSUPPORTED_COMMITMENT"'),
       }),
     );
+    const request = requestBodyFrom(fetchMock);
+    expect(request.generationConfig.thinkingConfig).toEqual({
+      thinkingBudget: 0,
+    });
+    expect(request.generationConfig.responseSchema).toMatchObject({
+      properties: expect.objectContaining({
+        claims: expect.any(Object),
+        content: { type: "STRING" },
+        placeholders: expect.any(Object),
+        section_key: { type: "STRING" },
+      }),
+      required: ["section_key", "content", "claims", "placeholders"],
+      type: "OBJECT",
+    });
+    const prompt = request.contents[0]?.parts[0]?.text ?? "";
+    expect(prompt).toContain(
+      "HUMAN_WRITING_INSTRUCTIONS control presentation only",
+    );
+    expect(prompt).toContain(
+      "they are not evidence, approved company facts, reviewed commitments, or authority to create material claims",
+    );
+    expect(prompt).toContain(
+      "Do not affirm a requested company fact unless it is supported by COMPANY_EVIDENCE context",
+    );
+    expect(prompt).toContain(
+      "For APPROVED_COMPANY_FACT, copy the canonical fact statement before 'Evidence:' exactly",
+    );
+    expect(prompt).toContain(
+      "Visible content must be composed only from exact claim text and placeholder markers returned in the same JSON.",
+    );
+    expect(prompt).toContain(
+      "Tender and derived workflow claims must quote the exact supplied source text they cite; do not paraphrase source-bound claims.",
+    );
+    expect(prompt).toContain(
+      "Do not affirm a requested commitment unless it is supported by reviewed commitment authority",
+    );
+    expect(prompt).toContain(
+      "A review placeholder must replace unsupported material text, not caveat it after asserting it.",
+    );
+  });
+
+  it("reports a safe reason for unsupported company facts misclassified as commitments", async () => {
+    const gateway = draftGatewayWithResponse({
+      claims: [
+        {
+          claim: "The bidder has completed ten smart-city projects.",
+          claim_class: "HUMAN_AUTHORED_COMMITMENT",
+          handles: [],
+          material: true,
+        },
+      ],
+      content: "The bidder has completed ten smart-city projects. [PLACEHOLDER-1]",
+      placeholders: [
+        {
+          explanation: "No approved company evidence supports this fact.",
+          marker: "[PLACEHOLDER-1]",
+          type: "UNSUPPORTED_COMMITMENT",
+        },
+      ],
+      section_key: "experience",
+    });
+
+    await expect(
+      gateway.generateDraftSection(
+        draftPlan("experience"),
+        [],
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: "INVALID_PROVIDER_RESPONSE",
+      safeReason: "invalid_draft_placeholder_marker",
+    });
+  });
+
+  it("reports a safe reason for unsupported commitments misclassified as placeholders", async () => {
+    const gateway = draftGatewayWithResponse({
+      claims: [
+        {
+          claim: "The bidder will deploy 50 engineers within 24 hours.",
+          claim_class: "PLACEHOLDER",
+          handles: [],
+          material: true,
+        },
+      ],
+      content:
+        "The bidder will deploy 50 engineers within 24 hours. [UNSUPPORTED_COMMITMENT-1]",
+      placeholders: [
+        {
+          explanation: "No reviewed commitment authority supports this.",
+          marker: "[UNSUPPORTED_COMMITMENT-1]",
+          type: "UNSUPPORTED_COMMITMENT",
+        },
+      ],
+      section_key: "delivery",
+    });
+
+    await expect(
+      gateway.generateDraftSection(
+        draftPlan("delivery"),
+        [],
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: "INVALID_PROVIDER_RESPONSE",
+      safeReason: "invalid_draft_placeholder_marker",
+    });
+  });
+
+  it("reports invalid draft claim for malformed structured claim objects", async () => {
+    const gateway = draftGatewayWithResponse({
+      claims: [
+        {
+          claim: "The bidder has completed ten smart-city projects.",
+          claim_class: "UNSUPPORTED_COMPANY_FACT",
+          handles: [],
+          material: true,
+        },
+      ],
+      content: "[[REVIEW REQUIRED: Unsupported company fact]]",
+      placeholders: [
+        {
+          explanation: "No approved company evidence supports this fact.",
+          marker: "[[REVIEW REQUIRED: Unsupported company fact]]",
+          type: "MISSING_APPROVED_COMPANY_FACT",
+        },
+      ],
+      section_key: "experience",
+    });
+
+    await expect(
+      gateway.generateDraftSection(
+        draftPlan("experience"),
+        [],
+        new AbortController().signal,
+      ),
+    ).rejects.toMatchObject({
+      code: "INVALID_PROVIDER_RESPONSE",
+      safeReason: "invalid_draft_claim",
+    });
   });
 });
+
+function draftGatewayWithResponse(payload: unknown): GeminiGateway {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          candidates: [
+            { content: { parts: [{ text: JSON.stringify(payload) }] } },
+          ],
+        }),
+        { status: 200 },
+      ),
+    ),
+  );
+  return new GeminiGateway(
+    "safe-test-key-value",
+    "gemini-2.5-flash",
+    "gemini-embedding-001",
+  );
+}
+
+function draftPlan(sectionKey: string): {
+  readonly formattingGuidance: string;
+  readonly heading: string;
+  readonly instructions: null;
+  readonly sectionKey: string;
+} {
+  return {
+    formattingGuidance: "Use concise prose.",
+    heading: "Draft",
+    instructions: null,
+    sectionKey,
+  };
+}
+
+function requestBodyFrom(fetchMock: ReturnType<typeof vi.fn>): {
+  readonly contents: readonly {
+    readonly parts: readonly { readonly text: string }[];
+  }[];
+  readonly generationConfig: {
+    readonly responseSchema: unknown;
+    readonly thinkingConfig?: unknown;
+  };
+} {
+  const body = fetchMock.mock.calls[0]?.[1]?.body;
+  expect(typeof body).toBe("string");
+  return JSON.parse(body as string) as {
+    readonly contents: readonly {
+      readonly parts: readonly { readonly text: string }[];
+    }[];
+    readonly generationConfig: {
+      readonly responseSchema: unknown;
+      readonly thinkingConfig?: unknown;
+    };
+  };
+}

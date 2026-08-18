@@ -5,6 +5,8 @@ import {
 } from "@tender/database";
 import {
   claimSupportState,
+  canonicalCompanyEvidenceSourceText,
+  canonicalCompanyEvidenceStatement,
   DRAFT_MAX_CONTEXTS_PER_SECTION,
   isUnsafeDraftInstruction,
   sourceClassesForMode,
@@ -17,6 +19,7 @@ import {
 import type {
   DraftGenerationGateway,
   EmbeddingGateway,
+  GeneratedDraftClaim,
   GeneratedDraftSection,
 } from "./ai-provider.js";
 import { ProviderResponseError } from "./ai-provider.js";
@@ -52,6 +55,30 @@ interface RetrievedDraftChunk {
   readonly source_class: string;
   readonly source_record_id: string;
 }
+
+interface CompanyEvidenceAuthority {
+  readonly citationId: string;
+  readonly factVersionId: string;
+  readonly canonicalStatement: string;
+  readonly canonicalSourceText: string;
+}
+
+const tenderAuthoritySourceClasses = new Set([
+  "TENDER_PRIMARY",
+  "TENDER_ANNEXURE",
+  "TENDER_CORRIGENDUM",
+  "TENDER_BOQ",
+  "TENDER_CLARIFICATION",
+  "STRUCTURED_REQUIREMENT",
+  "STRUCTURED_FIELD",
+  "TENDER_METADATA",
+  "SYSTEM_POLICY",
+]);
+const assessmentAuthoritySourceClasses = new Set(["ELIGIBILITY_ASSESSMENT"]);
+const riskChecklistAuthoritySourceClasses = new Set([
+  "CHECKLIST_ITEM",
+  "RISK_FINDING",
+]);
 
 export class DraftGenerationProcessor {
   public constructor(
@@ -279,6 +306,8 @@ export class DraftGenerationProcessor {
     for (const claim of generated.claims) {
       if (!plan.allowedClaimClasses.includes(claim.claimClass))
         throw new Error("DRAFT_CLAIM_CLASS_NOT_ALLOWED");
+      if (claim.claimClass === "HUMAN_AUTHORED_COMMITMENT")
+        throw new Error("HUMAN_COMMITMENT_SOURCE_INVALID");
       if (
         claim.material &&
         claim.claimClass !== "PLACEHOLDER" &&
@@ -287,18 +316,32 @@ export class DraftGenerationProcessor {
         throw new Error("DRAFT_CITATION_INVALID");
       if (
         claim.claimClass === "APPROVED_COMPANY_FACT" &&
-        !claim.handles.every((handle) => {
-          const chunk = chunks[Number(handle.slice(1)) - 1];
-          return chunk?.source_class === "COMPANY_EVIDENCE";
-        })
+        !companyFactClaimBindsToAuthority(
+          claim.claim,
+          claim.handles.flatMap((handle) => {
+            const chunk = chunks[Number(handle.slice(1)) - 1];
+            if (chunk?.source_class !== "COMPANY_EVIDENCE") return [];
+            return [
+              {
+                canonicalSourceText: chunk.content,
+                canonicalStatement: companyEvidenceStatementFromSourceText(
+                  chunk.content,
+                ),
+              },
+            ];
+          }),
+        )
       )
-        throw new Error("COMPANY_FACT_SOURCE_INVALID");
+        throw new Error("COMPANY_FACT_CLAIM_MISMATCH");
+      assertGeneratedClaimSourceAuthority(claim, chunks);
       if (!generated.content.includes(claim.claim))
         throw new Error("DRAFT_CLAIM_TEXT_NOT_IN_SECTION");
     }
     for (const placeholder of generated.placeholders)
       if (!generated.content.includes(placeholder.marker))
         throw new Error("DRAFT_PLACEHOLDER_NOT_VISIBLE");
+    if (!visibleDraftContentIsAccountedFor(generated))
+      throw new Error("DRAFT_UNCLAIMED_MATERIAL_CONTENT");
   }
 
   private async persist(
@@ -403,17 +446,35 @@ export class DraftGenerationProcessor {
           const citedChunks = proposed.handles.map(
             (handle) => item.chunks[Number(handle.slice(1)) - 1],
           );
-          const companyChunk = citedChunks.find(
-            (chunk) => chunk?.source_class === "COMPANY_EVIDENCE",
+          const companyAuthorities = (
+            await Promise.all(
+              citedChunks
+                .filter(
+                  (chunk): chunk is RetrievedDraftChunk =>
+                    chunk?.source_class === "COMPANY_EVIDENCE",
+                )
+                .map((chunk) =>
+                  this.companyEvidenceCitation(
+                    transaction,
+                    run.organisationId,
+                    chunk,
+                  ),
+                ),
+            )
+          ).filter(
+            (authority): authority is CompanyEvidenceAuthority =>
+              authority !== null,
           );
-          const companyEvidence =
-            companyChunk === undefined
-              ? null
-              : await this.companyEvidenceCitation(
-                  transaction,
-                  run.organisationId,
-                  companyChunk,
-                );
+          const companyEvidence = companyAuthorities[0] ?? null;
+          if (
+            proposed.claimClass === "APPROVED_COMPANY_FACT" &&
+            !companyFactClaimBindsToAuthority(
+              proposed.claim,
+              companyAuthorities,
+            )
+          )
+            throw new Error("COMPANY_FACT_CLAIM_MISMATCH");
+          assertGeneratedClaimSourceAuthority(proposed, citedChunks);
           const supportState = claimSupportState({
             approvedEvidence: companyEvidence !== null,
             citationCount: citedChunks.filter(Boolean).length,
@@ -509,10 +570,7 @@ export class DraftGenerationProcessor {
     transaction: Prisma.TransactionClient,
     organisationId: string,
     chunk: RetrievedDraftChunk,
-  ): Promise<{
-    readonly citationId: string;
-    readonly factVersionId: string;
-  } | null> {
+  ): Promise<CompanyEvidenceAuthority | null> {
     if (chunk.source_class !== "COMPANY_EVIDENCE") return null;
     const fact = await transaction.companyEvidenceFact.findFirst({
       include: {
@@ -536,7 +594,17 @@ export class DraftGenerationProcessor {
       citation === undefined
     )
       throw new Error("COMPANY_FACT_SOURCE_INVALID");
+    const canonicalStatement = canonicalCompanyEvidenceStatement({
+      factType: fact.factType,
+      value: fact.currentVersion,
+    });
     return {
+      canonicalSourceText: canonicalCompanyEvidenceSourceText({
+        boundedExcerpt: citation.boundedExcerpt,
+        factType: fact.factType,
+        value: fact.currentVersion,
+      }),
+      canonicalStatement,
       citationId: citation.id,
       factVersionId: fact.currentVersion.id,
     };
@@ -630,6 +698,132 @@ export class DraftGenerationProcessor {
     });
     if (updated.count !== 1) throw new Error("DRAFT_GENERATION_CANCELLED");
   }
+}
+
+export function companyFactClaimBindsToAuthority(
+  claim: string,
+  authorities: readonly {
+    readonly canonicalSourceText: string;
+    readonly canonicalStatement: string;
+  }[],
+): boolean {
+  if (authorities.length === 0) return false;
+  const normalizedClaim = normalizeCompanyFactBindingText(claim);
+  const canonical = normalizeCompanyFactBindingText(
+    authorities[0]!.canonicalStatement,
+  );
+  if (
+    !authorities.every(
+      ({ canonicalStatement }) =>
+        normalizeCompanyFactBindingText(canonicalStatement) === canonical,
+    )
+  )
+    return false;
+  return authorities.every(
+    ({ canonicalStatement }) =>
+      normalizedClaim === normalizeCompanyFactBindingText(canonicalStatement),
+  );
+}
+
+function assertGeneratedClaimSourceAuthority(
+  claim: GeneratedDraftClaim,
+  chunks: readonly (RetrievedDraftChunk | undefined)[],
+): void {
+  switch (claim.claimClass) {
+    case "APPROVED_COMPANY_FACT":
+      if (
+        !chunks.every((chunk) => chunk?.source_class === "COMPANY_EVIDENCE")
+      )
+        throw new Error("DRAFT_CLAIM_SOURCE_CLASS_INVALID");
+      return;
+    case "TENDER_SOURCE_STATEMENT":
+      assertExactSourceBoundClaim(
+        claim,
+        chunks,
+        tenderAuthoritySourceClasses,
+      );
+      return;
+    case "DERIVED_ASSESSMENT_REFERENCE":
+      assertExactSourceBoundClaim(
+        claim,
+        chunks,
+        assessmentAuthoritySourceClasses,
+      );
+      return;
+    case "RISK_OR_CHECKLIST_WARNING":
+      assertExactSourceBoundClaim(
+        claim,
+        chunks,
+        riskChecklistAuthoritySourceClasses,
+      );
+      return;
+    case "HUMAN_AUTHORED_COMMITMENT":
+      throw new Error("HUMAN_COMMITMENT_SOURCE_INVALID");
+    case "INFERENCE_REQUIRING_REVIEW":
+      if (!claim.claim.startsWith("[[REVIEW REQUIRED:"))
+        throw new Error("DRAFT_INFERENCE_REVIEW_MARKER_REQUIRED");
+      return;
+    case "PLACEHOLDER":
+      if (!claim.claim.startsWith("[[REVIEW REQUIRED:"))
+        throw new Error("DRAFT_PLACEHOLDER_CLAIM_MARKER_REQUIRED");
+      return;
+  }
+}
+
+function assertExactSourceBoundClaim(
+  claim: GeneratedDraftClaim,
+  chunks: readonly (RetrievedDraftChunk | undefined)[],
+  allowedSourceClasses: ReadonlySet<string>,
+): void {
+  const validChunks = chunks.filter(
+    (chunk): chunk is RetrievedDraftChunk => chunk !== undefined,
+  );
+  if (
+    chunks.length === 0 ||
+    validChunks.length !== chunks.length ||
+    !validChunks.every((chunk) => allowedSourceClasses.has(chunk.source_class))
+  )
+    throw new Error("DRAFT_CLAIM_SOURCE_CLASS_INVALID");
+  if (
+    !validChunks.some(
+      (chunk) =>
+        normalizeClaimSourceText(claim.claim) ===
+        normalizeClaimSourceText(chunk.content),
+    )
+  )
+    throw new Error("DRAFT_CLAIM_SOURCE_TEXT_MISMATCH");
+}
+
+function normalizeClaimSourceText(value: string): string {
+  return value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+}
+
+function normalizeCompanyFactBindingText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}:|]+/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+}
+
+function companyEvidenceStatementFromSourceText(value: string): string {
+  return value.split(". Evidence:")[0]?.trim() ?? value.trim();
+}
+
+function visibleDraftContentIsAccountedFor(
+  generated: GeneratedDraftSection,
+): boolean {
+  let remainder = generated.content;
+  for (const claim of generated.claims)
+    remainder = remainder.replaceAll(claim.claim, " ");
+  for (const placeholder of generated.placeholders)
+    remainder = remainder.replaceAll(placeholder.marker, " ");
+  return normalizeUnclaimedContent(remainder) === "";
+}
+
+function normalizeUnclaimedContent(value: string): string {
+  return value.replace(/[^\p{L}\p{N}]+/gu, " ").trim();
 }
 
 function parseTemplateSections(
