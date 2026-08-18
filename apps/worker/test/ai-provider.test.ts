@@ -355,7 +355,8 @@ describe("Gemini provider adapter", () => {
           material: true,
         },
       ],
-      content: "The bidder has completed ten smart-city projects. [PLACEHOLDER-1]",
+      content:
+        "The bidder has completed ten smart-city projects. [PLACEHOLDER-1]",
       placeholders: [
         {
           explanation: "No approved company evidence supports this fact.",

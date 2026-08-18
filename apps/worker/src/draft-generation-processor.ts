@@ -731,17 +731,11 @@ function assertGeneratedClaimSourceAuthority(
 ): void {
   switch (claim.claimClass) {
     case "APPROVED_COMPANY_FACT":
-      if (
-        !chunks.every((chunk) => chunk?.source_class === "COMPANY_EVIDENCE")
-      )
+      if (!chunks.every((chunk) => chunk?.source_class === "COMPANY_EVIDENCE"))
         throw new Error("DRAFT_CLAIM_SOURCE_CLASS_INVALID");
       return;
     case "TENDER_SOURCE_STATEMENT":
-      assertExactSourceBoundClaim(
-        claim,
-        chunks,
-        tenderAuthoritySourceClasses,
-      );
+      assertExactSourceBoundClaim(claim, chunks, tenderAuthoritySourceClasses);
       return;
     case "DERIVED_ASSESSMENT_REFERENCE":
       assertExactSourceBoundClaim(

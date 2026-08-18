@@ -203,12 +203,14 @@ describe("fact-constrained draft worker", () => {
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).rejects.toThrow(
-      "COMPANY_FACT_CLAIM_MISMATCH",
-    );
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).rejects.toThrow("COMPANY_FACT_CLAIM_MISMATCH");
     expect(database.$transaction).not.toHaveBeenCalled();
     expect(database.draftGenerationRun.update).not.toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: "COMPLETE" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "COMPLETE" }),
+      }),
     );
   });
 
@@ -222,9 +224,9 @@ describe("fact-constrained draft worker", () => {
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).rejects.toThrow(
-      "DRAFT_UNCLAIMED_MATERIAL_CONTENT",
-    );
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).rejects.toThrow("DRAFT_UNCLAIMED_MATERIAL_CONTENT");
     expect(database.$transaction).not.toHaveBeenCalled();
   });
 
@@ -246,9 +248,9 @@ describe("fact-constrained draft worker", () => {
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).rejects.toThrow(
-      "DRAFT_CLAIM_SOURCE_TEXT_MISMATCH",
-    );
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).rejects.toThrow("DRAFT_CLAIM_SOURCE_TEXT_MISMATCH");
     expect(database.$transaction).not.toHaveBeenCalled();
   });
 
@@ -265,15 +267,16 @@ describe("fact-constrained draft worker", () => {
             material: true,
           },
         ],
-        content: "The bidder commits to deploying 50 engineers within 24 hours.",
+        content:
+          "The bidder commits to deploying 50 engineers within 24 hours.",
         placeholders: [],
         sectionKey: "company",
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).rejects.toThrow(
-      "DRAFT_CLAIM_SOURCE_TEXT_MISMATCH",
-    );
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).rejects.toThrow("DRAFT_CLAIM_SOURCE_TEXT_MISMATCH");
     expect(database.$transaction).not.toHaveBeenCalled();
   });
 
@@ -289,15 +292,16 @@ describe("fact-constrained draft worker", () => {
             material: true,
           },
         ],
-        content: "The bidder commits to deploying 50 engineers within 24 hours.",
+        content:
+          "The bidder commits to deploying 50 engineers within 24 hours.",
         placeholders: [],
         sectionKey: "company",
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).rejects.toThrow(
-      "HUMAN_COMMITMENT_SOURCE_INVALID",
-    );
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).rejects.toThrow("HUMAN_COMMITMENT_SOURCE_INVALID");
     expect(database.$transaction).not.toHaveBeenCalled();
   });
 
@@ -320,7 +324,9 @@ describe("fact-constrained draft worker", () => {
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).resolves.toBeUndefined();
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).resolves.toBeUndefined();
     expect(database.$transaction).toHaveBeenCalled();
     expect(transaction.draftClaim.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -351,7 +357,9 @@ describe("fact-constrained draft worker", () => {
       },
     });
 
-    await expect(processor.process(job, new AbortController().signal)).resolves.toBeUndefined();
+    await expect(
+      processor.process(job, new AbortController().signal),
+    ).resolves.toBeUndefined();
     expect(database.$transaction).toHaveBeenCalled();
     expect(transaction.draftClaim.create).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -383,7 +391,11 @@ function processorFixture({
 }: {
   readonly chunk?: DraftTestChunk;
   readonly generated: Awaited<
-    ReturnType<ConstructorParameters<typeof DraftGenerationProcessor>[2]["generateDraftSection"]>
+    ReturnType<
+      ConstructorParameters<
+        typeof DraftGenerationProcessor
+      >[2]["generateDraftSection"]
+    >
   >;
 }): {
   readonly database: {
@@ -408,7 +420,9 @@ function processorFixture({
     evidenceSnapshotId: "snapshot",
     extractionRunId: "extraction",
     id: "run",
-    inputSnapshot: { sources: [{ sourceKind: "RAG_CHUNK", sourceRecordId: "chunk" }] },
+    inputSnapshot: {
+      sources: [{ sourceKind: "RAG_CHUNK", sourceRecordId: "chunk" }],
+    },
     inputSnapshotId: "input-snapshot",
     model: "gemini",
     organisationId: "organisation",
@@ -482,7 +496,9 @@ function processorFixture({
       callback(transaction),
     ),
     auditEvent: { create: vi.fn() },
-    checklistGenerationRun: { findFirst: vi.fn().mockResolvedValue({ id: "checklist" }) },
+    checklistGenerationRun: {
+      findFirst: vi.fn().mockResolvedValue({ id: "checklist" }),
+    },
     draftGenerationRun: {
       findFirst: vi.fn().mockResolvedValue(run),
       update: vi.fn(),
@@ -509,7 +525,9 @@ function processorFixture({
         template: {},
       }),
     },
-    earlyPursuitDecision: { findFirst: vi.fn().mockResolvedValue({ id: "decision" }) },
+    earlyPursuitDecision: {
+      findFirst: vi.fn().mockResolvedValue({ id: "decision" }),
+    },
     ragIndexRun: { findFirst: vi.fn().mockResolvedValue({ id: "rag" }) },
     tender: {
       findFirst: vi.fn().mockResolvedValue({
@@ -563,12 +581,16 @@ function canonicalGstStatement(): string {
   });
 }
 
-function gstValue(): Parameters<typeof canonicalCompanyEvidenceStatement>[0]["value"] {
+function gstValue(): Parameters<
+  typeof canonicalCompanyEvidenceStatement
+>[0]["value"] {
   return factValue({ textValue: "The bidder has valid GST registration." });
 }
 
 function factValue(
-  overrides: Partial<Parameters<typeof canonicalCompanyEvidenceStatement>[0]["value"]>,
+  overrides: Partial<
+    Parameters<typeof canonicalCompanyEvidenceStatement>[0]["value"]
+  >,
 ): Parameters<typeof canonicalCompanyEvidenceStatement>[0]["value"] {
   return {
     booleanValue: null,

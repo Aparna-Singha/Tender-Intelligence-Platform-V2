@@ -222,7 +222,9 @@ export function canonicalCompanyEvidenceStatement(input: {
 export function canonicalCompanyEvidenceSourceText(input: {
   readonly boundedExcerpt: string;
   readonly factType: string;
-  readonly value: Parameters<typeof canonicalCompanyEvidenceStatement>[0]["value"];
+  readonly value: Parameters<
+    typeof canonicalCompanyEvidenceStatement
+  >[0]["value"];
 }): string {
   return `${canonicalCompanyEvidenceStatement(input)}. Evidence: ${input.boundedExcerpt}`;
 }
@@ -238,13 +240,7 @@ function canonicalCompanyEvidenceValue(
       : value.dateValue?.slice(0, 10)) ??
     value.booleanValue?.toString() ??
     value.textListValue.join(", ");
-  return [
-    primary,
-    value.unit,
-    value.currency,
-    value.financialYear,
-    value.scope,
-  ]
+  return [primary, value.unit, value.currency, value.financialYear, value.scope]
     .filter((item): item is string => item !== null && item.trim() !== "")
     .join(" | ");
 }
