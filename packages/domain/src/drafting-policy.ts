@@ -201,3 +201,46 @@ export function isUnsafeDraftInstruction(text: string): boolean {
     text,
   );
 }
+
+export function canonicalCompanyEvidenceStatement(input: {
+  readonly factType: string;
+  readonly value: {
+    readonly booleanValue: boolean | null;
+    readonly currency: string | null;
+    readonly dateValue: Date | string | null;
+    readonly financialYear: string | null;
+    readonly numberValue: { toString(): string } | null;
+    readonly scope: string | null;
+    readonly textListValue: readonly string[];
+    readonly textValue: string | null;
+    readonly unit: string | null;
+  };
+}): string {
+  return `${input.factType}: ${canonicalCompanyEvidenceValue(input.value)}`;
+}
+
+export function canonicalCompanyEvidenceSourceText(input: {
+  readonly boundedExcerpt: string;
+  readonly factType: string;
+  readonly value: Parameters<
+    typeof canonicalCompanyEvidenceStatement
+  >[0]["value"];
+}): string {
+  return `${canonicalCompanyEvidenceStatement(input)}. Evidence: ${input.boundedExcerpt}`;
+}
+
+function canonicalCompanyEvidenceValue(
+  value: Parameters<typeof canonicalCompanyEvidenceStatement>[0]["value"],
+): string {
+  const primary =
+    value.textValue ??
+    value.numberValue?.toString() ??
+    (value.dateValue instanceof Date
+      ? value.dateValue.toISOString().slice(0, 10)
+      : value.dateValue?.slice(0, 10)) ??
+    value.booleanValue?.toString() ??
+    value.textListValue.join(", ");
+  return [primary, value.unit, value.currency, value.financialYear, value.scope]
+    .filter((item): item is string => item !== null && item.trim() !== "")
+    .join(" | ");
+}
