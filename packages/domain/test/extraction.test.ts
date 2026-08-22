@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractDeterministicFields,
   extractDeterministicRequirements,
+  parseTenderDateTime,
   validateCitation,
   type ParsedBlock,
 } from "../src/extraction.js";
@@ -69,6 +70,24 @@ describe("deterministic extraction policy", () => {
         () => anchor,
       )[0],
     ).toMatchObject({ confidence: "LOW", findingState: "AMBIGUOUS" });
+  });
+
+  it("extracts GeM bid end date/time and normalises it as an Indian tender deadline", () => {
+    const fields = extractDeterministicFields(
+      [block("Bid End Date/Time 21-08-2026 09:00:00")],
+      () => anchor,
+    );
+    expect(fields).toHaveLength(1);
+    expect(fields[0]).toMatchObject({
+      fieldType: "SUBMISSION_DEADLINE",
+      normalizedTextValue: "21-08-2026 09:00:00",
+    });
+    expect(parseTenderDateTime("21-08-2026 09:00:00")?.toISOString()).toBe(
+      "2026-08-21T03:30:00.000Z",
+    );
+    expect(fields[0]?.normalizedDateValue?.toISOString()).toBe(
+      "2026-08-21T00:00:00.000Z",
+    );
   });
 
   it("rejects invalid citation bounds and accepts a valid anchor", () => {

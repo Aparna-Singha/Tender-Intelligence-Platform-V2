@@ -1,6 +1,7 @@
 import { NotFoundException } from "@nestjs/common";
 import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
+import { CORS_METHODS } from "../src/cors.js";
 import { FinalReadinessController } from "../src/final-readiness/final-readiness.controller.js";
 import { FinalReadinessError } from "../src/final-readiness/final-readiness.error.js";
 import { FinalReadinessFreshnessService } from "../src/final-readiness/final-readiness-freshness.service.js";
@@ -680,13 +681,15 @@ describe("Phase 11 stable public errors", () => {
 
 describe("Phase 11 controller selectors", () => {
   it("allows the browser methods used by cancellation and review flows", () => {
-    const source = readFileSync(
-      new URL("../src/main.ts", import.meta.url),
-      "utf8",
-    );
-    expect(source).toContain(
-      'methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"]',
-    );
+    expect(CORS_METHODS).toEqual([
+      "GET",
+      "HEAD",
+      "POST",
+      "PUT",
+      "PATCH",
+      "DELETE",
+      "OPTIONS",
+    ]);
   });
 
   it("rejects a mismatched body run identifier", () => {

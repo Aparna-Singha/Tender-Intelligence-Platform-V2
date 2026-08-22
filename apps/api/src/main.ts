@@ -17,6 +17,7 @@ import {
 import { Logger } from "nestjs-pino";
 
 import { AppModule } from "./app.module.js";
+import { corsOptions } from "./cors.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { ApiResponseInterceptor } from "./common/api-response.interceptor.js";
 import { resolveRequestId } from "./common/request-id.js";
@@ -50,11 +51,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(new ApiResponseInterceptor());
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
-  app.enableCors({
-    credentials: true,
-    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
-    origin: environment.WEB_ORIGIN,
-  });
+  app.enableCors(corsOptions(environment));
 
   const openApiConfig = new DocumentBuilder()
     .setTitle("Tender Intelligence Platform API")

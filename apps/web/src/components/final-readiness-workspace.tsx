@@ -514,26 +514,27 @@ export function FinalReadinessWorkspace({
       className="stack"
       style={{ minWidth: 0, overflowWrap: "anywhere" }}
     >
-      <div>
-        <h2 id="final-readiness-heading">Final readiness review</h2>
-        <p>
-          This deterministic review aid supports a final human check. It does
-          not guarantee eligibility, compliance, completeness or success.
-        </p>
-      </div>
-      <Alert tone="warning">
-        <p>
-          Independent platform—not affiliated with GeM, CPPP or another
-          government portal. Proceed permits only future controlled Phase 12
-          export review; it is not approval to submit.
-        </p>
-      </Alert>
+      <h2 className="visually-hidden" id="final-readiness-heading">
+        Final readiness
+      </h2>
+      <p style={{ margin: 0, fontSize: "0.78rem" }}>
+        A final human check — this aid does not guarantee eligibility,
+        compliance, or bid success.
+      </p>
       <p aria-live="polite" role="status">
         {message}
       </p>
 
-      <Card>
-        <h3>Start preflight</h3>
+      <details className="disclosure">
+        <summary>Start preflight</summary>
+        <div className="disclosure__body">
+        <Alert tone="warning">
+          <p>
+            Independent platform, not affiliated with GeM, CPPP or another
+            government portal. Proceed permits only future controlled Phase 12
+            export review; it is not approval to submit.
+          </p>
+        </Alert>
         {preflight === null ? (
           <p>Loading informational prerequisite check…</p>
         ) : (
@@ -607,14 +608,21 @@ export function FinalReadinessWorkspace({
             )}
           </>
         )}
-      </Card>
+        </div>
+      </details>
 
-      <Card>
+      <details className="disclosure">
+        <summary>
+          Run history &amp; linked risk analysis
+          <small>Preflight runs, policy versions, and the linked final-risk analysis</small>
+        </summary>
+        <div className="disclosure__body">
+        <Card>
         <h3>Run history</h3>
         {runs.length === 0 ? (
           <EmptyState
             title="No final-readiness run"
-            description="Run preflight and start an audit after authoritative Phase 5–10 records are current."
+            description="Run preflight and start an audit after authoritative prerequisite records are current."
           />
         ) : (
           <>
@@ -775,6 +783,8 @@ export function FinalReadinessWorkspace({
           </Button>
         </Card>
       )}
+        </div>
+      </details>
 
       {selectedRun !== null && (
         <Card>
@@ -806,21 +816,21 @@ export function FinalReadinessWorkspace({
                   {humanizeEnum(finding.review_state)}
                 </p>
                 <p>{finding.explanation}</p>
-                <p>
-                  Rule: <code>{finding.rule_code}</code> · Materiality:{" "}
+                <p style={{ fontSize: "0.76rem" }}>
+                  Materiality:{" "}
                   {finding.materiality === null
                     ? "Not applicable"
-                    : humanizeEnum(finding.materiality)}{" "}
-                  · Provenance: {finding.provenance_valid ? "Valid" : "Invalid"}{" "}
-                  · Created: {when(finding.created_at)}
+                    : humanizeEnum(finding.materiality)}
+                  {finding.provenance_valid ? "" : " · Provenance needs review"}
+                  {" · "}
+                  Created: {when(finding.created_at)}
                 </p>
                 <ul>
                   {finding.provenance.map((source) => {
                     const safe = sourceLabels[source.source_class];
                     return (
                       <li key={`${source.source_class}:${source.id}`}>
-                        {safe?.label ?? humanizeEnum(source.source_class)}{" "}
-                        <code>{source.id}</code>
+                        {safe?.label ?? humanizeEnum(source.source_class)}
                         {safe !== undefined && (
                           <Button
                             variant="quiet"

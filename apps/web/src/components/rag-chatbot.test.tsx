@@ -10,10 +10,11 @@ const source = readFileSync(
 describe("RAG chatbot workspace", () => {
   it("shows source limits, human control, and no submission action", () => {
     expect(source).toContain(
-      "Answers are limited to authorised tender and evidence sources.",
+      "Answers remain grounded in authorised tender and company evidence",
     );
-    expect(source).toContain("does not provide legal advice");
-    expect(source).toContain("human-controlled");
+    expect(source).toContain("No legal advice or autonomous bid decisions are made here.");
+    expect(source).toContain("No answer could be grounded for this question.");
+    expect(source).toContain("Human review required");
     expect(source).not.toContain("Submit bid");
   });
 });

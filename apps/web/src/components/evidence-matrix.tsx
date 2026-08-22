@@ -300,20 +300,18 @@ export function EvidenceMatrix({
   const active = runs.find((run) => run.id === runId);
   return (
     <section>
-      <h2>Evidence matrix</h2>
-      <p>
-        This matrix assesses individual requirements against the selected
-        evidence snapshot.
-      </p>
       <p className="warning">
-        It does not guarantee eligibility or bid success. Verified and
-        not-applicable states require authorised human action.
+        Assessment results do not guarantee eligibility or bid success. Verified
+        and not-applicable states still require authorised human action.
       </p>
-      <p>
-        Document existence alone may not prove detailed compliance. OCR and
-        automatic company-document fact extraction are unavailable; use
-        reviewed, manually captured facts with exact source locations.
-      </p>
+      <details>
+        <summary>Why evidence matters</summary>
+        <p>
+          Document existence alone may not prove detailed compliance. OCR and
+          automatic company-document fact extraction are unavailable, so use
+          reviewed, manually captured facts with exact source locations.
+        </p>
+      </details>
       <button onClick={() => void start()} type="button">
         Start controlled evidence comparison
       </button>

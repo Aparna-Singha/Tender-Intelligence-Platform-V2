@@ -5,5 +5,6 @@ import { ChecklistsService } from "./checklists.service.js";
 @Module({
   controllers: [ChecklistsController],
   providers: [ChecklistsService],
+  exports: [ChecklistsService],
 })
 export class ChecklistsModule {}

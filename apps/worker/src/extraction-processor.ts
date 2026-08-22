@@ -473,6 +473,7 @@ export class ExtractionProcessor {
           extractionRunId: runId,
           fieldType: field.fieldType,
           findingState: field.findingState,
+          normalizedDateValue: field.normalizedDateValue ?? null,
           normalizedTextValue: field.normalizedTextValue,
           sourceWording: field.sourceWording,
         },

@@ -79,8 +79,14 @@ export class TendersController {
   public get(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
+    @Req() request: AuthenticatedRequest,
   ): Promise<unknown> {
-    return this.tenders.get(organisationId, tenderId);
+    return this.tenders.get(
+      organisationId,
+      tenderId,
+      request.authenticatedUser.userId,
+      request.id,
+    );
   }
 
   @RequireOrganisationPermission("TENDER_READ")
@@ -165,6 +171,23 @@ export class TendersController {
       documentId,
       request.authenticatedUser.userId,
       input.checksum_sha256,
+      request.id,
+    );
+  }
+
+  @RequireOrganisationPermission("TENDER_UPLOAD")
+  @Delete(":tenderId/documents/:documentId")
+  public abandonUpload(
+    @Param("organisationId") organisationId: string,
+    @Param("tenderId") tenderId: string,
+    @Param("documentId") documentId: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<unknown> {
+    return this.tenders.abandonUpload(
+      organisationId,
+      tenderId,
+      documentId,
+      request.authenticatedUser.userId,
       request.id,
     );
   }

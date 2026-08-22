@@ -85,6 +85,17 @@ class InfrastructureShutdown implements OnApplicationShutdown {
           endpoint: environment.S3_ENDPOINT,
           forcePathStyle: environment.S3_FORCE_PATH_STYLE,
           region: environment.S3_REGION,
+          // The SDK's default flexible-checksum behaviour signs a
+          // CRC32 checksum computed over an empty body into presigned
+          // PutObject URLs (it has no body to hash at sign time). The
+          // browser's direct upload then sends the real file content,
+          // which mismatches that pre-baked checksum and MinIO/S3
+          // rejects the PUT with 400 before the object is stored.
+          // "WHEN_REQUIRED" stops the SDK from opportunistically
+          // attaching a checksum unless the operation explicitly asks
+          // for one; the app's own sha256 integrity check in
+          // completeUpload() is unaffected and remains authoritative.
+          requestChecksumCalculation: "WHEN_REQUIRED",
         }),
     },
     InfrastructureShutdown,

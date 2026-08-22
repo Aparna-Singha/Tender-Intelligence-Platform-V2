@@ -1,70 +1,81 @@
 "use client";
 
-import { ArrowRight, Building2, Plus, X } from "lucide-react";
+import { Building2, Plus, Sparkles, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState, type FormEvent, type JSX } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
 import {
   Alert,
-  Badge,
   Button,
-  Card,
   EmptyState,
   Field,
   FormMessage,
   IconButton,
   Input,
   Modal,
-  PageHeader,
   Select,
-  StatCard,
-  humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
+import {
+  describeTender,
+  getDeadlineDays,
+  formatDeadlineCountdown,
+  type TenderSummary,
+} from "./tender-presentation";
 
 interface Session {
-  active_organisation_id: string | null;
+  readonly active_organisation_id: string | null;
+  readonly user: { readonly display_name: string };
 }
+
 interface Membership {
-  organisation: { id: string; name: string; type: string };
-  role: string;
+  readonly organisation: { readonly id: string; readonly name: string; readonly type: string };
+  readonly role: string;
 }
+
 interface DashboardGuidance {
-  completeness: {
-    completed: number;
-    missingFields: readonly string[];
-    percentage: number;
-    total: number;
-  };
-  display_mode: "BEGINNER" | "PROFESSIONAL";
-  progress: {
-    completed_steps: readonly number[];
-    current_step: number;
-    status: string;
-  };
-  recommendations: readonly { action: string; id: string; priority: string }[];
+  readonly recommendations: readonly { readonly action: string; readonly id: string; readonly priority: string }[];
 }
-interface DocumentSummary {
-  id: string;
-  status: string;
-  verificationStatus: string;
+
+type HomeFilter = "ALL" | "ACTIVE" | "IN_PROGRESS" | "COMPLETED";
+
+function compareAttention(left: TenderSummary, right: TenderSummary): number {
+  return (left.submissionDeadline ?? "").localeCompare(
+    right.submissionDeadline ?? "",
+  );
 }
-interface TenderSummary {
-  buyer: string;
-  id: string;
-  isDemonstration: boolean;
-  lifecycleStatus: string;
-  sourceTenderNumber: string | null;
-  submissionDeadline: string;
-  title: string;
-  workspace: { processingProgress: number; status: string } | null;
+
+function greetingName(displayName: string | undefined): string {
+  const first = displayName?.trim().split(/\s+/)[0];
+  return first === undefined || first === "" ? "there" : first;
+}
+
+function deadlineTone(
+  submissionDeadline: string | undefined,
+): "danger" | "info" | "warning" {
+  const days = getDeadlineDays(submissionDeadline);
+  if (days === null) return "info";
+  if (days < 0 || days <= 3) return "danger";
+  if (days <= 7) return "warning";
+  return "info";
+}
+
+function progressHeading(
+  presentation: ReturnType<typeof describeTender>,
+  tenderTitle: string,
+): string {
+  if (presentation.statusLabel === "Preparing draft...") {
+    return `Drafting: ${tenderTitle}`;
+  }
+  return `Analysing: ${tenderTitle}`;
 }
 
 export function Dashboard(): JSX.Element {
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [guidance, setGuidance] = useState<DashboardGuidance | null>(null);
-  const [documents, setDocuments] = useState<readonly DocumentSummary[]>([]);
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
+  const [filter, setFilter] = useState<HomeFilter>("ALL");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -73,49 +84,46 @@ export function Dashboard(): JSX.Element {
 
   async function load(): Promise<void> {
     try {
-      const [session, nextMemberships] = await Promise.all([
+      const [nextSession, nextMemberships] = await Promise.all([
         apiRequest<Session>("/auth/session"),
         apiRequest<Membership[]>("/organisations"),
       ]);
-      const id =
-        session.active_organisation_id ??
+      const organisationId =
+        nextSession.active_organisation_id ??
         nextMemberships[0]?.organisation.id ??
         null;
+      setSession(nextSession);
       setMemberships(nextMemberships);
-      setSelectedId(id);
-      if (id !== null) {
-        const [nextGuidance, nextDocuments, nextTenders] = await Promise.all([
+      setSelectedId(organisationId);
+
+      if (organisationId === null) {
+        setGuidance(null);
+        setTenders([]);
+      } else {
+        const [nextGuidance, nextTenders] = await Promise.all([
           apiRequest<DashboardGuidance>(
-            `/organisations/${id}/dashboard-recommendations`,
+            `/organisations/${organisationId}/dashboard-recommendations`,
           ),
-          apiRequest<DocumentSummary[]>(`/organisations/${id}/documents`),
-          apiRequest<TenderSummary[]>(`/organisations/${id}/tenders`),
+          apiRequest<TenderSummary[]>(`/organisations/${organisationId}/tenders`),
         ]);
         setGuidance(nextGuidance);
-        setDocuments(nextDocuments);
         setTenders(nextTenders);
       }
+
       setError("");
     } catch (caught) {
       setError(
-        formatApiError(
-          caught,
-          "Unable to load your workspace. Please try again.",
-        ),
+        formatApiError(caught, "Unable to load your workspace. Please try again."),
       );
     } finally {
       setLoading(false);
     }
   }
+
   useEffect(() => {
-    let active = true;
-    void load().catch(() => {
-      if (active) setLoading(false);
-    });
-    return () => {
-      active = false;
-    };
+    void load();
   }, []);
+
   async function create(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
     if (creating) return;
@@ -143,62 +151,109 @@ export function Dashboard(): JSX.Element {
       setCreating(false);
     }
   }
-  const selected = memberships.find(
+
+  const selectedOrganisation = memberships.find(
     ({ organisation }) => organisation.id === selectedId,
-  )?.organisation;
-  const readyDocuments = documents.filter(
-    ({ status }) => status === "READY",
-  ).length;
-  if (loading)
+  );
+  const tenderModels = useMemo(
+    () =>
+      tenders.map((tender) => ({
+        presentation: describeTender(tender),
+        tender,
+      })),
+    [tenders],
+  );
+  const attentionRows = useMemo(() => {
+    const recommendationRows = (guidance?.recommendations ?? []).slice(0, 3).map((recommendation) => ({
+      actionLabel: "Review",
+      deadline: "Organisation profile",
+      issue: recommendation.action,
+      key: recommendation.id,
+      tenderName: selectedOrganisation?.organisation.name ?? "Organisation profile",
+      tone:
+        recommendation.priority === "HIGH"
+          ? "danger"
+          : recommendation.priority === "MEDIUM"
+            ? "warning"
+            : "info",
+      href: selectedId === null ? "/dashboard" : `/settings/${selectedId}`,
+    }));
+    const tenderAttention = tenderModels
+      .filter(({ presentation }) => presentation.needsAttention)
+      .sort((left, right) => compareAttention(left.tender, right.tender))
+      .map(({ presentation, tender }) => ({
+        actionLabel: presentation.actionLabel,
+        deadline: formatDeadlineCountdown(tender.submissionDeadline),
+        issue: presentation.supportingLabel,
+        key: tender.id,
+        tenderName: tender.title,
+        tone: deadlineTone(tender.submissionDeadline),
+        href: `/tenders/${selectedId ?? ""}/${tender.id}`,
+      }));
+    return [...tenderAttention, ...recommendationRows].slice(0, 3);
+  }, [guidance, selectedId, selectedOrganisation, tenderModels]);
+  const inProgressRows = tenderModels.filter(({ presentation }) => presentation.isInProgress);
+  const counts = {
+    ACTIVE: tenderModels.filter(({ presentation }) => !presentation.isCompleted).length,
+    ALL: tenderModels.length,
+    COMPLETED: tenderModels.filter(({ presentation }) => presentation.isCompleted).length,
+    IN_PROGRESS: inProgressRows.length,
+  };
+  const visibleTenders = tenderModels.filter(({ presentation }) => {
+    if (filter === "ACTIVE") return !presentation.isCompleted;
+    if (filter === "COMPLETED") return presentation.isCompleted;
+    if (filter === "IN_PROGRESS") return presentation.isInProgress;
+    return true;
+  });
+  const aiChatHref =
+    selectedId !== null && tenders[0] !== undefined
+      ? `/tenders/${selectedId}/${tenders[0].id}?stage=ask`
+      : null;
+
+  if (loading) {
     return (
-      <div className="page">
-        <PageHeader
-          description="Loading your organisation context and supported workflow data."
-          title="Overview"
-        />
-        <div className="summary-grid">
-          <StatCard title="Organisation profile" value="Loading…" />
-          <StatCard title="Company evidence" value="Loading…" />
-          <StatCard title="Tender workspaces" value="Loading…" />
-        </div>
+      <div className="workspace-page">
+        <header className="workspace-page__header">
+          <div>
+            <h1>Home</h1>
+            <p>Loading your organisation workspace and tender queue.</p>
+          </div>
+        </header>
       </div>
     );
+  }
+
   return (
-    <div className="page">
-      <PageHeader
-        actions={
-          memberships.length === 0 ? (
-            <Button onClick={() => setCreateOpen(true)}>
-              <Plus aria-hidden="true" size={18} />
-              Create organisation
-            </Button>
-          ) : (
-            <Link
-              className="button button--primary"
-              href={`/tenders/${selectedId ?? ""}`}
-            >
-              Create tender workspace
-            </Link>
-          )
-        }
-        description={
-          selected === undefined
-            ? "Create an organisation workspace to keep tender work, company evidence and permissions properly separated."
-            : `You are working in ${selected.name}. Review current work and choose the next human action.`
-        }
-        eyebrow="Tender command centre"
-        title={selected === undefined ? "Set up your workspace" : "Overview"}
-      />
-      {error !== "" && (
+    <div className="workspace-page">
+      <header className="workspace-page__header">
+        <div>
+          <h1>Good morning, {greetingName(session?.user.display_name)}</h1>
+          <p>Here&apos;s what needs your attention today.</p>
+        </div>
+        {selectedId === null ? (
+          <Button onClick={() => setCreateOpen(true)}>
+            <Plus aria-hidden="true" size={18} />
+            Create organisation
+          </Button>
+        ) : (
+          <Link className="button button--primary workspace-cta" href={`/tenders/${selectedId}`}>
+            <Plus aria-hidden="true" size={18} />
+            Analyse new tender
+          </Link>
+        )}
+      </header>
+
+      {error !== "" ? (
         <Alert tone="danger" title="Workspace unavailable">
           <p>{error}</p>
           <Button onClick={() => void load()} variant="secondary">
             Try again
           </Button>
         </Alert>
-      )}
+      ) : null}
+
       {memberships.length === 0 ? (
-        <Card>
+        <section className="workspace-card">
           <EmptyState
             action={
               <Button onClick={() => setCreateOpen(true)}>
@@ -206,139 +261,166 @@ export function Dashboard(): JSX.Element {
                 Create organisation
               </Button>
             }
-            description="An organisation is the private boundary for company evidence, tender workspaces, members and permissions. Choose MSME for your own company’s bidding work, or Consultant when managing tender work for client organisations."
+            description="An organisation is the private boundary for company evidence, tender workspaces, roles, and permissions."
             title="Create your first organisation workspace"
           />
-        </Card>
+        </section>
       ) : (
         <>
-          <div className="summary-grid">
-            <StatCard
-              description={`${guidance?.progress.completed_steps.length ?? 0} of 8 onboarding steps saved`}
-              title="Organisation profile"
-              value={`${guidance?.completeness.percentage ?? 0}% complete`}
-            />
-            <StatCard
-              description="Ready means processed, not verified or eligible"
-              title="Company evidence"
-              value={`${readyDocuments} ready · ${documents.length} total`}
-            />
-            <StatCard
-              description={
-                tenders.some(
-                  ({ workspace }) => workspace?.status === "INGESTING",
-                )
-                  ? "Source processing is active"
-                  : "Organisation-scoped workspaces"
-              }
-              title="Tender workspaces"
-              value={String(tenders.length)}
-            />
-          </div>
-          <div className="two-column">
-            <Card>
-              <div className="section-header">
-                <div>
-                  <h2>Continue working</h2>
-                  <p>Your most recently created tender workspaces.</p>
-                </div>
-                <Link href={`/tenders/${selectedId ?? ""}`}>View all</Link>
+          <section className="workspace-section">
+            <div className="workspace-section__header">
+              <div>
+                <h2>Needs your attention</h2>
               </div>
-              {tenders.length === 0 ? (
-                <EmptyState
-                  action={
-                    <Link
-                      className="button button--secondary"
-                      href={`/tenders/${selectedId ?? ""}`}
-                    >
-                      Create tender workspace
-                    </Link>
-                  }
-                  description="Add tender metadata and upload private source documents when you are ready."
-                  title="No tender workspaces yet"
-                />
+            </div>
+            <div className="workspace-card">
+              {attentionRows.length === 0 ? (
+                <div className="workspace-empty-row">
+                  <p>No urgent work is waiting right now.</p>
+                </div>
               ) : (
-                <div className="stack">
-                  {tenders.slice(0, 4).map((tender) => (
-                    <article key={tender.id}>
-                      <div className="section-header">
-                        <div>
-                          <h3>{tender.title}</h3>
-                          <p>
-                            {tender.buyer}
-                            {tender.sourceTenderNumber === null
-                              ? ""
-                              : ` · ${tender.sourceTenderNumber}`}
-                          </p>
-                        </div>
-                        <Badge
-                          tone={
-                            tender.lifecycleStatus === "READY"
-                              ? "success"
-                              : "info"
-                          }
-                        >
-                          {humanizeEnum(tender.lifecycleStatus)}
-                        </Badge>
+                <ul className="attention-list">
+                  {attentionRows.map((row) => (
+                    <li className="attention-row" key={row.key}>
+                      <span
+                        aria-hidden="true"
+                        className={`status-dot status-dot--${row.tone}`}
+                      />
+                      <div className="attention-row__main">
+                        <strong>{row.tenderName}</strong>
+                        <p>{row.issue}</p>
                       </div>
-                      {tender.isDemonstration && (
-                        <Badge tone="warning">Demonstration tender</Badge>
-                      )}
-                      <div className="inline-actions">
-                        <Link
-                          href={`/tenders/${selectedId ?? ""}/${tender.id}`}
-                        >
-                          Open workspace{" "}
-                          <ArrowRight aria-hidden="true" size={14} />
-                        </Link>
+                      <span className={`deadline-text deadline-text--${row.tone}`}>
+                        {row.deadline}
+                      </span>
+                      <Link className="button button--secondary" href={row.href}>
+                        {row.actionLabel}
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </section>
+
+          <section className="workspace-section">
+            <div className="workspace-section__header workspace-section__header--stacked">
+              <div>
+                <h2>Your tenders</h2>
+              </div>
+              <div
+                className="workspace-chip-row workspace-chip-row--left dashboard-filter-row"
+                role="tablist"
+                aria-label="Tender filters"
+              >
+                {([
+                  ["ALL", `All ${counts.ALL}`],
+                  ["ACTIVE", `Active ${counts.ACTIVE}`],
+                  ["IN_PROGRESS", `In progress ${counts.IN_PROGRESS}`],
+                  ["COMPLETED", `Completed ${counts.COMPLETED}`],
+                ] as const).map(([value, label]) => (
+                  <button
+                    aria-pressed={filter === value}
+                    className={`workspace-chip ${filter === value ? "workspace-chip--active" : ""}`}
+                    key={value}
+                    onClick={() => setFilter(value)}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="workspace-card">
+              {visibleTenders.length === 0 ? (
+                <div className="workspace-empty-row">
+                  <p>No tenders match this view yet.</p>
+                </div>
+              ) : (
+                <div className="workspace-rows">
+                  {visibleTenders.map(({ presentation, tender }) => (
+                    <article className="workspace-row" key={tender.id}>
+                      <div className="workspace-row__title">
+                        <strong>{tender.title}</strong>
+                        <p>{tender.buyer}</p>
                       </div>
+                      <span className={`status-badge status-badge--${presentation.tone}`}>
+                        {presentation.statusLabel}
+                      </span>
+                      <p className="workspace-row__supporting">
+                        {presentation.supportingLabel}
+                      </p>
+                      <span className="workspace-row__deadline">
+                        {formatDeadlineCountdown(tender.submissionDeadline)}
+                      </span>
+                      <Link
+                        className="button button--secondary"
+                        href={`/tenders/${selectedId ?? ""}/${tender.id}`}
+                      >
+                        {presentation.actionLabel}
+                      </Link>
                     </article>
                   ))}
                 </div>
               )}
-            </Card>
-            <Card>
-              <div className="section-header">
+            </div>
+          </section>
+
+          {inProgressRows.length > 0 ? (
+            <section className="workspace-section">
+              <div className="workspace-section__header">
                 <div>
-                  <h2>Next actions</h2>
-                  <p>
-                    Suggestions derived from the saved organisation profile.
-                  </p>
+                  <h2>In progress</h2>
                 </div>
               </div>
-              {guidance?.recommendations.length === 0 ? (
-                <p>No profile recommendations are currently available.</p>
-              ) : (
-                <div className="stack">
-                  {guidance?.recommendations.map((recommendation) => (
-                    <div className="recommendation" key={recommendation.id}>
-                      <Badge
-                        tone={
-                          recommendation.priority === "HIGH"
-                            ? "warning"
-                            : "info"
-                        }
-                      >
-                        {humanizeEnum(recommendation.priority)} priority
-                      </Badge>
-                      <p>{recommendation.action}</p>
+              <div className="workspace-progress-grid">
+                {inProgressRows.map(({ presentation, tender }) => (
+                  <article className="workspace-card progress-card" key={tender.id}>
+                    <div className="progress-card__header">
+                      <strong>{progressHeading(presentation, tender.title)}</strong>
+                      {typeof tender.workspace?.processingProgress === "number" &&
+                      tender.workspace.processingProgress > 0 &&
+                      tender.workspace.processingProgress < 100 ? (
+                        <span>{tender.workspace.processingProgress}%</span>
+                      ) : null}
                     </div>
-                  ))}
-                </div>
-              )}
-              <div className="inline-actions">
-                <Link href={`/onboarding/${selectedId ?? ""}`}>
-                  Review organisation profile
-                </Link>
-                <Link href={`/documents/${selectedId ?? ""}`}>
-                  Open company evidence
-                </Link>
+                    <p>{presentation.supportingLabel}</p>
+                    {typeof tender.workspace?.processingProgress === "number" &&
+                    tender.workspace.processingProgress > 0 &&
+                    tender.workspace.processingProgress < 100 ? (
+                      <div className="progress-bar" aria-hidden="true">
+                        <span
+                          style={{
+                            width: `${tender.workspace.processingProgress}%`,
+                          }}
+                        />
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
               </div>
-            </Card>
-          </div>
+            </section>
+          ) : null}
         </>
       )}
-      {createOpen && (
+
+      {aiChatHref === null ? (
+        <button className="workspace-floating-ai" disabled type="button">
+          <span>
+            <Sparkles aria-hidden="true" size={16} />
+          </span>
+          Ask about my tenders
+        </button>
+      ) : (
+        <Link className="workspace-floating-ai" href={aiChatHref}>
+          <span>
+            <Sparkles aria-hidden="true" size={16} />
+          </span>
+          Ask about my tenders
+        </Link>
+      )}
+
+      {createOpen ? (
         <Modal
           label="Create organisation"
           onClose={() => {
@@ -359,15 +441,14 @@ export function Dashboard(): JSX.Element {
             </IconButton>
           </div>
           <p>
-            Organisation membership controls access to company evidence and
-            tender work.
+            Organisation membership controls access to company evidence and tender work.
           </p>
           <form onSubmit={(event) => void create(event)}>
             <Field label="Organisation name" required>
               <Input autoFocus maxLength={160} name="name" required />
             </Field>
             <Field
-              hint="MSME is for your company’s tender work. Consultant is for tender professionals managing client workspaces."
+              hint="MSME is for your company&apos;s tender work. Consultant is for tender professionals managing client workspaces."
               label="Organisation type"
               required
             >
@@ -376,10 +457,10 @@ export function Dashboard(): JSX.Element {
                 <option value="CONSULTANT">Consultant</option>
               </Select>
             </Field>
-            {createError !== "" && <FormMessage>{createError}</FormMessage>}
+            {createError !== "" ? <FormMessage>{createError}</FormMessage> : null}
             <div className="inline-actions">
               <Button loading={creating} type="submit">
-                {creating ? "Creating…" : "Create organisation"}
+                {creating ? "Creating..." : "Create organisation"}
               </Button>
               <Button
                 disabled={creating}
@@ -392,7 +473,7 @@ export function Dashboard(): JSX.Element {
             </div>
           </form>
         </Modal>
-      )}
+      ) : null}
     </div>
   );
 }

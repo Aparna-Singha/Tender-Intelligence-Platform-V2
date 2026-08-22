@@ -132,6 +132,7 @@ export interface ExtractedFieldCandidate {
   readonly fieldType: string;
   readonly findingState:
     "FOUND" | "AMBIGUOUS" | "CONFLICTING" | "HUMAN_REVIEW_REQUIRED";
+  readonly normalizedDateValue?: Date;
   readonly normalizedTextValue: string;
   readonly sourceWording: string;
 }
@@ -256,7 +257,7 @@ export function extractDeterministicFields(
   const patterns: readonly [string, RegExp][] = [
     [
       "SUBMISSION_DEADLINE",
-      /\b(?:submission|bid)\s+deadline\s*[:-]\s*([^\n.;]{4,100})/iu,
+      /\b(?:submission|bid)\s+(?:deadline|end\s+date(?:\/time)?)\s*[:\-]?\s*([^\n.;]{4,100})/iu,
     ],
     ["EMD_WORDING", /\b(?:emd|bid security)\s*[:-]\s*([^\n.;]{2,200})/iu],
     [
@@ -272,17 +273,83 @@ export function extractDeterministicFields(
     patterns.flatMap(([fieldType, pattern]) => {
       const match = pattern.exec(block.text);
       if (match?.[1] === undefined) return [];
+      const normalizedTextValue = match[1].trim();
       return [
         {
           anchor: anchorFor(block),
           confidence: block.confidence,
           fieldType,
           findingState: "FOUND",
-          normalizedTextValue: match[1].trim(),
+          ...(fieldType === "SUBMISSION_DEADLINE"
+            ? {
+                normalizedDateValue:
+                  normalizeTenderCalendarDate(normalizedTextValue) ??
+                  undefined,
+              }
+            : {}),
+          normalizedTextValue,
           sourceWording: block.text,
         },
       ];
     }),
+  );
+}
+
+const INDIA_TIMEZONE_OFFSET_MINUTES = 330;
+
+export function parseTenderDateTime(value: string): Date | null {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const match =
+    /(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM)?)?/iu.exec(
+      normalized,
+    );
+  if (match === null) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const rawYear = Number(match[3]);
+  const year = match[3]?.length === 2 ? 2000 + rawYear : rawYear;
+  let hour = Number(match[4] ?? "0");
+  const minute = Number(match[5] ?? "0");
+  const second = Number(match[6] ?? "0");
+  const meridiem = match[7]?.toUpperCase() ?? null;
+  if (
+    !Number.isInteger(day) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(year) ||
+    day < 1 ||
+    month < 1 ||
+    month > 12 ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    return null;
+  }
+  if (meridiem !== null) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === "PM" && hour !== 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+  const utcMilliseconds =
+    Date.UTC(year, month - 1, day, hour, minute, second) -
+    INDIA_TIMEZONE_OFFSET_MINUTES * 60_000;
+  const parsed = new Date(utcMilliseconds);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+export function normalizeTenderCalendarDate(value: string): Date | null {
+  const parsed = parseTenderDateTime(value);
+  if (parsed === null) return null;
+  return new Date(
+    Date.UTC(
+      parsed.getUTCFullYear(),
+      parsed.getUTCMonth(),
+      parsed.getUTCDate(),
+    ),
   );
 }
 
