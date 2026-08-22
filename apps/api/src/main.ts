@@ -23,6 +23,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { Logger } from "nestjs-pino";
 
 import { AppModule } from "./app.module.js";
+import { corsOptions } from "./cors.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { ApiResponseInterceptor } from "./common/api-response.interceptor.js";
 import { metricRouteForRequest } from "./common/metric-routes.js";
@@ -67,11 +68,7 @@ async function bootstrap(): Promise<void> {
   app.useGlobalFilters(new ApiExceptionFilter());
   app.useGlobalInterceptors(new ApiResponseInterceptor());
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
-  app.enableCors({
-    credentials: true,
-    methods: ["GET", "HEAD", "POST", "PATCH", "DELETE", "OPTIONS"],
-    origin: environment.WEB_ORIGIN,
-  });
+  app.enableCors(corsOptions(environment));
   fastify.addHook("onRequest", (request, _reply, done) => {
     requestStartTimes.set(request, process.hrtime.bigint());
     metrics.requestStarted();

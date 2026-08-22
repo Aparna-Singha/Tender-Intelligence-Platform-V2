@@ -4,10 +4,12 @@ import {
   GoneException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   type MessageEvent,
 } from "@nestjs/common";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -40,12 +42,18 @@ import {
   PRISMA_CLIENT,
   S3_CLIENT,
 } from "../infrastructure.tokens.js";
+import {
+  deriveTenderWorkflowState,
+  resolveSubmissionDeadline,
+} from "./tender-user-facing.js";
 
 const demonstrationLabel =
   "Demonstration tender — not live procurement information.";
 
 @Injectable()
 export class TendersService {
+  private readonly logger = new Logger(TendersService.name);
+
   public constructor(
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(S3_CLIENT) private readonly storage: S3Client,
@@ -53,11 +61,58 @@ export class TendersService {
     @Inject(API_ENVIRONMENT) private readonly environment: ApiEnvironment,
   ) {}
 
-  public list(organisationId: string, cursor?: string): Promise<unknown> {
-    return this.database.tender.findMany({
+  public async list(organisationId: string, cursor?: string): Promise<unknown> {
+    const tenders = await this.database.tender.findMany({
       orderBy: { createdAt: "desc" },
       select: {
         buyer: true,
+        currentVersion: {
+          select: {
+            activeEarlyRiskRun: {
+              select: {
+                id: true,
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+            },
+            activeEligibilityAssessmentRun: {
+              select: {
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+            },
+            activeExtractionRun: {
+              select: {
+                id: true,
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+            },
+            documents: {
+              select: {
+                role: true,
+                status: true,
+                uploadSessionExpiresAt: true,
+              },
+              where: { deletedAt: null },
+            },
+            id: true,
+            processingJobs: {
+              orderBy: { createdAt: "desc" },
+              select: {
+                publicMessage: true,
+                state: true,
+              },
+              take: 5,
+            },
+          },
+        },
         id: true,
         isDemonstration: true,
         lifecycleStatus: true,
@@ -73,27 +128,58 @@ export class TendersService {
       ...(cursor === undefined ? {} : { cursor: { id: cursor } }),
       where: { deletedAt: null, organisationId },
     });
+    return this.decorateTenders(tenders);
   }
 
-  public async get(organisationId: string, tenderId: string): Promise<unknown> {
+  public async get(
+    organisationId: string,
+    tenderId: string,
+    _userId: string,
+    _requestId: string,
+  ): Promise<unknown> {
+    void _userId;
+    void _requestId;
     const tender = await this.database.tender.findFirst({
       include: {
         corrigenda: { orderBy: { ingestedAt: "desc" } },
-        processingJobs: {
-          orderBy: { createdAt: "desc" },
-          select: {
-            completedAt: true,
-            createdAt: true,
-            currentStage: true,
-            eventSequence: true,
-            failureCategory: true,
-            id: true,
-            progressPercentage: true,
-            publicMessage: true,
-            state: true,
-            updatedAt: true,
+        currentVersion: {
+          include: {
+            activeEarlyRiskRun: {
+              select: {
+                id: true,
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+            },
+            activeEligibilityAssessmentRun: {
+              select: {
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+            },
+            activeExtractionRun: {
+              select: {
+                id: true,
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+            },
+            documents: {
+              orderBy: { createdAt: "asc" },
+              select: {
+                role: true,
+                status: true,
+                uploadSessionExpiresAt: true,
+              },
+              where: { deletedAt: null },
+            },
           },
-          take: 20,
         },
         sources: true,
         versions: {
@@ -110,7 +196,9 @@ export class TendersService {
                 sha256: true,
                 sizeBytes: true,
                 status: true,
+                uploadSessionExpiresAt: true,
               },
+              where: { deletedAt: null },
             },
           },
           orderBy: { versionNumber: "desc" },
@@ -120,11 +208,38 @@ export class TendersService {
       where: { deletedAt: null, id: tenderId, organisationId },
     });
     if (tender === null) throw new NotFoundException();
+    const processingJobs =
+      tender.currentVersionId === null
+        ? []
+        : await this.database.processingJob.findMany({
+            orderBy: { createdAt: "desc" },
+            select: {
+              completedAt: true,
+              createdAt: true,
+              currentStage: true,
+              eventSequence: true,
+              failureCategory: true,
+              id: true,
+              progressPercentage: true,
+              publicMessage: true,
+              state: true,
+              updatedAt: true,
+            },
+            take: 20,
+            where: {
+              organisationId,
+              tenderId,
+              tenderVersionId: tender.currentVersionId,
+            },
+          });
+    const [decorated] = (await this.decorateTenders([
+      {
+        ...tender,
+        processingJobs,
+      },
+    ])) as readonly Record<string, unknown>[];
     return {
-      ...tender,
-      demonstration_label: tender.isDemonstration
-        ? demonstrationLabel
-        : undefined,
+      ...decorated,
       versions: tender.versions.map((version) => ({
         ...version,
         documents: version.documents.map((document) => ({
@@ -179,6 +294,7 @@ export class TendersService {
             sizeBytes: true,
             status: true,
           },
+          where: { deletedAt: null },
         },
       },
       where: { id: versionId, tender: { id: tenderId, organisationId } },
@@ -217,7 +333,7 @@ export class TendersService {
       skip: cursor === undefined ? 0 : 1,
       take: 25,
       ...(cursor === undefined ? {} : { cursor: { id: cursor } }),
-      where: { organisationId, tenderVersion: { tenderId } },
+      where: { deletedAt: null, organisationId, tenderVersion: { tenderId } },
     });
     return documents.map((document) => ({
       ...document,
@@ -432,7 +548,7 @@ export class TendersService {
         subjectType: "tender",
       },
     });
-    return this.get(organisationId, tenderId);
+    return this.get(organisationId, tenderId, userId, requestId);
   }
 
   public async createUpload(
@@ -458,6 +574,7 @@ export class TendersService {
       throw new BadRequestException("File type is not allowed");
     const duplicate = await this.database.tenderDocument.findFirst({
       where: {
+        deletedAt: null,
         organisationId,
         role: input.role,
         sha256: input.checksum_sha256,
@@ -612,6 +729,186 @@ export class TendersService {
       { attempts: 3, jobId: job.id, removeOnComplete: 100 },
     );
     return { job_id: job.id, state: job.state };
+  }
+
+  public async abandonUpload(
+    organisationId: string,
+    tenderId: string,
+    documentId: string,
+    userId: string,
+    requestId: string,
+  ): Promise<unknown> {
+    const resolvedDocument = await this.database.tenderDocument.findFirst({
+      select: {
+        id: true,
+        approvedObjectKey: true,
+        createdAt: true,
+        declaredMimeType: true,
+        detectedMimeType: true,
+        displayFilename: true,
+        extension: true,
+        originalFilename: true,
+        provenance: true,
+        quarantineObjectKey: true,
+        role: true,
+        sha256: true,
+        sizeBytes: true,
+        status: true,
+        tenderVersionId: true,
+        uploadSessionExpiresAt: true,
+        uploadedByUserId: true,
+        tenderVersion: {
+          select: {
+            createdByUserId: true,
+            previousVersionId: true,
+            reason: true,
+            sourceFingerprint: true,
+            sourceProvenance: true,
+            sourceSnapshot: true,
+            tender: { select: { currentVersionId: true } },
+            versionNumber: true,
+          },
+        },
+      },
+      where: {
+        deletedAt: null,
+        id: documentId,
+        organisationId,
+        tenderVersion: { tenderId },
+      },
+    });
+    if (resolvedDocument === null) throw new NotFoundException();
+    if (
+      resolvedDocument.status === "UPLOADING" &&
+      resolvedDocument.uploadSessionExpiresAt <= new Date()
+    ) {
+      await this.database.$transaction([
+        this.database.tenderDocument.delete({ where: { id: documentId } }),
+        this.database.auditEvent.create({
+          data: {
+            actorUserId: userId,
+            eventType: "TENDER_UPLOAD_ABANDONED",
+            organisationId,
+            outcome: "SUCCESS",
+            requestId,
+            subjectId: tenderId,
+            subjectType: "tender",
+            metadata: {
+              document_id: resolvedDocument.id,
+              role: resolvedDocument.role,
+            },
+          },
+        }),
+      ]);
+      await this.cleanupRemovedTenderDocument({
+        cleanupReason: "ABANDONED_UPLOAD",
+        documentId: resolvedDocument.id,
+        keys: [resolvedDocument.quarantineObjectKey],
+        organisationId,
+        requestId,
+        tenderId,
+      });
+      return { removed: true };
+    }
+    if (
+      resolvedDocument.status !== "READY" ||
+      resolvedDocument.tenderVersion.tender.currentVersionId !==
+        resolvedDocument.tenderVersionId
+    )
+      throw new ConflictException(
+        "Only a current single-source tender setup file can be removed safely.",
+      );
+
+    const siblingCount = await this.database.tenderDocument.count({
+      where: {
+        deletedAt: null,
+        organisationId,
+        tenderVersionId: resolvedDocument.tenderVersionId,
+      },
+    });
+    if (siblingCount !== 1)
+      throw new ConflictException(
+        "Only a current single-source tender setup file can be removed safely.",
+      );
+
+    const nextFingerprint = createHash("sha256")
+      .update(
+        JSON.stringify({
+          documents: [],
+          organisationId,
+          removal_of_document_id: resolvedDocument.id,
+          previous_version_id: resolvedDocument.tenderVersionId,
+          tenderId,
+        }),
+      )
+      .digest("hex");
+    await this.database.$transaction(async (tx) => {
+      const nextVersion = await tx.tenderVersion.create({
+        data: {
+          createdByUserId: userId,
+          previousVersionId: resolvedDocument.tenderVersionId,
+          reason: `Removed tender file ${resolvedDocument.displayFilename}`,
+          sourceFingerprint: nextFingerprint,
+          sourceProvenance:
+            "Current tender source removed by an authorised organisation member.",
+          sourceSnapshot: {
+            previous_source_snapshot:
+              resolvedDocument.tenderVersion.sourceSnapshot,
+            removed_document_id: resolvedDocument.id,
+            removed_filename: resolvedDocument.displayFilename,
+            removed_role: resolvedDocument.role,
+          },
+          tenderId,
+          versionNumber: resolvedDocument.tenderVersion.versionNumber + 1,
+        },
+      });
+      await tx.tenderDocument.update({
+        data: { deletedAt: new Date() },
+        where: { id: resolvedDocument.id },
+      });
+      await tx.tender.update({
+        data: { currentVersionId: nextVersion.id, lifecycleStatus: "DRAFT" },
+        where: { id: tenderId },
+      });
+      await tx.tenderWorkspace.update({
+        data: {
+          processingProgress: 0,
+          sourceSectionStatus: "NOT_STARTED",
+          status: "DRAFT",
+        },
+        where: { tenderId },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          eventType: "TENDER_UPDATED",
+          organisationId,
+          outcome: "SUCCESS",
+          requestId,
+          subjectId: tenderId,
+          subjectType: "tender",
+          metadata: {
+            action: "READY_SOURCE_REMOVED",
+            previous_version_id: resolvedDocument.tenderVersionId,
+            removed_document_id: resolvedDocument.id,
+            removed_role: resolvedDocument.role,
+            resulting_version_id: nextVersion.id,
+          },
+        },
+      });
+    });
+    await this.cleanupRemovedTenderDocument({
+      cleanupReason: "READY_SOURCE_REMOVED",
+      documentId: resolvedDocument.id,
+      keys: [
+        resolvedDocument.approvedObjectKey,
+        resolvedDocument.quarantineObjectKey,
+      ],
+      organisationId,
+      requestId,
+      tenderId,
+    });
+    return { removed: true };
   }
 
   public async addCorrigendum(
@@ -908,4 +1205,311 @@ export class TendersService {
     });
     if (count !== 1) throw new NotFoundException();
   }
+
+  private async cleanupRemovedTenderDocument(input: {
+    readonly cleanupReason: "ABANDONED_UPLOAD" | "READY_SOURCE_REMOVED";
+    readonly documentId: string;
+    readonly keys: readonly (string | null)[];
+    readonly organisationId: string;
+    readonly requestId: string;
+    readonly tenderId: string;
+  }): Promise<void> {
+    const keys = input.keys.filter((key): key is string => key !== null);
+    if (keys.length === 0) return;
+    try {
+      await this.deleteTenderObjectsNow(keys);
+      return;
+    } catch (error: unknown) {
+      try {
+        await this.jobs.add(
+          "cleanup-tender-document-storage",
+          {
+            documentId: input.documentId,
+            keys,
+            organisationId: input.organisationId,
+            requestId: input.requestId,
+            tenderId: input.tenderId,
+          },
+          {
+            attempts: 10,
+            backoff: { delay: 1_000, type: "exponential" },
+            jobId: `cleanup-tender-document-${input.cleanupReason}-${input.documentId}`,
+            removeOnComplete: 100,
+          },
+        );
+      } catch (queueError: unknown) {
+        this.logger.error(
+          {
+            cleanupReason: input.cleanupReason,
+            documentId: input.documentId,
+            keys,
+            organisationId: input.organisationId,
+            queueError:
+              queueError instanceof Error
+                ? queueError.message
+                : String(queueError),
+            storageError:
+              error instanceof Error ? error.message : String(error),
+            tenderId: input.tenderId,
+          },
+          "Tender storage cleanup could not be queued after an immediate cleanup failure",
+        );
+      }
+    }
+  }
+
+  private async deleteTenderObjectsNow(keys: readonly string[]): Promise<void> {
+    for (const key of keys) {
+      try {
+        await this.storage.send(
+          new DeleteObjectCommand({
+            Bucket: this.environment.S3_BUCKET,
+            Key: key,
+          }),
+        );
+      } catch (error: unknown) {
+        if (!isMissingObjectError(error)) throw error;
+      }
+    }
+  }
+
+  private async decorateTenders<
+    TTender extends {
+      readonly buyer: string;
+      readonly currentVersion: {
+        readonly activeEarlyRiskRun: {
+          readonly id: string;
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        } | null;
+        readonly activeEligibilityAssessmentRun: {
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        } | null;
+        readonly activeExtractionRun: {
+          readonly id: string;
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        } | null;
+        readonly documents: readonly {
+          readonly role: string;
+          readonly status: string;
+          readonly uploadSessionExpiresAt: Date;
+        }[];
+        readonly id: string;
+        readonly processingJobs?: readonly {
+          readonly publicMessage: string;
+          readonly state: string;
+        }[];
+      } | null;
+      readonly currentVersionId?: string | null;
+      readonly id: string;
+      readonly isDemonstration: boolean;
+      readonly lifecycleStatus: string;
+      readonly processingJobs?: readonly {
+        readonly publicMessage: string;
+        readonly state: string;
+      }[];
+      readonly sourceTenderNumber: string | null;
+      readonly submissionDeadline: Date | null;
+      readonly title: string;
+      readonly workspace: {
+        readonly id: string;
+        readonly processingProgress: number;
+        readonly status?: string;
+      } | null;
+    },
+  >(tenders: readonly TTender[]): Promise<readonly unknown[]> {
+    if (tenders.length === 0) return [];
+    const extractionIds = tenders
+      .map((tender) => tender.currentVersion?.activeExtractionRun?.id ?? null)
+      .filter((id): id is string => id !== null);
+    const riskIds = tenders
+      .map((tender) => tender.currentVersion?.activeEarlyRiskRun?.id ?? null)
+      .filter((id): id is string => id !== null);
+    const versionIds = tenders
+      .map((tender) => tender.currentVersion?.id ?? null)
+      .filter((id): id is string => id !== null);
+    const tenderIds = tenders.map((tender) => tender.id);
+    const [deadlineFields, decisions, drafts, draftRuns] = await Promise.all([
+      extractionIds.length === 0
+        ? Promise.resolve([])
+        : this.database.extractedTenderField.findMany({
+            orderBy: { createdAt: "asc" },
+            select: {
+              extractionRunId: true,
+              normalizedTextValue: true,
+            },
+            where: {
+              extractionRunId: { in: extractionIds },
+              fieldType: "SUBMISSION_DEADLINE",
+            },
+          }),
+      riskIds.length === 0
+        ? Promise.resolve([])
+        : this.database.earlyPursuitDecision.findMany({
+            orderBy: { createdAt: "desc" },
+            select: {
+              decision: true,
+              riskAnalysisRunId: true,
+            },
+            where: {
+              riskAnalysisRunId: { in: riskIds },
+              supersededAt: null,
+            },
+          }),
+      versionIds.length === 0
+        ? Promise.resolve([])
+        : this.database.draft.findMany({
+            select: {
+              currentVersionId: true,
+              tenderId: true,
+            },
+            where: {
+              currentVersionId: { not: null },
+              deletedAt: null,
+              lifecycle: "ACTIVE",
+              tenderId: { in: tenderIds },
+            },
+          }),
+      versionIds.length === 0
+        ? Promise.resolve([])
+        : this.database.draftGenerationRun.findMany({
+            orderBy: { createdAt: "desc" },
+            select: {
+              status: true,
+              tenderId: true,
+              tenderVersionId: true,
+            },
+            where: {
+              invalidatedAt: null,
+              tenderId: { in: tenderIds },
+              tenderVersionId: { in: versionIds },
+            },
+          }),
+    ]);
+    const currentDraftVersionIds = drafts
+      .map((draft) => draft.currentVersionId)
+      .filter((id): id is string => id !== null);
+    const currentDraftVersions =
+      currentDraftVersionIds.length === 0
+        ? []
+        : await this.database.draftVersion.findMany({
+            select: {
+              tenderId: true,
+              tenderVersionId: true,
+            },
+            where: {
+              id: { in: currentDraftVersionIds },
+              invalidatedAt: null,
+              tenderId: { in: tenderIds },
+              tenderVersionId: { in: versionIds },
+            },
+          });
+    const deadlineByExtractionRunId = new Map<string, string | null>();
+    deadlineFields.forEach((field) => {
+      if (!deadlineByExtractionRunId.has(field.extractionRunId)) {
+        deadlineByExtractionRunId.set(
+          field.extractionRunId,
+          field.normalizedTextValue,
+        );
+      }
+    });
+    const decisionByRiskRunId = new Map<
+      string,
+      { readonly decision: "CONTINUE" | "HOLD" | "STOP" }
+    >();
+    decisions.forEach((decision) => {
+      if (!decisionByRiskRunId.has(decision.riskAnalysisRunId)) {
+        decisionByRiskRunId.set(decision.riskAnalysisRunId, decision);
+      }
+    });
+    const draftKeys = new Set(
+      currentDraftVersions.map(
+        (draftVersion) =>
+          `${draftVersion.tenderId}:${draftVersion.tenderVersionId}`,
+      ),
+    );
+    const draftRunByVersionKey = new Map<string, string>();
+    draftRuns.forEach((run) => {
+      const key = `${run.tenderId}:${run.tenderVersionId}`;
+      if (!draftRunByVersionKey.has(key)) {
+        draftRunByVersionKey.set(key, run.status);
+      }
+    });
+
+    return tenders.map((tender) => {
+      const currentVersion = tender.currentVersion;
+      const submissionDeadlineText =
+        currentVersion?.activeExtractionRun === null ||
+        currentVersion?.activeExtractionRun === undefined
+          ? null
+          : (deadlineByExtractionRunId.get(
+              currentVersion.activeExtractionRun.id,
+            ) ?? null);
+      const deadlineResolution = resolveSubmissionDeadline(
+        tender.submissionDeadline,
+        submissionDeadlineText,
+      );
+      const currentVersionKey =
+        currentVersion === null ? null : `${tender.id}:${currentVersion.id}`;
+      const workflowState = deriveTenderWorkflowState({
+        assessment: currentVersion?.activeEligibilityAssessmentRun ?? null,
+        currentDecision:
+          currentVersion?.activeEarlyRiskRun === null ||
+          currentVersion?.activeEarlyRiskRun === undefined
+            ? null
+            : (decisionByRiskRunId.get(currentVersion.activeEarlyRiskRun.id) ??
+              null),
+        currentDraftExists:
+          currentVersionKey === null ? false : draftKeys.has(currentVersionKey),
+        currentDraftRunStatus:
+          currentVersionKey === null
+            ? null
+            : (draftRunByVersionKey.get(currentVersionKey) ?? null),
+        documents: currentVersion?.documents ?? [],
+        extraction: currentVersion?.activeExtractionRun ?? null,
+        processingJobs:
+          tender.processingJobs ?? currentVersion?.processingJobs ?? [],
+        risk: currentVersion?.activeEarlyRiskRun ?? null,
+      });
+      return {
+        ...tender,
+        currentVersion: undefined,
+        deadlineResolution,
+        demonstration_label: tender.isDemonstration
+          ? demonstrationLabel
+          : undefined,
+        metadataSubmissionDeadline:
+          deadlineResolution.metadataSubmissionDeadline ?? undefined,
+        submissionDeadline: deadlineResolution.submissionDeadline ?? undefined,
+        workflowState,
+      };
+    });
+  }
+}
+
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as {
+    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
+    readonly code?: string;
+    readonly name?: string;
+  };
+  return (
+    candidate.name === "NoSuchKey" ||
+    candidate.name === "NotFound" ||
+    candidate.code === "NoSuchKey" ||
+    candidate.code === "NotFound" ||
+    candidate.Code === "NoSuchKey" ||
+    candidate.Code === "NotFound" ||
+    candidate.$metadata?.httpStatusCode === 404
+  );
 }

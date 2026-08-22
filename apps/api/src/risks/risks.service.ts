@@ -17,6 +17,7 @@ import type { Queue } from "bullmq";
 import { createHash } from "node:crypto";
 import { Observable } from "rxjs";
 import { JOB_QUEUE, PRISMA_CLIENT } from "../infrastructure.tokens.js";
+import { TenderWorkflowProgressionScheduler } from "../common/tender-workflow-progression-scheduler.service.js";
 
 type RiskFindingWithHistory = Prisma.RiskFindingGetPayload<{
   include: {
@@ -30,6 +31,7 @@ export class RisksService {
   public constructor(
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(JOB_QUEUE) private readonly jobs: Queue,
+    private readonly workflowProgression: TenderWorkflowProgressionScheduler,
   ) {}
 
   public async start(
@@ -336,7 +338,7 @@ export class RisksService {
         severity: { in: ["HIGH", "CRITICAL"] },
       },
     });
-    return this.database.$transaction(async (transaction) => {
+    const decision = await this.database.$transaction(async (transaction) => {
       const prior = await transaction.earlyPursuitDecision.findFirst({
         orderBy: { createdAt: "desc" },
         where: { organisationId, riskAnalysisRunId: runId, supersededAt: null },
@@ -429,6 +431,15 @@ export class RisksService {
       });
       return decision;
     });
+    if (decision.decision === "CONTINUE") {
+      await this.workflowProgression.schedule(
+        organisationId,
+        tenderId,
+        userId,
+        requestId,
+      );
+    }
+    return decision;
   }
 
   public async decisions(

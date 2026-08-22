@@ -164,17 +164,22 @@ export function ActionChecklist({
   const selected = runs.find((run) => run.id === runId);
   return (
     <section aria-labelledby="action-checklist-heading">
-      <h2 id="action-checklist-heading">Missing documents and actions</h2>
+      <h2 className="visually-hidden" id="action-checklist-heading">
+        Missing documents and actions
+      </h2>
       <p className="warning">
-        This checklist is generated from the selected Phase 7 assessment
-        snapshot. A missing checklist item does not itself determine overall
-        eligibility.
-      </p>
-      <p>
+        A missing checklist item does not itself determine overall eligibility.
         Uploading a document does not automatically prove compliance.
-        Eligibility decisions remain human-controlled. Official tender deadlines
-        are distinguished from internal target dates.
+        Eligibility decisions remain human-controlled.
       </p>
+      <details>
+        <summary>About checklist dates</summary>
+        <p>
+          This checklist is generated from the selected assessment snapshot.
+          Official tender deadlines are distinguished from internal target
+          dates.
+        </p>
+      </details>
       <button onClick={() => void start()} type="button">
         Generate current checklist
       </button>

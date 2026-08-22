@@ -5,5 +5,6 @@ import { ExtractionsService } from "./extractions.service.js";
 @Module({
   controllers: [ExtractionsController],
   providers: [ExtractionsService],
+  exports: [ExtractionsService],
 })
 export class ExtractionsModule {}

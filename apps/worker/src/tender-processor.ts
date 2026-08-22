@@ -5,6 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { PrismaClient } from "@tender/database";
+import type { TenderWorkflowProgressJob } from "@tender/contracts";
 import {
   isAllowedMimeExtension,
   validateZipEntries,
@@ -23,6 +24,14 @@ export interface TenderDocumentJob {
   readonly requestId: string;
 }
 
+export interface TenderDocumentCleanupJob {
+  readonly documentId: string;
+  readonly keys: readonly string[];
+  readonly organisationId: string;
+  readonly requestId: string;
+  readonly tenderId: string;
+}
+
 export class TenderProcessor {
   public constructor(
     private readonly database: PrismaClient,
@@ -34,13 +43,17 @@ export class TenderProcessor {
   public async process(
     data: TenderDocumentJob,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<TenderWorkflowProgressJob | null> {
     const job = await this.database.processingJob.findFirst({
       where: { id: data.jobId, organisationId: data.organisationId },
     });
-    if (job === null || job.state === "CANCELLED") return;
+    if (job === null || job.state === "CANCELLED") return null;
     const document = await this.database.tenderDocument.findFirst({
-      include: { tenderVersion: true },
+      include: {
+        tenderVersion: {
+          include: { tender: { select: { currentVersionId: true } } },
+        },
+      },
       where: { id: data.documentId, organisationId: data.organisationId },
     });
     if (document === null) throw new Error("Tender source document not found");
@@ -60,8 +73,10 @@ export class TenderProcessor {
         object.Body === undefined ||
         object.ContentLength !== Number(document.sizeBytes) ||
         object.ContentLength > MAX_TENDER_UPLOAD_BYTES
-      )
-        return this.reject(data, "BOUNDED_SIZE_CHECK_FAILED", null);
+      ) {
+        await this.reject(data, "BOUNDED_SIZE_CHECK_FAILED", null);
+        return null;
+      }
       const content = await object.Body.transformToByteArray();
       signal?.throwIfAborted();
       const checksum = createHash("sha256").update(content).digest("hex");
@@ -74,14 +89,18 @@ export class TenderProcessor {
         detectedMime === null ||
         !isTenderMimeAllowed(detectedMime, document.extension) ||
         detectedMime !== document.declaredMimeType
-      )
-        return this.reject(data, "FILE_TYPE_MISMATCH", detectedMime);
+      ) {
+        await this.reject(data, "FILE_TYPE_MISMATCH", detectedMime);
+        return null;
+      }
       if (document.extension === ".zip")
         validateZipEntries(readZipDirectory(content));
       signal?.throwIfAborted();
       const scan = await this.scanner.scan(content);
-      if (scan.status === "INFECTED")
-        return this.reject(data, "MALWARE_DETECTED", detectedMime);
+      if (scan.status === "INFECTED") {
+        await this.reject(data, "MALWARE_DETECTED", detectedMime);
+        return null;
+      }
       if (scan.status === "ERROR") {
         await this.database.tenderDocument.update({
           data: { status: "QUARANTINED" },
@@ -90,7 +109,7 @@ export class TenderProcessor {
         throw new Error("Malware scanner unavailable");
       }
       signal?.throwIfAborted();
-      if (await this.isCancelled(data.jobId)) return;
+      if (await this.isCancelled(data.jobId)) return null;
       await this.stage(data.jobId, "PROCESSING", 75, "Securing tender source");
       const approvedKey = `tender-approved/${data.organisationId}/${document.id}`;
       await this.storage.send(
@@ -106,7 +125,7 @@ export class TenderProcessor {
         await this.storage.send(
           new DeleteObjectCommand({ Bucket: this.bucket, Key: approvedKey }),
         );
-        return;
+        return null;
       }
       await this.storage.send(
         new DeleteObjectCommand({
@@ -114,14 +133,53 @@ export class TenderProcessor {
           Key: document.quarantineObjectKey,
         }),
       );
+      const latestDocument = await this.database.tenderDocument.findUnique({
+        select: {
+          deletedAt: true,
+          status: true,
+          tenderVersionId: true,
+          tenderVersion: {
+            select: {
+              tender: { select: { currentVersionId: true } },
+              tenderId: true,
+            },
+          },
+        },
+        where: { id: document.id },
+      });
+      if (
+        latestDocument?.deletedAt !== null ||
+        !["UPLOADED", "SCANNING"].includes(latestDocument.status)
+      ) {
+        await this.deleteObjectIfPresent(approvedKey);
+        await this.database.processingJob.updateMany({
+          data: {
+            completedAt: new Date(),
+            currentStage: "CANCELLED",
+            eventSequence: { increment: 1 },
+            publicMessage:
+              "Tender source processing no longer applies to the current source state",
+            state: "CANCELLED",
+          },
+          where: { id: data.jobId, state: { not: "CANCELLED" } },
+        });
+        return null;
+      }
+      const currentVersionStillActive =
+        latestDocument.tenderVersion.tender.currentVersionId ===
+        latestDocument.tenderVersionId;
       await this.database.$transaction([
-        this.database.tenderDocument.update({
+        this.database.tenderDocument.updateMany({
           data: {
             approvedObjectKey: approvedKey,
             detectedMimeType: detectedMime,
             status: "READY",
           },
-          where: { id: document.id },
+          where: {
+            deletedAt: null,
+            id: document.id,
+            status: { in: ["UPLOADED", "SCANNING"] },
+          },
         }),
         this.database.processingJob.update({
           data: {
@@ -134,19 +192,31 @@ export class TenderProcessor {
           },
           where: { id: data.jobId },
         }),
-        this.database.tender.update({
-          data: { lifecycleStatus: "SOURCE_READY" },
-          where: { id: document.tenderVersion.tenderId },
-        }),
-        this.database.tenderWorkspace.update({
-          data: {
-            processingProgress: 100,
-            sourceSectionStatus: "READY",
-            status: "SOURCE_READY",
-          },
-          where: { tenderId: document.tenderVersion.tenderId },
-        }),
+        ...(currentVersionStillActive
+          ? [
+              this.database.tender.update({
+                data: { lifecycleStatus: "SOURCE_READY" },
+                where: { id: latestDocument.tenderVersion.tenderId },
+              }),
+              this.database.tenderWorkspace.update({
+                data: {
+                  processingProgress: 100,
+                  sourceSectionStatus: "READY",
+                  status: "SOURCE_READY",
+                },
+                where: { tenderId: latestDocument.tenderVersion.tenderId },
+              }),
+            ]
+          : []),
       ]);
+      return currentVersionStillActive
+        ? {
+            organisationId: data.organisationId,
+            requestId: data.requestId,
+            tenderId: latestDocument.tenderVersion.tenderId,
+            userId: document.uploadedByUserId,
+          }
+        : null;
     } catch (error: unknown) {
       if (signal?.aborted === true)
         await this.fail(
@@ -258,6 +328,24 @@ export class TenderProcessor {
       }),
     ]);
   }
+
+  public async cleanupRemovedDocument(
+    data: TenderDocumentCleanupJob,
+  ): Promise<void> {
+    for (const key of data.keys) {
+      await this.deleteObjectIfPresent(key);
+    }
+  }
+
+  private async deleteObjectIfPresent(key: string): Promise<void> {
+    try {
+      await this.storage.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+    } catch (error: unknown) {
+      if (!isMissingObjectError(error)) throw error;
+    }
+  }
 }
 
 function detectCsv(content: Uint8Array, extension: string): string | null {
@@ -275,6 +363,25 @@ function isTenderMimeAllowed(mime: string, extension: string): boolean {
     isAllowedMimeExtension(mime, extension) ||
     (mime === "application/zip" && extension === ".zip") ||
     (mime === "text/csv" && extension === ".csv")
+  );
+}
+
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as {
+    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
+    readonly code?: string;
+    readonly name?: string;
+  };
+  return (
+    candidate.name === "NoSuchKey" ||
+    candidate.name === "NotFound" ||
+    candidate.code === "NoSuchKey" ||
+    candidate.code === "NotFound" ||
+    candidate.Code === "NoSuchKey" ||
+    candidate.Code === "NotFound" ||
+    candidate.$metadata?.httpStatusCode === 404
   );
 }
 

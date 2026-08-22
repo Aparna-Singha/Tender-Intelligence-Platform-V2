@@ -137,7 +137,9 @@ export {
   classifySections,
   extractDeterministicFields,
   extractDeterministicRequirements,
+  normalizeTenderCalendarDate,
   PARSER_POLICY_VERSION,
+  parseTenderDateTime,
   STRUCTURING_POLICY_VERSION,
   validateCitation,
 } from "./extraction.js";

@@ -7,6 +7,7 @@ import {
   type FormEvent,
   type JSX,
 } from "react";
+import { Badge, Button } from "@tender/ui";
 import { apiRequest } from "../lib/api";
 import { humanizeEnum } from "@tender/ui";
 
@@ -97,10 +98,20 @@ interface VersionSummary {
   versionNumber: number;
 }
 
+function isSectionReady(section: Section): boolean {
+  const state = section.reviewState.toUpperCase();
+  return (
+    (state.includes("COMPLETE") || state.includes("APPROVED")) &&
+    section.placeholders.every((placeholder) => !placeholder.approvalBlocking)
+  );
+}
+
 export function DraftWorkspace({
+  onOpenReview,
   organisationId,
   tenderId,
 }: {
+  readonly onOpenReview?: () => void;
   readonly organisationId: string;
   readonly tenderId: string;
 }): JSX.Element {
@@ -113,6 +124,7 @@ export function DraftWorkspace({
   const [versionHistory, setVersionHistory] = useState<
     readonly VersionSummary[]
   >([]);
+  const [selectedSectionId, setSelectedSectionId] = useState("");
   const [mode, setMode] = useState<SourceMode>("TENDER_ONLY");
   const [status, setStatus] = useState("Loading drafting workspace…");
 
@@ -169,6 +181,19 @@ export function DraftWorkspace({
   useEffect(() => {
     void loadVersion();
   }, [loadVersion]);
+
+  useEffect(() => {
+    if (version === null || version.sections.length === 0) {
+      setSelectedSectionId("");
+      return;
+    }
+    setSelectedSectionId((current) =>
+      current === "" ||
+      !version.sections.some((section) => section.id === current)
+        ? (version.sections[0]?.id ?? "")
+        : current,
+    );
+  }, [version]);
 
   async function createControlledTemplate(): Promise<void> {
     setStatus("Creating controlled organisation template…");
@@ -243,7 +268,7 @@ export function DraftWorkspace({
       typeof instructions !== "string"
     )
       return;
-    setStatus("Validating current Phase 5–9 authority…");
+    setStatus("Validating current drafting authority…");
     try {
       await apiRequest(`${base}/draft-generation-runs`, {
         body: JSON.stringify({
@@ -263,7 +288,7 @@ export function DraftWorkspace({
       await load();
     } catch {
       setStatus(
-        "Generation could not start. Current extraction, CONTINUE decision, assessment, checklist, matching RAG index, evidence permission, template, and provider are required.",
+        "Generation could not start. Current extraction, assessment, checklist, evidence permission, template, and provider authority are required.",
       );
     }
   }
@@ -295,154 +320,272 @@ export function DraftWorkspace({
     }
   }
 
+  const selectedSection =
+    version?.sections.find((section) => section.id === selectedSectionId) ??
+    null;
+  const readiness =
+    version === null || version.sections.length === 0
+      ? null
+      : Math.round(
+          (version.sections.filter(isSectionReady).length /
+            version.sections.length) *
+            100,
+        );
+  const blockingPlaceholders =
+    selectedSection?.placeholders.filter(
+      (placeholder) => placeholder.approvalBlocking,
+    ) ?? [];
+
   return (
-    <section aria-labelledby="draft-heading">
-      <h2 id="draft-heading">Fact-constrained tender draft</h2>
-      <div className="warning" role="note">
-        <p>This is an AI-assisted first draft, not a final bid package.</p>
-        <p>
-          Draft content is limited to authorised tender sources and approved
-          evidence.
-        </p>
-        <p>Unsupported inputs remain visible as placeholders.</p>
-        <p>Human review is mandatory.</p>
-        <p>
-          Approval here does not complete the final readiness audit or authorise
-          submission.
-        </p>
-        <p>
-          The platform does not determine legal compliance, provide legal
-          advice, or guarantee bid success.
-        </p>
+    <section aria-labelledby="draft-heading" className="draft-columns">
+      <div className="workspace-card draft-nav">
+        {version === null || version.sections.length === 0 ? (
+          <div className="workspace-empty-row">
+            <p>No draft sections yet.</p>
+          </div>
+        ) : (
+          version.sections.map((section, index) => (
+            <button
+              className={`draft-nav__item ${section.id === selectedSectionId ? "draft-nav__item--active" : ""}`}
+              key={section.id}
+              onClick={() => setSelectedSectionId(section.id)}
+              type="button"
+            >
+              <strong>
+                {index + 1}. {section.heading}
+              </strong>
+              <Badge tone={isSectionReady(section) ? "success" : "warning"}>
+                {humanizeEnum(section.reviewState)}
+              </Badge>
+            </button>
+          ))
+        )}
       </div>
-      {templates.length === 0 && (
-        <button onClick={() => void createControlledTemplate()} type="button">
-          Create controlled draft template
-        </button>
-      )}
-      <form onSubmit={(event) => void startGeneration(event)}>
-        <label>
-          Draft title
-          <input maxLength={200} name="title" required />
-        </label>
-        <label>
-          Authorised source mode
-          <select
-            value={mode}
-            onChange={(event) => setMode(event.target.value as SourceMode)}
-          >
-            <option value="TENDER_ONLY">Tender only</option>
-            <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
-              Tender and approved company evidence
-            </option>
-            <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
-              Tender and derived workflow warnings
-            </option>
-            <option value="FULL_AUTHORISED_TENDER_CONTEXT">
-              Full authorised context
-            </option>
-          </select>
-        </label>
-        <label>
-          Writing preference only (not factual evidence)
-          <textarea maxLength={2000} name="instructions" />
-        </label>
-        <button disabled={templates.length === 0} type="submit">
-          Generate controlled first draft
-        </button>
-      </form>
-      {status !== "" && <p aria-live="polite">{status}</p>}
-      <h3>Generation history</h3>
-      {runs.map((run) => (
-        <p key={run.id}>
-          {humanizeEnum(run.currentStage)} · {humanizeEnum(run.status)} ·{" "}
-          {run.progressPercentage}% · {run.validatedClaimCount} validated claims
-          · {run.citationCount} citations · {run.placeholderCount} placeholders
-          {run.safeFailureCode === null ? "" : ` · ${run.safeFailureCode}`}
-        </p>
-      ))}
-      <label>
-        Draft
-        <select
-          value={selectedDraft}
-          onChange={(event) => setSelectedDraft(event.target.value)}
-        >
-          <option value="">Select a draft</option>
-          {drafts.map((draft) => (
-            <option key={draft.id} value={draft.id}>
-              {draft.title} · {draft.lifecycle}
-            </option>
-          ))}
-        </select>
-      </label>
-      {version !== null && (
-        <article aria-labelledby="draft-version-heading">
-          <h3>Version history</h3>
-          <ol>
-            {versionHistory.map((item) => (
-              <li key={item.id}>
-                Version {item.versionNumber} · {humanizeEnum(item.reviewState)}
-                {item.invalidatedAt === null ? "" : " · invalidated"}
-              </li>
-            ))}
-          </ol>
-          <h3 id="draft-version-heading">
-            Version {version.versionNumber} ·{" "}
-            {humanizeEnum(version.reviewState)}
-          </h3>
-          {version.invalidatedAt !== null && (
-            <p className="warning">
-              This version is invalidated and not current.
+
+      <div className="workspace-card draft-center">
+        <h2 className="visually-hidden" id="draft-heading">
+          Your proposal draft
+        </h2>
+        {version?.invalidatedAt != null && (
+          <p className="warning">
+            This version is invalidated and not current.
+          </p>
+        )}
+        {selectedSection === null ? (
+          <div className="draft-center__header">
+            <div>
+              <h3>Your proposal draft</h3>
+              <p>
+                Content stays limited to authorised tender sources and approved
+                evidence; unsupported inputs remain visible as placeholders.
+              </p>
+            </div>
+          </div>
+        ) : null}
+        {selectedSection === null ? (
+          <div className="workspace-empty-row">
+            <p>
+              {drafts.length === 0
+                ? "No draft has been generated yet. Use Draft &amp; generation on the right to start one."
+                : "Select a section to review its content."}
             </p>
-          )}
-          {version.sections.map((section) => (
-            <section key={section.id}>
-              <h4>{section.heading}</h4>
-              <div className="draft-content">{section.content}</div>
-              <h5>Claim support</h5>
-              {section.claims.map((claim) => (
-                <div key={claim.id}>
-                  <p>
-                    {humanizeEnum(claim.claimClass)} ·{" "}
-                    {humanizeEnum(claim.supportState)}: {claim.claimText}
+          </div>
+        ) : (
+          <>
+            <div className="requirement-detail__header">
+              <div>
+                <h3>{selectedSection.heading}</h3>
+                <p style={{ margin: "2px 0 0", fontSize: "0.78rem" }}>
+                  Content stays limited to authorised tender sources and
+                  approved evidence.
+                </p>
+              </div>
+              <Badge
+                tone={isSectionReady(selectedSection) ? "success" : "warning"}
+              >
+                {humanizeEnum(selectedSection.reviewState)}
+              </Badge>
+            </div>
+            <div className="draft-content">{selectedSection.content}</div>
+            {blockingPlaceholders.length > 0 && (
+              <div className="workspace-card" style={{ padding: 14 }}>
+                <h4>Placeholders</h4>
+                {blockingPlaceholders.map((placeholder) => (
+                  <p className="warning" key={placeholder.id}>
+                    <strong>{placeholder.markerText}</strong> —{" "}
+                    {placeholder.explanation}
                   </p>
-                  {claim.citations.map((citation) => (
-                    <details key={`${claim.id}-${citation.handle}`}>
-                      <summary>
-                        {citation.handle}: {citation.documentName}
-                        {citation.pageNumber === null
-                          ? ""
-                          : `, page ${citation.pageNumber}`}
-                        {citation.clauseLabel === null
-                          ? ""
-                          : `, ${citation.clauseLabel}`}
-                      </summary>
-                      <p>{citation.excerpt}</p>
-                    </details>
+                ))}
+              </div>
+            )}
+            {selectedSection.claims.length > 0 && (
+              <div>
+                <h4>Supporting evidence</h4>
+                <div className="draft-claim-list">
+                  {selectedSection.claims.map((claim) => (
+                    <div className="draft-claim" key={claim.id}>
+                      <p>
+                        {humanizeEnum(claim.claimClass)} ·{" "}
+                        {humanizeEnum(claim.supportState)}: {claim.claimText}
+                      </p>
+                      {claim.citations.map((citation) => (
+                        <details key={`${claim.id}-${citation.handle}`}>
+                          <summary>
+                            {citation.handle}: {citation.documentName}
+                            {citation.pageNumber === null
+                              ? ""
+                              : `, page ${citation.pageNumber}`}
+                            {citation.clauseLabel === null
+                              ? ""
+                              : `, ${citation.clauseLabel}`}
+                          </summary>
+                          <p>{citation.excerpt}</p>
+                        </details>
+                      ))}
+                    </div>
                   ))}
                 </div>
-              ))}
-              {section.placeholders.length > 0 && <h5>Placeholders</h5>}
-              {section.placeholders.map((placeholder) => (
-                <div className="warning" key={placeholder.id}>
-                  <strong>{placeholder.markerText}</strong>
-                  <p>
-                    {placeholder.explanation} ·{" "}
-                    {humanizeEnum(placeholder.resolutionState)}
-                    {placeholder.approvalBlocking ? " · blocks approval" : ""}
-                  </p>
-                </div>
-              ))}
-            </section>
-          ))}
-          <button onClick={() => void review("REQUEST_CHANGES")} type="button">
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="workspace-card draft-rail">
+        <div className="draft-rail__readiness">
+          <strong>{readiness === null ? "—" : `${readiness}%`}</strong>
+          <span>Overall draft readiness</span>
+        </div>
+        {version !== null && (
+          <p style={{ fontSize: "0.76rem", margin: 0 }}>
+            Version {version.versionNumber} ·{" "}
+            {humanizeEnum(version.reviewState)}
+          </p>
+        )}
+        <div className="draft-rail__actions">
+          <Button
+            onClick={() => void review("REQUEST_CHANGES")}
+            variant="secondary"
+          >
             Request changes
-          </button>
-          <button onClick={() => void review("APPROVE_VERSION")} type="button">
+          </Button>
+          <Button onClick={() => void review("APPROVE_VERSION")}>
             Approve for final readiness review
-          </button>
-        </article>
-      )}
+          </Button>
+          {onOpenReview !== undefined && (
+            <Button onClick={onOpenReview} variant="secondary">
+              Open Review &amp; Export
+            </Button>
+          )}
+        </div>
+        <p aria-live="polite" style={{ fontSize: "0.76rem" }}>
+          {status}
+        </p>
+
+        <details className="disclosure">
+          <summary>
+            Draft &amp; generation
+            <small>Select drafts, start generation, review history</small>
+          </summary>
+          <div className="disclosure__body tender-tools-panel">
+            {drafts.length > 0 && (
+              <label>
+                Draft
+                <select
+                  value={selectedDraft}
+                  onChange={(event) => setSelectedDraft(event.target.value)}
+                >
+                  <option value="">Select a draft</option>
+                  {drafts.map((draft) => (
+                    <option key={draft.id} value={draft.id}>
+                      {draft.title} · {draft.lifecycle}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            {versionHistory.length > 0 && (
+              <>
+                <h4>Version history</h4>
+                <ol>
+                  {versionHistory.map((item) => (
+                    <li key={item.id}>
+                      Version {item.versionNumber} ·{" "}
+                      {humanizeEnum(item.reviewState)}
+                      {item.invalidatedAt === null ? "" : " · invalidated"}
+                    </li>
+                  ))}
+                </ol>
+              </>
+            )}
+            {runs.length > 0 && (
+              <>
+                <h4>Generation history</h4>
+                {runs.map((run) => (
+                  <p key={run.id}>
+                    {humanizeEnum(run.currentStage)} ·{" "}
+                    {humanizeEnum(run.status)} · {run.progressPercentage}% ·{" "}
+                    {run.validatedClaimCount} validated claims ·{" "}
+                    {run.citationCount} citations · {run.placeholderCount}{" "}
+                    placeholders
+                    {run.safeFailureCode === null
+                      ? ""
+                      : ` · ${run.safeFailureCode}`}
+                  </p>
+                ))}
+              </>
+            )}
+            {templates.length === 0 && (
+              <button
+                onClick={() => void createControlledTemplate()}
+                type="button"
+              >
+                Create controlled draft template
+              </button>
+            )}
+            <h4>Start a new generation</h4>
+            <p>This is an AI-assisted first draft, not a final bid package.</p>
+            <p>Human review is mandatory.</p>
+            <p>
+              The platform does not determine legal compliance, provide legal
+              advice, or guarantee bid success.
+            </p>
+            <form onSubmit={(event) => void startGeneration(event)}>
+              <label>
+                Draft title
+                <input maxLength={200} name="title" required />
+              </label>
+              <label>
+                Authorised source mode
+                <select
+                  value={mode}
+                  onChange={(event) =>
+                    setMode(event.target.value as SourceMode)
+                  }
+                >
+                  <option value="TENDER_ONLY">Tender only</option>
+                  <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
+                    Tender and approved company evidence
+                  </option>
+                  <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
+                    Tender and derived workflow warnings
+                  </option>
+                  <option value="FULL_AUTHORISED_TENDER_CONTEXT">
+                    Full authorised context
+                  </option>
+                </select>
+              </label>
+              <label>
+                Writing preference only (not factual evidence)
+                <textarea maxLength={2000} name="instructions" />
+              </label>
+              <button disabled={templates.length === 0} type="submit">
+                Generate controlled first draft
+              </button>
+            </form>
+          </div>
+        </details>
+      </div>
     </section>
   );
 }

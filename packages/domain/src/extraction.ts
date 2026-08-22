@@ -142,6 +142,7 @@ export interface ExtractedFieldCandidate {
   readonly fieldType: string;
   readonly findingState:
     "FOUND" | "AMBIGUOUS" | "CONFLICTING" | "HUMAN_REVIEW_REQUIRED";
+  readonly normalizedDateValue?: Date;
   readonly normalizedTextValue: string;
   readonly sourceWording: string;
 }
@@ -266,7 +267,7 @@ export function extractDeterministicFields(
   const patterns: readonly [string, RegExp][] = [
     [
       "SUBMISSION_DEADLINE",
-      /\b(?:submission|bid)\s+deadline\s*[:-]\s*([^\n.;]{4,100})/iu,
+      /\b(?:submission|bid)\s+(?:deadline|end\s+date(?:\/time)?)\s*[:-]?\s*([^\n.;]{4,100})/iu,
     ],
     ["EMD_WORDING", /\b(?:emd|bid security)\s*[:-]\s*([^\n.;]{2,200})/iu],
     [
@@ -282,18 +283,131 @@ export function extractDeterministicFields(
     patterns.flatMap(([fieldType, pattern]) => {
       const match = pattern.exec(block.text);
       if (match?.[1] === undefined) return [];
+      const normalizedTextValue = match[1].trim();
+      const normalizedDateValue =
+        fieldType === "SUBMISSION_DEADLINE"
+          ? normalizeTenderCalendarDate(normalizedTextValue)
+          : null;
       return [
         {
           anchor: anchorFor(block),
           confidence: block.confidence,
           fieldType,
           findingState: "FOUND",
-          normalizedTextValue: match[1].trim(),
+          ...(normalizedDateValue === null ? {} : { normalizedDateValue }),
+          normalizedTextValue,
           sourceWording: block.text,
         },
       ];
     }),
   );
+}
+
+const INDIA_TIMEZONE_OFFSET_MINUTES = 330;
+const TENDER_DATE_TIME_PATTERN =
+  /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM)?)?$/iu;
+
+interface ParsedTenderDateTimeParts {
+  readonly day: number;
+  readonly hour: number;
+  readonly minute: number;
+  readonly month: number;
+  readonly second: number;
+  readonly year: number;
+}
+
+export function parseTenderDateTime(value: string): Date | null {
+  const parsedParts = parseTenderDateTimeParts(value);
+  if (parsedParts === null) return null;
+  const utcMilliseconds =
+    Date.UTC(
+      parsedParts.year,
+      parsedParts.month - 1,
+      parsedParts.day,
+      parsedParts.hour,
+      parsedParts.minute,
+      parsedParts.second,
+    ) -
+    INDIA_TIMEZONE_OFFSET_MINUTES * 60_000;
+  const parsed = new Date(utcMilliseconds);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+export function normalizeTenderCalendarDate(value: string): Date | null {
+  const parsedParts = parseTenderDateTimeParts(value);
+  if (parsedParts === null) return null;
+  return new Date(
+    Date.UTC(parsedParts.year, parsedParts.month - 1, parsedParts.day),
+  );
+}
+
+function parseTenderDateTimeParts(
+  value: string,
+): ParsedTenderDateTimeParts | null {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  const match = TENDER_DATE_TIME_PATTERN.exec(normalized);
+  if (match === null) return null;
+  const day = Number(match[1]);
+  const month = Number(match[2]);
+  const rawYear = Number(match[3]);
+  const year = match[3]?.length === 2 ? 2000 + rawYear : rawYear;
+  let hour = Number(match[4] ?? "0");
+  const minute = Number(match[5] ?? "0");
+  const second = Number(match[6] ?? "0");
+  const meridiem = match[7]?.toUpperCase() ?? null;
+  if (
+    !Number.isInteger(day) ||
+    !Number.isInteger(month) ||
+    !Number.isInteger(year) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    !Number.isInteger(second) ||
+    day < 1 ||
+    month < 1 ||
+    month > 12 ||
+    !isValidCalendarDate(year, month, day) ||
+    minute < 0 ||
+    minute > 59 ||
+    second < 0 ||
+    second > 59
+  ) {
+    return null;
+  }
+  if (meridiem !== null) {
+    if (hour < 1 || hour > 12) return null;
+    if (meridiem === "PM" && hour !== 12) hour += 12;
+    if (meridiem === "AM" && hour === 12) hour = 0;
+  } else if (hour < 0 || hour > 23) {
+    return null;
+  }
+  return { day, hour, minute, month, second, year };
+}
+
+function isValidCalendarDate(
+  year: number,
+  month: number,
+  day: number,
+): boolean {
+  const daysInMonth = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return day <= daysInMonth[month - 1]!;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
 }
 
 export function validateCitation(

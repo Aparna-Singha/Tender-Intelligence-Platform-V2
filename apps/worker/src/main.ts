@@ -1,6 +1,11 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { S3Client } from "@aws-sdk/client-s3";
 import { parseEnvironment, workerEnvironmentSchema } from "@tender/config";
+import {
+  TENDER_WORKFLOW_PROGRESS_JOB,
+  tenderWorkflowProgressQueueName,
+  type TenderWorkflowProgressJob,
+} from "@tender/contracts";
 import { createPrismaClient, type PrismaClient } from "@tender/database";
 import {
   createLogger,
@@ -19,7 +24,11 @@ import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
 import { runWithTimeout } from "./job-timeout.js";
-import { TenderProcessor, type TenderDocumentJob } from "./tender-processor.js";
+import {
+  TenderProcessor,
+  type TenderDocumentCleanupJob,
+  type TenderDocumentJob,
+} from "./tender-processor.js";
 import {
   ExtractionProcessor,
   type ExtractionJob,
@@ -71,7 +80,8 @@ type PlatformJob =
   | RagJob
   | DraftGenerationJob
   | FinalReadinessJob
-  | ControlledPackageJob;
+  | ControlledPackageJob
+  | TenderDocumentCleanupJob;
 
 async function bootstrap(): Promise<void> {
   const environment = parseEnvironment(
@@ -94,6 +104,12 @@ async function bootstrap(): Promise<void> {
   const queue = new Queue(environment.QUEUE_NAME, {
     connection: redis,
   });
+  const workflowProgressQueue = new Queue<TenderWorkflowProgressJob>(
+    tenderWorkflowProgressQueueName(environment.QUEUE_NAME),
+    {
+      connection: redis,
+    },
+  );
   const storage = new S3Client({
     credentials: {
       accessKeyId: environment.S3_ACCESS_KEY_ID,
@@ -158,6 +174,18 @@ async function bootstrap(): Promise<void> {
       const lifecycle = startJobLifecycle(job, logger, metrics);
       try {
         const result = await dispatchJob(job);
+        if (isTenderWorkflowProgressJob(result)) {
+          await workflowProgressQueue.add(
+            TENDER_WORKFLOW_PROGRESS_JOB,
+            result,
+            {
+              attempts: 5,
+              backoff: { delay: 2_000, type: "exponential" },
+              jobId: `${TENDER_WORKFLOW_PROGRESS_JOB}:${result.organisationId}:${result.tenderId}`,
+              removeOnComplete: 100,
+            },
+          );
+        }
         lifecycle.complete();
         return result;
       } catch (error: unknown) {
@@ -167,7 +195,16 @@ async function bootstrap(): Promise<void> {
     },
     { connection: redis, concurrency: 2 },
   );
+
   async function dispatchJob(job: Job<PlatformJob>): Promise<unknown> {
+    if (job.name === "cleanup-tender-document-storage") {
+      if (!isTenderDocumentCleanupJob(job.data))
+        throw new Error("Invalid tender document cleanup job");
+      const data = job.data;
+      return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async () =>
+        tenderProcessor.cleanupRemovedDocument(data),
+      );
+    }
     if (job.name === "process-tender-document") {
       if (!isTenderDocumentJob(job.data))
         throw new Error("Invalid tender document job");
@@ -245,6 +282,7 @@ async function bootstrap(): Promise<void> {
       processor.process(job.name, data, signal),
     );
   }
+
   documentWorker.on("stalled", (jobId) => {
     logger.warn({ event: "job_stalled", jobId }, "Worker job stalled");
     metrics.jobStalled({ jobName: "unknown" });
@@ -368,6 +406,7 @@ async function bootstrap(): Promise<void> {
       server.close(),
       metricsServer.close(),
       queue.close(),
+      workflowProgressQueue.close(),
       documentWorker.close(),
       redis.quit(),
       database.$disconnect(),
@@ -409,6 +448,12 @@ function isTenderDocumentJob(value: PlatformJob): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
 
+function isTenderDocumentCleanupJob(
+  value: PlatformJob,
+): value is TenderDocumentCleanupJob {
+  return "documentId" in value && "keys" in value && "tenderId" in value;
+}
+
 function isCompanyDocumentJob(value: PlatformJob): value is DocumentJob {
   return "documentVersionId" in value;
 }
@@ -419,6 +464,19 @@ function isExtractionJob(value: PlatformJob): value is ExtractionJob {
 
 function isRiskAnalysisJob(value: PlatformJob): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
+}
+
+function isTenderWorkflowProgressJob(
+  value: unknown,
+): value is TenderWorkflowProgressJob {
+  if (typeof value !== "object" || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.organisationId === "string" &&
+    typeof item.requestId === "string" &&
+    typeof item.tenderId === "string" &&
+    typeof item.userId === "string"
+  );
 }
 
 void bootstrap().catch((error: unknown) => {

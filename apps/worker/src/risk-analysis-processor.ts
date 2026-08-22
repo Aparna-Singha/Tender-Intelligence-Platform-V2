@@ -80,7 +80,7 @@ export class RiskAnalysisProcessor {
         citations.some(
           (citation) =>
             citation.extractionRunId !== run.extractionRunId ||
-            citation.validationStatus !== "VALIDATED" ||
+            !["VALID", "VALIDATED"].includes(citation.validationStatus) ||
             citation.extractedBlock === null ||
             !citation.extractedBlock.normalizedText.includes(
               citation.boundedExcerpt,
