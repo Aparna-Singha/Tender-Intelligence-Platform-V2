@@ -10,7 +10,11 @@ import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
 import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
 import { runWithTimeout } from "./job-timeout.js";
-import { TenderProcessor, type TenderDocumentJob } from "./tender-processor.js";
+import {
+  TenderProcessor,
+  type TenderDocumentCleanupJob,
+  type TenderDocumentJob,
+} from "./tender-processor.js";
 import {
   ExtractionProcessor,
   type ExtractionJob,
@@ -131,9 +135,18 @@ async function bootstrap(): Promise<void> {
     | DraftGenerationJob
     | FinalReadinessJob
     | ControlledPackageJob
+    | TenderDocumentCleanupJob
   >(
     environment.QUEUE_NAME,
     async (job) => {
+      if (job.name === "cleanup-tender-document-storage") {
+        if (!isTenderDocumentCleanupJob(job.data))
+          throw new Error("Invalid tender document cleanup job");
+        const data = job.data;
+        return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async () =>
+          tenderProcessor.cleanupRemovedDocument(data),
+        );
+      }
       if (job.name === "process-tender-document") {
         if (!isTenderDocumentJob(job.data))
           throw new Error("Invalid tender document job");
@@ -359,9 +372,27 @@ function isTenderDocumentJob(
     | RagJob
     | DraftGenerationJob
     | FinalReadinessJob
-    | ControlledPackageJob,
+    | ControlledPackageJob
+    | TenderDocumentCleanupJob,
 ): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
+}
+
+function isTenderDocumentCleanupJob(
+  value:
+    | DocumentJob
+    | TenderDocumentJob
+    | ExtractionJob
+    | RiskAnalysisJob
+    | EvidenceAssessmentJob
+    | ChecklistGenerationJob
+    | RagJob
+    | DraftGenerationJob
+    | FinalReadinessJob
+    | ControlledPackageJob
+    | TenderDocumentCleanupJob,
+): value is TenderDocumentCleanupJob {
+  return "documentId" in value && "keys" in value && "tenderId" in value;
 }
 
 function isCompanyDocumentJob(
@@ -375,7 +406,8 @@ function isCompanyDocumentJob(
     | RagJob
     | DraftGenerationJob
     | FinalReadinessJob
-    | ControlledPackageJob,
+    | ControlledPackageJob
+    | TenderDocumentCleanupJob,
 ): value is DocumentJob {
   return "documentVersionId" in value;
 }

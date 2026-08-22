@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   extractDeterministicFields,
   extractDeterministicRequirements,
+  normalizeTenderCalendarDate,
   parseTenderDateTime,
   validateCitation,
   type ParsedBlock,
@@ -88,6 +89,47 @@ describe("deterministic extraction policy", () => {
     expect(fields[0]?.normalizedDateValue?.toISOString()).toBe(
       "2026-08-21T00:00:00.000Z",
     );
+  });
+
+  it("preserves the source calendar day when the IST instant crosses into the previous UTC day", () => {
+    expect(parseTenderDateTime("21-08-2026 01:00:00")?.toISOString()).toBe(
+      "2026-08-20T19:30:00.000Z",
+    );
+    expect(
+      normalizeTenderCalendarDate("21-08-2026 01:00:00")?.toISOString(),
+    ).toBe("2026-08-21T00:00:00.000Z");
+  });
+
+  it("handles 12-hour tender times correctly", () => {
+    expect(parseTenderDateTime("21-08-2026 12:30 AM")?.toISOString()).toBe(
+      "2026-08-20T19:00:00.000Z",
+    );
+    expect(parseTenderDateTime("21-08-2026 12:30 PM")?.toISOString()).toBe(
+      "2026-08-21T07:00:00.000Z",
+    );
+  });
+
+  it("rejects impossible calendar dates instead of rolling them forward", () => {
+    expect(parseTenderDateTime("31-02-2026")).toBeNull();
+    expect(parseTenderDateTime("31-04-2026")).toBeNull();
+    expect(parseTenderDateTime("29-02-2025")).toBeNull();
+    expect(normalizeTenderCalendarDate("31-02-2026")).toBeNull();
+  });
+
+  it("accepts valid leap-day and two-digit-year tender dates", () => {
+    expect(parseTenderDateTime("29-02-2028 09:00:00")?.toISOString()).toBe(
+      "2028-02-29T03:30:00.000Z",
+    );
+    expect(
+      normalizeTenderCalendarDate("29-02-28 09:00:00")?.toISOString(),
+    ).toBe("2028-02-29T00:00:00.000Z");
+  });
+
+  it("fails closed on invalid time values", () => {
+    expect(parseTenderDateTime("21-08-2026 24:00:00")).toBeNull();
+    expect(parseTenderDateTime("21-08-2026 09:60:00")).toBeNull();
+    expect(parseTenderDateTime("21-08-2026 12:00 XM")).toBeNull();
+    expect(parseTenderDateTime("21-08-2026 00:30 PM")).toBeNull();
   });
 
   it("rejects invalid citation bounds and accepts a valid anchor", () => {

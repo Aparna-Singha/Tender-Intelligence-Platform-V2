@@ -4,6 +4,7 @@ import {
   GoneException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
   type MessageEvent,
 } from "@nestjs/common";
@@ -41,7 +42,6 @@ import {
   PRISMA_CLIENT,
   S3_CLIENT,
 } from "../infrastructure.tokens.js";
-import { TenderAnalysisOrchestratorService } from "./tender-analysis-orchestrator.service.js";
 import {
   deriveTenderWorkflowState,
   resolveSubmissionDeadline,
@@ -52,12 +52,13 @@ const demonstrationLabel =
 
 @Injectable()
 export class TendersService {
+  private readonly logger = new Logger(TendersService.name);
+
   public constructor(
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(S3_CLIENT) private readonly storage: S3Client,
     @Inject(JOB_QUEUE) private readonly jobs: Queue,
     @Inject(API_ENVIRONMENT) private readonly environment: ApiEnvironment,
-    private readonly orchestrator: TenderAnalysisOrchestratorService,
   ) {}
 
   public async list(organisationId: string, cursor?: string): Promise<unknown> {
@@ -133,15 +134,9 @@ export class TendersService {
   public async get(
     organisationId: string,
     tenderId: string,
-    userId: string,
-    requestId: string,
+    _userId: string,
+    _requestId: string,
   ): Promise<unknown> {
-    await this.orchestrator.ensureCurrentPipeline(
-      organisationId,
-      tenderId,
-      userId,
-      requestId,
-    );
     const tender = await this.database.tender.findFirst({
       include: {
         corrigenda: { orderBy: { ingestedAt: "desc" } },
@@ -785,18 +780,31 @@ export class TendersService {
       resolvedDocument.status === "UPLOADING" &&
       resolvedDocument.uploadSessionExpiresAt <= new Date()
     ) {
-      await this.database.tenderDocument.delete({ where: { id: documentId } });
-      await this.database.auditEvent.create({
-        data: {
-          actorUserId: userId,
-          eventType: "TENDER_UPLOAD_ABANDONED",
-          organisationId,
-          outcome: "SUCCESS",
-          requestId,
-          subjectId: tenderId,
-          subjectType: "tender",
-          metadata: { document_id: resolvedDocument.id, role: resolvedDocument.role },
-        },
+      await this.database.$transaction([
+        this.database.tenderDocument.delete({ where: { id: documentId } }),
+        this.database.auditEvent.create({
+          data: {
+            actorUserId: userId,
+            eventType: "TENDER_UPLOAD_ABANDONED",
+            organisationId,
+            outcome: "SUCCESS",
+            requestId,
+            subjectId: tenderId,
+            subjectType: "tender",
+            metadata: {
+              document_id: resolvedDocument.id,
+              role: resolvedDocument.role,
+            },
+          },
+        }),
+      ]);
+      await this.cleanupRemovedTenderDocument({
+        cleanupReason: "ABANDONED_UPLOAD",
+        documentId: resolvedDocument.id,
+        keys: [resolvedDocument.quarantineObjectKey],
+        organisationId,
+        requestId,
+        tenderId,
       });
       return { removed: true };
     }
@@ -886,20 +894,17 @@ export class TendersService {
         },
       });
     });
-    if (resolvedDocument.approvedObjectKey !== null) {
-      await this.storage.send(
-        new DeleteObjectCommand({
-          Bucket: this.environment.S3_BUCKET,
-          Key: resolvedDocument.approvedObjectKey,
-        }),
-      );
-    }
-    await this.storage.send(
-      new DeleteObjectCommand({
-        Bucket: this.environment.S3_BUCKET,
-        Key: resolvedDocument.quarantineObjectKey,
-      }),
-    );
+    await this.cleanupRemovedTenderDocument({
+      cleanupReason: "READY_SOURCE_REMOVED",
+      documentId: resolvedDocument.id,
+      keys: [
+        resolvedDocument.approvedObjectKey,
+        resolvedDocument.quarantineObjectKey,
+      ],
+      organisationId,
+      requestId,
+      tenderId,
+    });
     return { removed: true };
   }
 
@@ -1198,6 +1203,73 @@ export class TendersService {
     if (count !== 1) throw new NotFoundException();
   }
 
+  private async cleanupRemovedTenderDocument(input: {
+    readonly cleanupReason: "ABANDONED_UPLOAD" | "READY_SOURCE_REMOVED";
+    readonly documentId: string;
+    readonly keys: readonly (string | null)[];
+    readonly organisationId: string;
+    readonly requestId: string;
+    readonly tenderId: string;
+  }): Promise<void> {
+    const keys = input.keys.filter((key): key is string => key !== null);
+    if (keys.length === 0) return;
+    try {
+      await this.deleteTenderObjectsNow(keys);
+      return;
+    } catch (error: unknown) {
+      try {
+        await this.jobs.add(
+          "cleanup-tender-document-storage",
+          {
+            documentId: input.documentId,
+            keys,
+            organisationId: input.organisationId,
+            requestId: input.requestId,
+            tenderId: input.tenderId,
+          },
+          {
+            attempts: 10,
+            backoff: { delay: 1_000, type: "exponential" },
+            jobId: `cleanup-tender-document-${input.cleanupReason}-${input.documentId}`,
+            removeOnComplete: 100,
+          },
+        );
+      } catch (queueError: unknown) {
+        this.logger.error(
+          {
+            cleanupReason: input.cleanupReason,
+            documentId: input.documentId,
+            keys,
+            organisationId: input.organisationId,
+            queueError:
+              queueError instanceof Error
+                ? queueError.message
+                : String(queueError),
+            storageError:
+              error instanceof Error ? error.message : String(error),
+            tenderId: input.tenderId,
+          },
+          "Tender storage cleanup could not be queued after an immediate cleanup failure",
+        );
+      }
+    }
+  }
+
+  private async deleteTenderObjectsNow(keys: readonly string[]): Promise<void> {
+    for (const key of keys) {
+      try {
+        await this.storage.send(
+          new DeleteObjectCommand({
+            Bucket: this.environment.S3_BUCKET,
+            Key: key,
+          }),
+        );
+      } catch (error: unknown) {
+        if (!isMissingObjectError(error)) throw error;
+      }
+    }
+  }
+
   private async decorateTenders<
     TTender extends {
       readonly buyer: string;
@@ -1299,7 +1371,7 @@ export class TendersService {
               tenderId: true,
             },
             where: {
-              currentVersionId: { in: versionIds },
+              currentVersionId: { not: null },
               deletedAt: null,
               lifecycle: "ACTIVE",
               tenderId: { in: tenderIds },
@@ -1321,6 +1393,24 @@ export class TendersService {
             },
           }),
     ]);
+    const currentDraftVersionIds = drafts
+      .map((draft) => draft.currentVersionId)
+      .filter((id): id is string => id !== null);
+    const currentDraftVersions =
+      currentDraftVersionIds.length === 0
+        ? []
+        : await this.database.draftVersion.findMany({
+            select: {
+              tenderId: true,
+              tenderVersionId: true,
+            },
+            where: {
+              id: { in: currentDraftVersionIds },
+              invalidatedAt: null,
+              tenderId: { in: tenderIds },
+              tenderVersionId: { in: versionIds },
+            },
+          });
     const deadlineByExtractionRunId = new Map<string, string | null>();
     deadlineFields.forEach((field) => {
       if (!deadlineByExtractionRunId.has(field.extractionRunId)) {
@@ -1337,7 +1427,10 @@ export class TendersService {
       }
     });
     const draftKeys = new Set(
-      drafts.map((draft) => `${draft.tenderId}:${draft.currentVersionId}`),
+      currentDraftVersions.map(
+        (draftVersion) =>
+          `${draftVersion.tenderId}:${draftVersion.tenderVersionId}`,
+      ),
     );
     const draftRunByVersionKey = new Map<string, string>();
     draftRuns.forEach((run) => {
@@ -1397,4 +1490,23 @@ export class TendersService {
       };
     });
   }
+}
+
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as {
+    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
+    readonly code?: string;
+    readonly name?: string;
+  };
+  return (
+    candidate.name === "NoSuchKey" ||
+    candidate.name === "NotFound" ||
+    candidate.code === "NoSuchKey" ||
+    candidate.code === "NotFound" ||
+    candidate.Code === "NoSuchKey" ||
+    candidate.Code === "NotFound" ||
+    candidate.$metadata?.httpStatusCode === 404
+  );
 }

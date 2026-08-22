@@ -31,16 +31,34 @@ describe("company docs workspace", () => {
             displayName: "PAN copy",
             expiryDate: null,
             id: "doc-2",
-            status: "QUARANTINED",
+            status: "READY",
             updatedAt: "2026-08-18T10:00:00.000Z",
-            verificationStatus: "PENDING_REVIEW",
+            verificationStatus: "HUMAN_REVIEW_REQUIRED",
           },
           {
             category: "ISO_CERTIFICATE",
             displayName: "ISO certificate",
-            expiryDate: "2026-08-01T00:00:00.000Z",
+            expiryDate: null,
             id: "doc-3",
             status: "READY",
+            updatedAt: "2026-08-17T10:00:00.000Z",
+            verificationStatus: "UNVERIFIED",
+          },
+          {
+            category: "LICENCE",
+            displayName: "Factory licence",
+            expiryDate: null,
+            id: "doc-4",
+            status: "READY",
+            updatedAt: "2026-08-16T10:00:00.000Z",
+            verificationStatus: "REJECTED",
+          },
+          {
+            category: "PURCHASE_ORDER",
+            displayName: "Purchase order",
+            expiryDate: null,
+            id: "doc-5",
+            status: "QUARANTINED",
             updatedAt: "2026-08-15T10:00:00.000Z",
             verificationStatus: "VERIFIED",
           },
@@ -52,21 +70,40 @@ describe("company docs workspace", () => {
 
   it("renames the surface to Company documents and derives health counts from real document state", async () => {
     render(<DocumentCentre organisationId="org-1" />);
-    expect(await screen.findByRole("heading", { name: "Company documents" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Company documents" }),
+    ).toBeInTheDocument();
     const summaryGrid = screen.getByText("Current").closest(".tender-summary-grid");
     expect(summaryGrid).toBeInstanceOf(HTMLElement);
     if (!(summaryGrid instanceof HTMLElement)) {
       throw new Error("Expected health summary grid to render");
     }
     const summary = within(summaryGrid);
-    expect(summary.getByText("Current")).toBeInTheDocument();
-    expect(summary.getByText("Need attention")).toBeInTheDocument();
-    expect(summary.getByText("Expiring soon")).toBeInTheDocument();
-    expect(summary.getByText("Outdated")).toBeInTheDocument();
-    expect(summary.getAllByText("1", { selector: "strong" })).toHaveLength(4);
-    expect(screen.getByText(/Evidence health needs review|Expiry review coming up/)).toBeInTheDocument();
+    const currentCard = summary.getByText("Current").closest("div");
+    const attentionCard = summary.getByText("Need attention").closest("div");
+    const expiringCard = summary.getByText("Expiring soon").closest("div");
+    const outdatedCard = summary.getByText("Outdated").closest("div");
+    const tableCard = screen.getByRole("table").closest(".company-docs-table-card");
+    expect(currentCard).toHaveTextContent("1");
+    expect(attentionCard).toHaveTextContent("4");
+    expect(expiringCard).toHaveTextContent("1");
+    expect(outdatedCard).toHaveTextContent("0");
+    expect(
+      screen.getByText(/Evidence health needs review|Expiry review coming up/),
+    ).toBeInTheDocument();
     expect(screen.getByText("All documents")).toBeInTheDocument();
     expect(screen.getByText("GST certificate")).toBeInTheDocument();
+    expect(tableCard).toBeInstanceOf(HTMLElement);
+    if (!(tableCard instanceof HTMLElement)) {
+      throw new Error("Expected document table card to render");
+    }
+    const table = within(tableCard);
+    expect(table.getByText("Factory licence")).toBeInTheDocument();
+    expect(table.getAllByText("Purchase order").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("Human review required")).toBeInTheDocument();
+    expect(screen.getByText("Unverified")).toBeInTheDocument();
+    expect(screen.getByText("Rejected")).toBeInTheDocument();
+    expect(table.getByText("Quarantined")).toBeInTheDocument();
   });
 
   it("shows truthful supported-type guidance in the upload modal", async () => {

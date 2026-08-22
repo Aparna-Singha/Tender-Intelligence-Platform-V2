@@ -257,7 +257,7 @@ export function extractDeterministicFields(
   const patterns: readonly [string, RegExp][] = [
     [
       "SUBMISSION_DEADLINE",
-      /\b(?:submission|bid)\s+(?:deadline|end\s+date(?:\/time)?)\s*[:\-]?\s*([^\n.;]{4,100})/iu,
+      /\b(?:submission|bid)\s+(?:deadline|end\s+date(?:\/time)?)\s*[:-]?\s*([^\n.;]{4,100})/iu,
     ],
     ["EMD_WORDING", /\b(?:emd|bid security)\s*[:-]\s*([^\n.;]{2,200})/iu],
     [
@@ -274,19 +274,17 @@ export function extractDeterministicFields(
       const match = pattern.exec(block.text);
       if (match?.[1] === undefined) return [];
       const normalizedTextValue = match[1].trim();
+      const normalizedDateValue =
+        fieldType === "SUBMISSION_DEADLINE"
+          ? normalizeTenderCalendarDate(normalizedTextValue)
+          : null;
       return [
         {
           anchor: anchorFor(block),
           confidence: block.confidence,
           fieldType,
           findingState: "FOUND",
-          ...(fieldType === "SUBMISSION_DEADLINE"
-            ? {
-                normalizedDateValue:
-                  normalizeTenderCalendarDate(normalizedTextValue) ??
-                  undefined,
-              }
-            : {}),
+          ...(normalizedDateValue === null ? {} : { normalizedDateValue }),
           normalizedTextValue,
           sourceWording: block.text,
         },
@@ -296,13 +294,53 @@ export function extractDeterministicFields(
 }
 
 const INDIA_TIMEZONE_OFFSET_MINUTES = 330;
+const TENDER_DATE_TIME_PATTERN =
+  /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM)?)?$/iu;
+
+interface ParsedTenderDateTimeParts {
+  readonly day: number;
+  readonly hour: number;
+  readonly minute: number;
+  readonly month: number;
+  readonly second: number;
+  readonly year: number;
+}
 
 export function parseTenderDateTime(value: string): Date | null {
+  const parsedParts = parseTenderDateTimeParts(value);
+  if (parsedParts === null) return null;
+  const utcMilliseconds =
+    Date.UTC(
+      parsedParts.year,
+      parsedParts.month - 1,
+      parsedParts.day,
+      parsedParts.hour,
+      parsedParts.minute,
+      parsedParts.second,
+    ) -
+    INDIA_TIMEZONE_OFFSET_MINUTES * 60_000;
+  const parsed = new Date(utcMilliseconds);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+export function normalizeTenderCalendarDate(value: string): Date | null {
+  const parsedParts = parseTenderDateTimeParts(value);
+  if (parsedParts === null) return null;
+  return new Date(
+    Date.UTC(
+      parsedParts.year,
+      parsedParts.month - 1,
+      parsedParts.day,
+    ),
+  );
+}
+
+function parseTenderDateTimeParts(
+  value: string,
+): ParsedTenderDateTimeParts | null {
   const normalized = value.replace(/\s+/g, " ").trim();
-  const match =
-    /(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM)?)?/iu.exec(
-      normalized,
-    );
+  const match = TENDER_DATE_TIME_PATTERN.exec(normalized);
   if (match === null) return null;
   const day = Number(match[1]);
   const month = Number(match[2]);
@@ -316,9 +354,13 @@ export function parseTenderDateTime(value: string): Date | null {
     !Number.isInteger(day) ||
     !Number.isInteger(month) ||
     !Number.isInteger(year) ||
+    !Number.isInteger(hour) ||
+    !Number.isInteger(minute) ||
+    !Number.isInteger(second) ||
     day < 1 ||
     month < 1 ||
     month > 12 ||
+    !isValidCalendarDate(year, month, day) ||
     minute < 0 ||
     minute > 59 ||
     second < 0 ||
@@ -333,24 +375,29 @@ export function parseTenderDateTime(value: string): Date | null {
   } else if (hour < 0 || hour > 23) {
     return null;
   }
-  const utcMilliseconds =
-    Date.UTC(year, month - 1, day, hour, minute, second) -
-    INDIA_TIMEZONE_OFFSET_MINUTES * 60_000;
-  const parsed = new Date(utcMilliseconds);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return parsed;
+  return { day, hour, minute, month, second, year };
 }
 
-export function normalizeTenderCalendarDate(value: string): Date | null {
-  const parsed = parseTenderDateTime(value);
-  if (parsed === null) return null;
-  return new Date(
-    Date.UTC(
-      parsed.getUTCFullYear(),
-      parsed.getUTCMonth(),
-      parsed.getUTCDate(),
-    ),
-  );
+function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  const daysInMonth = [
+    31,
+    isLeapYear(year) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return day <= daysInMonth[month - 1]!;
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 400 === 0 || (year % 4 === 0 && year % 100 !== 0);
 }
 
 export function validateCitation(

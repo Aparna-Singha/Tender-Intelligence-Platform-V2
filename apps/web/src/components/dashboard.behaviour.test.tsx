@@ -219,6 +219,12 @@ describe("dashboard home parity behavior", () => {
     expect(tendersSection).not.toBeNull();
     expect(within(tendersSection!).getByRole("button", { name: "All 2" })).toBeInTheDocument();
     expect(
+      within(tendersSection!).getByRole("button", { name: "Active 2" }),
+    ).toBeInTheDocument();
+    expect(
+      within(tendersSection!).getByRole("button", { name: "Completed 0" }),
+    ).toBeInTheDocument();
+    expect(
       within(tendersSection!).getByRole("button", { name: "In progress 0" }),
     ).toBeInTheDocument();
 

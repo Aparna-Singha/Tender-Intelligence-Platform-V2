@@ -139,7 +139,7 @@ function verificationTone(
 ): "neutral" | "info" | "success" | "warning" | "danger" {
   if (status === "VERIFIED") return "success";
   if (status === "REJECTED") return "danger";
-  if (status === "PENDING_REVIEW") return "warning";
+  if (status === "HUMAN_REVIEW_REQUIRED") return "warning";
   return "neutral";
 }
 
@@ -161,10 +161,12 @@ function documentHealth(document: DocumentSummary): {
   const expiringSoon = !outdated && isExpiringSoon(document.expiryDate);
   const needsAttention =
     ["FAILED", "REJECTED", "QUARANTINED"].includes(document.status) ||
-    document.verificationStatus === "REJECTED";
+    ["HUMAN_REVIEW_REQUIRED", "REJECTED", "UNVERIFIED"].includes(
+      document.verificationStatus,
+    );
   const current =
     document.status === "READY" &&
-    document.verificationStatus !== "REJECTED" &&
+    document.verificationStatus === "VERIFIED" &&
     !outdated;
   return { current, expiringSoon, needsAttention, outdated };
 }
@@ -470,12 +472,12 @@ export function DocumentCentre({
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Current</span>
           <strong>{healthSummary.current}</strong>
-          <p>Ready documents without expired validity and without rejected review state.</p>
+          <p>Ready documents with verified review state and without expired validity.</p>
         </Card>
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Need attention</span>
           <strong>{healthSummary.needsAttention}</strong>
-          <p>Processing failures, quarantine, or rejected verification status.</p>
+          <p>Processing failures, quarantine, or verification states that still need review.</p>
         </Card>
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Expiring soon</span>

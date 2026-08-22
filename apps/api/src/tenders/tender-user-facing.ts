@@ -1,3 +1,5 @@
+import { parseTenderDateTime } from "@tender/domain";
+
 export type WorkflowTone =
   | "accent"
   | "danger"
@@ -386,7 +388,7 @@ export function deriveTenderWorkflowState(
       code: "REVIEW_READY",
       detail:
         "A current draft is ready for human review and controlled export steps.",
-      isCompleted: true,
+      isCompleted: false,
       isDraft: true,
       isInProgress: false,
       needsAttention: true,
@@ -401,7 +403,7 @@ export function deriveTenderWorkflowState(
     code: "ANALYSIS_READY",
     detail:
       "Tender analysis is ready. Review eligibility and move into drafting when the team is ready.",
-    isCompleted: true,
+    isCompleted: false,
     isDraft: false,
     isInProgress: false,
     needsAttention: false,
@@ -420,43 +422,4 @@ function isExpiredUpload(document: CurrentDocumentSummary): boolean {
 
 function isUploading(document: CurrentDocumentSummary): boolean {
   return document.status === "UPLOADING" && !isExpiredUpload(document);
-}
-
-function parseTenderDateTime(value: string): Date | null {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  const match =
-    /(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM)?)?/iu.exec(
-      normalized,
-    );
-  if (match === null) return null;
-  const day = Number(match[1]);
-  const month = Number(match[2]);
-  const rawYear = Number(match[3]);
-  const year = match[3]?.length === 2 ? 2000 + rawYear : rawYear;
-  let hour = Number(match[4] ?? "0");
-  const minute = Number(match[5] ?? "0");
-  const second = Number(match[6] ?? "0");
-  const meridiem = match[7]?.toUpperCase() ?? null;
-  if (
-    day < 1 ||
-    month < 1 ||
-    month > 12 ||
-    minute < 0 ||
-    minute > 59 ||
-    second < 0 ||
-    second > 59
-  ) {
-    return null;
-  }
-  if (meridiem !== null) {
-    if (hour < 1 || hour > 12) return null;
-    if (meridiem === "PM" && hour !== 12) hour += 12;
-    if (meridiem === "AM" && hour === 12) hour = 0;
-  } else if (hour < 0 || hour > 23) {
-    return null;
-  }
-  const utcMilliseconds =
-    Date.UTC(year, month - 1, day, hour, minute, second) - 330 * 60_000;
-  const parsed = new Date(utcMilliseconds);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
 }

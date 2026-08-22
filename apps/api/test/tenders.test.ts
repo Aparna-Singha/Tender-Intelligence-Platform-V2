@@ -9,10 +9,6 @@ const environment = {
   S3_BUCKET: "private-test",
 } as never;
 
-const orchestrator = {
-  ensureCurrentPipeline: vi.fn().mockResolvedValue(undefined),
-} as never;
-
 beforeEach(() => {
   vi.clearAllMocks();
 });
@@ -27,7 +23,6 @@ describe("tender workspace tenant isolation", () => {
       {} as never,
       {} as never,
       environment,
-      orchestrator,
     );
     await expect(
       service.get("organisation-b", "tender-a", "user-a", "request-a"),
@@ -43,6 +38,87 @@ describe("tender workspace tenant isolation", () => {
     );
   });
 
+  it("reads the persisted tender state without starting workflow orchestration", async () => {
+    const workflowStartWrite = vi.fn();
+    const database = {
+      auditEvent: { create: vi.fn() },
+      checklistGenerationRun: { create: workflowStartWrite },
+      draft: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
+      earlyPursuitDecision: { findMany: vi.fn().mockResolvedValue([]) },
+      eligibilityAssessmentRun: { create: workflowStartWrite },
+      extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
+      extractionRun: { create: workflowStartWrite },
+      processingJob: {
+        create: workflowStartWrite,
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      ragIndexRun: { create: workflowStartWrite },
+      riskAnalysisRun: { create: workflowStartWrite },
+      tender: {
+        findFirst: vi.fn().mockResolvedValue({
+          buyer: "Buyer department",
+          corrigenda: [],
+          currentVersion: {
+            activeEarlyRiskRun: null,
+            activeEligibilityAssessmentRun: null,
+            activeExtractionRun: null,
+            documents: [
+              {
+                role: "PRIMARY",
+                status: "READY",
+                uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+              },
+            ],
+            id: "version-current",
+          },
+          currentVersionId: "version-current",
+          id: "tender-a",
+          isDemonstration: false,
+          lifecycleStatus: "SOURCE_READY",
+          sources: [],
+          submissionDeadline: null,
+          title: "Overload relay and its accessories",
+          versions: [
+            {
+              documents: [],
+              id: "version-current",
+              reason: "Original tender source",
+              versionNumber: 1,
+            },
+          ],
+          workspace: {
+            id: "workspace-a",
+            processingProgress: 100,
+            sourceSectionStatus: "READY",
+          },
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.get(
+      "organisation-a",
+      "tender-a",
+      "reader-user",
+      "request-a",
+    )) as {
+      readonly id: string;
+      readonly workflowState: { readonly code: string };
+    };
+
+    expect(result.id).toBe("tender-a");
+    expect(result.workflowState.code).toBe("EXTRACTING");
+    expect(workflowStartWrite).not.toHaveBeenCalled();
+    expect(database.auditEvent.create).not.toHaveBeenCalled();
+  });
+
   it("does not sign quarantined or cross-tenant source files", async () => {
     const database = {
       tenderDocument: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -53,7 +129,6 @@ describe("tender workspace tenant isolation", () => {
       storage as never,
       {} as never,
       environment,
-      orchestrator,
     );
     await expect(
       service.download(
@@ -77,12 +152,18 @@ describe("tender workspace tenant isolation", () => {
   });
 
   it("removes only an expired abandoned upload", async () => {
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const storage = { send: vi.fn().mockResolvedValue(undefined) };
     const database = {
+      $transaction: vi.fn(async (operations: readonly Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
       auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
       tenderDocument: {
         delete: vi.fn().mockResolvedValue(undefined),
         findFirst: vi.fn().mockResolvedValue({
           id: "document-a",
+          quarantineObjectKey: "quarantine/object-key",
           role: "PRIMARY",
           sha256:
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -93,10 +174,9 @@ describe("tender workspace tenant isolation", () => {
     };
     const service = new TendersService(
       database as never,
-      {} as never,
-      {} as never,
+      storage as never,
+      jobs as never,
       environment,
-      orchestrator,
     );
 
     await expect(
@@ -134,6 +214,110 @@ describe("tender workspace tenant isolation", () => {
         subjectType: "tender",
       },
     });
+    expect(storage.send).toHaveBeenCalledWith(expect.any(DeleteObjectCommand));
+    expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("treats a missing quarantine object as idempotent abandoned-upload cleanup success", async () => {
+    const jobs = { add: vi.fn() };
+    const storage = {
+      send: vi.fn().mockRejectedValueOnce({
+        $metadata: { httpStatusCode: 404 },
+        name: "NoSuchKey",
+      }),
+    };
+    const database = {
+      $transaction: vi.fn(async (operations: readonly Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      tenderDocument: {
+        delete: vi.fn().mockResolvedValue(undefined),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "document-a",
+          quarantineObjectKey: "quarantine/object-key",
+          role: "PRIMARY",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          status: "UPLOADING",
+          uploadSessionExpiresAt: new Date("2026-08-20T09:35:00.000Z"),
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    await expect(
+      service.abandonUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual({ removed: true });
+
+    expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("queues exact-key cleanup when abandoned-upload storage deletion fails immediately", async () => {
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const storage = {
+      send: vi.fn().mockRejectedValueOnce(new Error("S3 unavailable")),
+    };
+    const database = {
+      $transaction: vi.fn(async (operations: readonly Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      tenderDocument: {
+        delete: vi.fn().mockResolvedValue(undefined),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "document-a",
+          quarantineObjectKey: "quarantine/object-key",
+          role: "PRIMARY",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          status: "UPLOADING",
+          uploadSessionExpiresAt: new Date("2026-08-20T09:35:00.000Z"),
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    await expect(
+      service.abandonUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual({ removed: true });
+
+    expect(jobs.add).toHaveBeenCalledWith(
+      "cleanup-tender-document-storage",
+      {
+        documentId: "document-a",
+        keys: ["quarantine/object-key"],
+        organisationId: "organisation-a",
+        requestId: "request-a",
+        tenderId: "tender-a",
+      },
+      expect.objectContaining({
+        attempts: 10,
+        jobId: "cleanup-tender-document-ABANDONED_UPLOAD-document-a",
+      }),
+    );
   });
 
   it("refuses to remove a non-expired or already-processed upload", async () => {
@@ -155,7 +339,6 @@ describe("tender workspace tenant isolation", () => {
       {} as never,
       {} as never,
       environment,
-      orchestrator,
     );
 
     await expect(
@@ -173,9 +356,11 @@ describe("tender workspace tenant isolation", () => {
 
   it("removes a current single-source ready document by creating a new empty version and invalidating the current source set", async () => {
     const storage = { send: vi.fn().mockResolvedValue(undefined) };
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
     const database = {
-      $transaction: vi.fn(async (callback: (tx: typeof transaction) => Promise<unknown>) =>
-        callback(transaction),
+      $transaction: vi.fn(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
       ),
       auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
       tenderDocument: {
@@ -234,9 +419,8 @@ describe("tender workspace tenant isolation", () => {
     const service = new TendersService(
       database as never,
       storage as never,
-      {} as never,
+      jobs as never,
       environment,
-      orchestrator,
     );
 
     await expect(
@@ -301,6 +485,97 @@ describe("tender workspace tenant isolation", () => {
       2,
       expect.any(DeleteObjectCommand),
     );
+    expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("keeps the authoritative ready-source removal after an immediate storage failure and queues cleanup retries", async () => {
+    const storage = {
+      send: vi.fn().mockRejectedValueOnce(new Error("temporary MinIO failure")),
+    };
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const database = {
+      $transaction: vi.fn(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+      tenderDocument: {
+        count: vi.fn().mockResolvedValue(1),
+        findFirst: vi.fn().mockResolvedValue({
+          approvedObjectKey: "approved/object-key",
+          createdAt: new Date("2026-08-20T09:30:00.000Z"),
+          declaredMimeType: "application/pdf",
+          detectedMimeType: "application/pdf",
+          displayFilename: "GeM-Bidding-9646270.pdf",
+          extension: ".pdf",
+          id: "document-a",
+          originalFilename: "GeM-Bidding-9646270.pdf",
+          provenance: "Direct upload",
+          quarantineObjectKey: "quarantine/object-key",
+          role: "PRIMARY",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          sizeBytes: BigInt(1024),
+          status: "READY",
+          tenderVersionId: "version-a",
+          uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+          uploadedByUserId: "user-a",
+          tenderVersion: {
+            createdByUserId: "user-a",
+            previousVersionId: null,
+            reason: "Original tender source",
+            sourceFingerprint: "fingerprint-a",
+            sourceProvenance: "Manual upload",
+            sourceSnapshot: { buyer: "Buyer" },
+            tender: { currentVersionId: "version-a" },
+            versionNumber: 1,
+          },
+        }),
+      },
+    };
+    const transaction = {
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      tender: { update: vi.fn().mockResolvedValue(undefined) },
+      tenderDocument: { update: vi.fn().mockResolvedValue(undefined) },
+      tenderVersion: {
+        create: vi.fn().mockResolvedValue({ id: "version-b" }),
+      },
+      tenderWorkspace: { update: vi.fn().mockResolvedValue(undefined) },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    await expect(
+      service.abandonUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual({ removed: true });
+
+    expect(transaction.tender.update).toHaveBeenCalledWith({
+      data: { currentVersionId: "version-b", lifecycleStatus: "DRAFT" },
+      where: { id: "tender-a" },
+    });
+    expect(jobs.add).toHaveBeenCalledWith(
+      "cleanup-tender-document-storage",
+      {
+        documentId: "document-a",
+        keys: ["approved/object-key", "quarantine/object-key"],
+        organisationId: "organisation-a",
+        requestId: "request-a",
+        tenderId: "tender-a",
+      },
+      expect.objectContaining({
+        attempts: 10,
+        jobId: "cleanup-tender-document-READY_SOURCE_REMOVED-document-a",
+      }),
+    );
   });
 
   it("refuses to remove a ready document when the current source set contains multiple documents", async () => {
@@ -345,7 +620,6 @@ describe("tender workspace tenant isolation", () => {
       {} as never,
       {} as never,
       environment,
-      orchestrator,
     );
 
     await expect(
@@ -362,6 +636,7 @@ describe("tender workspace tenant isolation", () => {
   it("returns only processing jobs for the current tender version", async () => {
     const database = {
       draft: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: { findMany: vi.fn().mockResolvedValue([]) },
       draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
       earlyPursuitDecision: { findMany: vi.fn().mockResolvedValue([]) },
       extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
@@ -421,7 +696,6 @@ describe("tender workspace tenant isolation", () => {
       {} as never,
       {} as never,
       environment,
-      orchestrator,
     );
 
     const result = (await service.get(
@@ -459,9 +733,450 @@ describe("tender workspace tenant isolation", () => {
     ]);
   });
 
+  it("treats a current active draft version on the current tender version as review-ready", async () => {
+    const database = {
+      draft: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            currentVersionId: "draft-version-current",
+            tenderId: "tender-a",
+          },
+        ]),
+      },
+      draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            tenderId: "tender-a",
+            tenderVersionId: "version-current",
+          },
+        ]),
+      },
+      earlyPursuitDecision: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            decision: "CONTINUE",
+            riskAnalysisRunId: "risk-current",
+          },
+        ]),
+      },
+      extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
+      processingJob: { findMany: vi.fn().mockResolvedValue([]) },
+      tender: {
+        findFirst: vi.fn().mockResolvedValue({
+          buyer: "Buyer department",
+          corrigenda: [],
+          currentVersion: {
+            activeEarlyRiskRun: {
+              id: "risk-current",
+              invalidatedAt: null,
+              publicMessage: "Early cited risk analysis complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            activeEligibilityAssessmentRun: {
+              invalidatedAt: null,
+              publicMessage: "Eligibility comparison complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            activeExtractionRun: {
+              id: "extract-current",
+              invalidatedAt: null,
+              publicMessage: "Extraction complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            documents: [
+              {
+                role: "PRIMARY",
+                status: "READY",
+                uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+              },
+            ],
+            id: "version-current",
+          },
+          currentVersionId: "version-current",
+          id: "tender-a",
+          isDemonstration: false,
+          lifecycleStatus: "SOURCE_READY",
+          sources: [],
+          submissionDeadline: null,
+          title: "Overload relay and its accessories",
+          versions: [
+            {
+              documents: [],
+              id: "version-current",
+              reason: "Original tender source",
+              versionNumber: 1,
+            },
+          ],
+          workspace: {
+            id: "workspace-a",
+            processingProgress: 100,
+            sourceSectionStatus: "READY",
+          },
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.get(
+      "organisation-a",
+      "tender-a",
+      "user-a",
+      "request-a",
+    )) as {
+      workflowState: {
+        readonly code: string;
+        readonly isCompleted: boolean;
+        readonly statusLabel: string;
+      };
+    };
+
+    expect(database.draft.findMany).toHaveBeenCalledWith({
+      select: {
+        currentVersionId: true,
+        tenderId: true,
+      },
+      where: {
+        currentVersionId: { not: null },
+        deletedAt: null,
+        lifecycle: "ACTIVE",
+        tenderId: { in: ["tender-a"] },
+      },
+    });
+    expect(database.draftVersion.findMany).toHaveBeenCalledWith({
+      select: {
+        tenderId: true,
+        tenderVersionId: true,
+      },
+      where: {
+        id: { in: ["draft-version-current"] },
+        invalidatedAt: null,
+        tenderId: { in: ["tender-a"] },
+        tenderVersionId: { in: ["version-current"] },
+      },
+    });
+    expect(result.workflowState).toMatchObject({
+      isCompleted: false,
+      code: "REVIEW_READY",
+      statusLabel: "Ready for review",
+    });
+  });
+
+  it("does not count a current active draft version that belongs to an older tender version", async () => {
+    const database = {
+      draft: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            currentVersionId: "draft-version-old",
+            tenderId: "tender-a",
+          },
+        ]),
+      },
+      draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      earlyPursuitDecision: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            decision: "CONTINUE",
+            riskAnalysisRunId: "risk-current",
+          },
+        ]),
+      },
+      extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
+      processingJob: { findMany: vi.fn().mockResolvedValue([]) },
+      tender: {
+        findFirst: vi.fn().mockResolvedValue({
+          buyer: "Buyer department",
+          corrigenda: [],
+          currentVersion: {
+            activeEarlyRiskRun: {
+              id: "risk-current",
+              invalidatedAt: null,
+              publicMessage: "Early cited risk analysis complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            activeEligibilityAssessmentRun: {
+              invalidatedAt: null,
+              publicMessage: "Eligibility comparison complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            activeExtractionRun: {
+              id: "extract-current",
+              invalidatedAt: null,
+              publicMessage: "Extraction complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            documents: [
+              {
+                role: "PRIMARY",
+                status: "READY",
+                uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+              },
+            ],
+            id: "version-current",
+          },
+          currentVersionId: "version-current",
+          id: "tender-a",
+          isDemonstration: false,
+          lifecycleStatus: "SOURCE_READY",
+          sources: [],
+          submissionDeadline: null,
+          title: "Overload relay and its accessories",
+          versions: [
+            {
+              documents: [],
+              id: "version-current",
+              reason: "Corrigendum 1",
+              versionNumber: 2,
+            },
+            {
+              documents: [],
+              id: "version-old",
+              reason: "Original tender source",
+              versionNumber: 1,
+            },
+          ],
+          workspace: {
+            id: "workspace-a",
+            processingProgress: 100,
+            sourceSectionStatus: "READY",
+          },
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.get(
+      "organisation-a",
+      "tender-a",
+      "user-a",
+      "request-a",
+    )) as {
+      workflowState: {
+        readonly code: string;
+        readonly isCompleted: boolean;
+        readonly statusLabel: string;
+      };
+    };
+
+    expect(database.draftVersion.findMany).toHaveBeenCalledWith({
+      select: {
+        tenderId: true,
+        tenderVersionId: true,
+      },
+      where: {
+        id: { in: ["draft-version-old"] },
+        invalidatedAt: null,
+        tenderId: { in: ["tender-a"] },
+        tenderVersionId: { in: ["version-current"] },
+      },
+    });
+    expect(result.workflowState).toMatchObject({
+      code: "ANALYSIS_READY",
+      isCompleted: false,
+      statusLabel: "Analysis ready",
+    });
+  });
+
+  it("does not report review-ready when no current draft exists", async () => {
+    const database = {
+      draft: { findMany: vi.fn().mockResolvedValue([]) },
+      draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      earlyPursuitDecision: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            decision: "CONTINUE",
+            riskAnalysisRunId: "risk-current",
+          },
+        ]),
+      },
+      extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
+      processingJob: { findMany: vi.fn().mockResolvedValue([]) },
+      tender: {
+        findFirst: vi.fn().mockResolvedValue({
+          buyer: "Buyer department",
+          corrigenda: [],
+          currentVersion: {
+            activeEarlyRiskRun: {
+              id: "risk-current",
+              invalidatedAt: null,
+              publicMessage: "Early cited risk analysis complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            activeEligibilityAssessmentRun: {
+              invalidatedAt: null,
+              publicMessage: "Eligibility comparison complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            activeExtractionRun: {
+              id: "extract-current",
+              invalidatedAt: null,
+              publicMessage: "Extraction complete",
+              safeFailureMessage: null,
+              status: "COMPLETE",
+            },
+            documents: [
+              {
+                role: "PRIMARY",
+                status: "READY",
+                uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+              },
+            ],
+            id: "version-current",
+          },
+          currentVersionId: "version-current",
+          id: "tender-a",
+          isDemonstration: false,
+          lifecycleStatus: "SOURCE_READY",
+          sources: [],
+          submissionDeadline: null,
+          title: "Overload relay and its accessories",
+          versions: [
+            {
+              documents: [],
+              id: "version-current",
+              reason: "Original tender source",
+              versionNumber: 1,
+            },
+          ],
+          workspace: {
+            id: "workspace-a",
+            processingProgress: 100,
+            sourceSectionStatus: "READY",
+          },
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.get(
+      "organisation-a",
+      "tender-a",
+      "user-a",
+      "request-a",
+    )) as {
+      workflowState: {
+        readonly code: string;
+        readonly isCompleted: boolean;
+        readonly statusLabel: string;
+      };
+    };
+
+    expect(database.draftVersion.findMany).not.toHaveBeenCalled();
+    expect(result.workflowState).toMatchObject({
+      code: "ANALYSIS_READY",
+      isCompleted: false,
+      statusLabel: "Analysis ready",
+    });
+  });
+
+  it("does not mark failed workflow states as completed", async () => {
+    const database = {
+      draft: { findMany: vi.fn().mockResolvedValue([]) },
+      draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: { findMany: vi.fn().mockResolvedValue([]) },
+      earlyPursuitDecision: { findMany: vi.fn().mockResolvedValue([]) },
+      extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
+      processingJob: {
+        findMany: vi.fn().mockResolvedValue([
+          { publicMessage: "Upload needs attention.", state: "FAILED" },
+        ]),
+      },
+      tender: {
+        findFirst: vi.fn().mockResolvedValue({
+          buyer: "Buyer department",
+          corrigenda: [],
+          currentVersion: {
+            activeEarlyRiskRun: null,
+            activeEligibilityAssessmentRun: null,
+            activeExtractionRun: null,
+            documents: [
+              {
+                role: "PRIMARY",
+                status: "READY",
+                uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+              },
+            ],
+            id: "version-current",
+          },
+          currentVersionId: "version-current",
+          id: "tender-a",
+          isDemonstration: false,
+          lifecycleStatus: "SOURCE_READY",
+          sources: [],
+          submissionDeadline: null,
+          title: "Overload relay and its accessories",
+          versions: [
+            {
+              documents: [],
+              id: "version-current",
+              reason: "Original tender source",
+              versionNumber: 1,
+            },
+          ],
+          workspace: {
+            id: "workspace-a",
+            processingProgress: 100,
+            sourceSectionStatus: "FAILED",
+          },
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.get(
+      "organisation-a",
+      "tender-a",
+      "user-a",
+      "request-a",
+    )) as {
+      workflowState: {
+        readonly code: string;
+        readonly isCompleted: boolean;
+        readonly statusLabel: string;
+      };
+    };
+
+    expect(result.workflowState).toMatchObject({
+      code: "FAILED_RECOVERABLE",
+      isCompleted: false,
+      statusLabel: "Source processing failed",
+    });
+  });
+
   it("prefers the source-extracted deadline and exposes the shared workflow state", async () => {
     const database = {
       draft: { findMany: vi.fn().mockResolvedValue([]) },
+      draftVersion: { findMany: vi.fn().mockResolvedValue([]) },
       draftGenerationRun: { findMany: vi.fn().mockResolvedValue([]) },
       earlyPursuitDecision: { findMany: vi.fn().mockResolvedValue([]) },
       extractedTenderField: {
@@ -530,7 +1245,6 @@ describe("tender workspace tenant isolation", () => {
       {} as never,
       {} as never,
       environment,
-      orchestrator,
     );
 
     const result = (await service.get(

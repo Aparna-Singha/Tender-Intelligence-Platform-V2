@@ -72,6 +72,13 @@ function hasAny(value: string, candidates: readonly string[]): boolean {
   return candidates.some((candidate) => value.includes(candidate));
 }
 
+function authoritativeLifecycleLabel(
+  lifecycle: string,
+  workspaceStatus: string,
+): string {
+  return humanizeEnum(workspaceStatus !== "" ? workspaceStatus : lifecycle);
+}
+
 export function getDeadlineDays(
   submissionDeadline: string | null | undefined,
 ): number | null {
@@ -213,19 +220,19 @@ export function describeTender(tender: TenderSummary): TenderPresentation {
   }
 
   if (hasAny(combined, ["COMPLETE", "COMPLETED", "READY", "APPROVED"])) {
+    const lifecycleLabel = authoritativeLifecycleLabel(
+      lifecycle,
+      workspaceStatus,
+    );
     return {
       actionLabel: "Continue",
-      isCompleted: hasAny(combined, ["COMPLETE", "COMPLETED", "APPROVED"]),
+      isCompleted: false,
       isDraft: false,
       isInProgress: false,
       needsAttention: overdue || deadlineSoon,
       onHold: false,
-      statusLabel: hasAny(combined, ["APPROVED", "READY"])
-        ? "Likely eligible"
-        : "Completed",
-      supportingLabel: humanizeEnum(
-        workspaceStatus !== "" ? workspaceStatus : lifecycle,
-      ),
+      statusLabel: lifecycleLabel,
+      supportingLabel: lifecycleLabel,
       tone: hasAny(combined, ["COMPLETE", "COMPLETED"]) ? "success" : "success",
     };
   }

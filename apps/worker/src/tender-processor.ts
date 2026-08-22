@@ -23,6 +23,14 @@ export interface TenderDocumentJob {
   readonly requestId: string;
 }
 
+export interface TenderDocumentCleanupJob {
+  readonly documentId: string;
+  readonly keys: readonly string[];
+  readonly organisationId: string;
+  readonly requestId: string;
+  readonly tenderId: string;
+}
+
 export class TenderProcessor {
   public constructor(
     private readonly database: PrismaClient,
@@ -40,7 +48,11 @@ export class TenderProcessor {
     });
     if (job === null || job.state === "CANCELLED") return;
     const document = await this.database.tenderDocument.findFirst({
-      include: { tenderVersion: true },
+      include: {
+        tenderVersion: {
+          include: { tender: { select: { currentVersionId: true } } },
+        },
+      },
       where: { id: data.documentId, organisationId: data.organisationId },
     });
     if (document === null) throw new Error("Tender source document not found");
@@ -114,14 +126,54 @@ export class TenderProcessor {
           Key: document.quarantineObjectKey,
         }),
       );
+      const latestDocument = await this.database.tenderDocument.findUnique({
+        select: {
+          deletedAt: true,
+          status: true,
+          tenderVersionId: true,
+          tenderVersion: {
+            select: {
+              tender: { select: { currentVersionId: true } },
+              tenderId: true,
+            },
+          },
+        },
+        where: { id: document.id },
+      });
+      if (
+        latestDocument === null ||
+        latestDocument.deletedAt !== null ||
+        !["UPLOADED", "SCANNING"].includes(latestDocument.status)
+      ) {
+        await this.deleteObjectIfPresent(approvedKey);
+        await this.database.processingJob.updateMany({
+          data: {
+            completedAt: new Date(),
+            currentStage: "CANCELLED",
+            eventSequence: { increment: 1 },
+            publicMessage:
+              "Tender source processing no longer applies to the current source state",
+            state: "CANCELLED",
+          },
+          where: { id: data.jobId, state: { not: "CANCELLED" } },
+        });
+        return;
+      }
+      const currentVersionStillActive =
+        latestDocument.tenderVersion.tender.currentVersionId ===
+        latestDocument.tenderVersionId;
       await this.database.$transaction([
-        this.database.tenderDocument.update({
+        this.database.tenderDocument.updateMany({
           data: {
             approvedObjectKey: approvedKey,
             detectedMimeType: detectedMime,
             status: "READY",
           },
-          where: { id: document.id },
+          where: {
+            deletedAt: null,
+            id: document.id,
+            status: { in: ["UPLOADED", "SCANNING"] },
+          },
         }),
         this.database.processingJob.update({
           data: {
@@ -134,18 +186,22 @@ export class TenderProcessor {
           },
           where: { id: data.jobId },
         }),
-        this.database.tender.update({
-          data: { lifecycleStatus: "SOURCE_READY" },
-          where: { id: document.tenderVersion.tenderId },
-        }),
-        this.database.tenderWorkspace.update({
-          data: {
-            processingProgress: 100,
-            sourceSectionStatus: "READY",
-            status: "SOURCE_READY",
-          },
-          where: { tenderId: document.tenderVersion.tenderId },
-        }),
+        ...(currentVersionStillActive
+          ? [
+              this.database.tender.update({
+                data: { lifecycleStatus: "SOURCE_READY" },
+                where: { id: latestDocument.tenderVersion.tenderId },
+              }),
+              this.database.tenderWorkspace.update({
+                data: {
+                  processingProgress: 100,
+                  sourceSectionStatus: "READY",
+                  status: "SOURCE_READY",
+                },
+                where: { tenderId: latestDocument.tenderVersion.tenderId },
+              }),
+            ]
+          : []),
       ]);
     } catch (error: unknown) {
       if (signal?.aborted === true)
@@ -258,6 +314,24 @@ export class TenderProcessor {
       }),
     ]);
   }
+
+  public async cleanupRemovedDocument(
+    data: TenderDocumentCleanupJob,
+  ): Promise<void> {
+    for (const key of data.keys) {
+      await this.deleteObjectIfPresent(key);
+    }
+  }
+
+  private async deleteObjectIfPresent(key: string): Promise<void> {
+    try {
+      await this.storage.send(
+        new DeleteObjectCommand({ Bucket: this.bucket, Key: key }),
+      );
+    } catch (error: unknown) {
+      if (!isMissingObjectError(error)) throw error;
+    }
+  }
 }
 
 function detectCsv(content: Uint8Array, extension: string): string | null {
@@ -275,6 +349,25 @@ function isTenderMimeAllowed(mime: string, extension: string): boolean {
     isAllowedMimeExtension(mime, extension) ||
     (mime === "application/zip" && extension === ".zip") ||
     (mime === "text/csv" && extension === ".csv")
+  );
+}
+
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as {
+    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
+    readonly code?: string;
+    readonly name?: string;
+  };
+  return (
+    candidate.name === "NoSuchKey" ||
+    candidate.name === "NotFound" ||
+    candidate.code === "NoSuchKey" ||
+    candidate.code === "NotFound" ||
+    candidate.Code === "NoSuchKey" ||
+    candidate.Code === "NotFound" ||
+    candidate.$metadata?.httpStatusCode === 404
   );
 }
 
