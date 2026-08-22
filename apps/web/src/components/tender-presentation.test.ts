@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { describeTender, type TenderSummary } from "./tender-presentation";
 
-function createTender(
-  overrides: Partial<TenderSummary> = {},
-): TenderSummary {
+function createTender(overrides: Partial<TenderSummary> = {}): TenderSummary {
   return {
     buyer: "Buyer department",
     id: "tender-1",

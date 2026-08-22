@@ -99,7 +99,8 @@ interface Workspace {
     readonly needsAttention: boolean;
     readonly onHold: boolean;
     readonly statusLabel: string;
-    readonly tone: "accent" | "danger" | "info" | "neutral" | "success" | "warning";
+    readonly tone:
+      "accent" | "danger" | "info" | "neutral" | "success" | "warning";
   };
   readonly workspace: {
     readonly processingProgress: number;
@@ -241,7 +242,10 @@ interface MatrixItem {
 }
 
 interface MatrixResult {
-  readonly counts: readonly { readonly _count: number; readonly currentState: string }[];
+  readonly counts: readonly {
+    readonly _count: number;
+    readonly currentState: string;
+  }[];
   readonly items: readonly MatrixItem[];
   readonly total: number;
 }
@@ -273,8 +277,14 @@ interface ChecklistItem {
 
 interface ChecklistResult {
   readonly items: readonly ChecklistItem[];
-  readonly priority_counts: readonly { readonly _count: number; readonly currentPriority: string }[];
-  readonly status_counts: readonly { readonly _count: number; readonly status: string }[];
+  readonly priority_counts: readonly {
+    readonly _count: number;
+    readonly currentPriority: string;
+  }[];
+  readonly status_counts: readonly {
+    readonly _count: number;
+    readonly status: string;
+  }[];
   readonly total: number;
 }
 
@@ -381,7 +391,8 @@ interface EligibilityViewRequirement {
   readonly stateKey: string;
   readonly statement: string;
   readonly statusLabel: string;
-  readonly statusTone: "accent" | "danger" | "info" | "neutral" | "success" | "warning";
+  readonly statusTone:
+    "accent" | "danger" | "info" | "neutral" | "success" | "warning";
   readonly title: string;
   readonly whatToDo: string;
   readonly why: string;
@@ -530,9 +541,12 @@ function statusTone(
     current.includes("CONFLICT")
   )
     return "warning";
-  if (current.includes("DRAFT") || current.includes("PACKAGE"))
-    return "accent";
-  if (current.includes("READY") || current.includes("VERIFIED") || current.includes("COMPLETE"))
+  if (current.includes("DRAFT") || current.includes("PACKAGE")) return "accent";
+  if (
+    current.includes("READY") ||
+    current.includes("VERIFIED") ||
+    current.includes("COMPLETE")
+  )
     return "success";
   if (
     current.includes("PROCESS") ||
@@ -561,12 +575,15 @@ function isRemovableFailedUpload(document: {
   return isExpiredUpload(document);
 }
 
-function isRemovableReadySource(document: {
-  readonly status: string;
-}, options: {
-  readonly documentCount: number;
-  readonly isCurrentVersion: boolean;
-}): boolean {
+function isRemovableReadySource(
+  document: {
+    readonly status: string;
+  },
+  options: {
+    readonly documentCount: number;
+    readonly isCurrentVersion: boolean;
+  },
+): boolean {
   return (
     document.status === "READY" &&
     options.isCurrentVersion &&
@@ -578,7 +595,9 @@ function documentStatusLabel(document: {
   readonly status: string;
   readonly uploadSessionExpiresAt: string;
 }): string {
-  return isExpiredUpload(document) ? "Upload failed" : humanizeEnum(document.status);
+  return isExpiredUpload(document)
+    ? "Upload failed"
+    : humanizeEnum(document.status);
 }
 
 function documentStatusTone(document: {
@@ -619,7 +638,8 @@ function formatFileSize(bytes: string): string {
 function bestAssessmentLabel(matrix: MatrixResult | null): {
   readonly detail: string;
   readonly label: string;
-  readonly tone: "accent" | "danger" | "info" | "neutral" | "success" | "warning";
+  readonly tone:
+    "accent" | "danger" | "info" | "neutral" | "success" | "warning";
 } {
   if (matrix === null || matrix.total === 0) {
     return {
@@ -629,7 +649,9 @@ function bestAssessmentLabel(matrix: MatrixResult | null): {
     };
   }
 
-  const counts = new Map(matrix.counts.map((item) => [item.currentState, item._count]));
+  const counts = new Map(
+    matrix.counts.map((item) => [item.currentState, item._count]),
+  );
   if ((counts.get("CONFLICT") ?? 0) > 0) {
     return {
       detail: `${counts.get("CONFLICT") ?? 0} requirement${counts.get("CONFLICT") === 1 ? "" : "s"} conflict with current evidence or need a blocking resolution.`,
@@ -651,7 +673,10 @@ function bestAssessmentLabel(matrix: MatrixResult | null): {
       tone: "warning",
     };
   }
-  if ((counts.get("VERIFIED") ?? 0) > 0 || (counts.get("LIKELY_MET") ?? 0) > 0) {
+  if (
+    (counts.get("VERIFIED") ?? 0) > 0 ||
+    (counts.get("LIKELY_MET") ?? 0) > 0
+  ) {
     return {
       detail: `${(counts.get("VERIFIED") ?? 0) + (counts.get("LIKELY_MET") ?? 0)} requirements currently look satisfied or likely met.`,
       label: "Satisfied where evidenced",
@@ -675,19 +700,22 @@ function deriveAssessmentLabel(input: {
 }): {
   readonly detail: string;
   readonly label: string;
-  readonly tone: "accent" | "danger" | "info" | "neutral" | "success" | "warning";
+  readonly tone:
+    "accent" | "danger" | "info" | "neutral" | "success" | "warning";
 } {
   if (input.matrix !== null) return bestAssessmentLabel(input.matrix);
   if (!input.hasReadySource) {
     return {
-      detail: "Upload a primary tender source to start extraction and downstream analysis.",
+      detail:
+        "Upload a primary tender source to start extraction and downstream analysis.",
       label: "Awaiting source",
       tone: "neutral",
     };
   }
   if (input.extractionRun?.status !== "COMPLETE") {
     return {
-      detail: "The platform is extracting tender requirements and key fields from the current authorised source set.",
+      detail:
+        "The platform is extracting tender requirements and key fields from the current authorised source set.",
       label: "Analysing tender...",
       tone: "info",
     };
@@ -703,19 +731,27 @@ function deriveAssessmentLabel(input: {
   }
   if (input.riskRun?.status !== "COMPLETE") {
     return {
-      detail: "Extraction is complete. Cited early risk analysis is still running for the current tender version.",
+      detail:
+        "Extraction is complete. Cited early risk analysis is still running for the current tender version.",
       label: "Analysing tender...",
       tone: "info",
     };
   }
-  if (input.assessmentRun !== null && input.assessmentRun.status !== "COMPLETE") {
+  if (
+    input.assessmentRun !== null &&
+    input.assessmentRun.status !== "COMPLETE"
+  ) {
     return {
-      detail: "Eligibility comparison is running against the current authorised evidence snapshot.",
+      detail:
+        "Eligibility comparison is running against the current authorised evidence snapshot.",
       label: "Comparing evidence...",
       tone: "info",
     };
   }
-  if (input.currentDecision !== null && input.currentDecision.decision !== "CONTINUE") {
+  if (
+    input.currentDecision !== null &&
+    input.currentDecision.decision !== "CONTINUE"
+  ) {
     return {
       detail: `The current early bid decision is ${humanizeEnum(input.currentDecision.decision)}. Eligibility comparison will not proceed until that decision changes.`,
       label: humanizeEnum(input.currentDecision.decision),
@@ -723,10 +759,10 @@ function deriveAssessmentLabel(input: {
     };
   }
   return {
-      detail:
-        "Tender extraction and early risk analysis are complete. Eligibility comparison will start automatically after an authorised CONTINUE decision.",
-      label: "Awaiting pursue decision",
-      tone: "warning",
+    detail:
+      "Tender extraction and early risk analysis are complete. Eligibility comparison will start automatically after an authorised CONTINUE decision.",
+    label: "Awaiting pursue decision",
+    tone: "warning",
   };
 }
 
@@ -736,7 +772,9 @@ function preferredReadableText(value: string): string {
     .map((part) => part.replace(/\s+/g, " ").trim())
     .filter((part) => part.length > 0);
   const englishCandidate =
-    candidates.find((part) => /[A-Za-z]/.test(part) && !/^[^A-Za-z]+$/.test(part)) ??
+    candidates.find(
+      (part) => /[A-Za-z]/.test(part) && !/^[^A-Za-z]+$/.test(part),
+    ) ??
     candidates.find((part) => /[A-Za-z]/.test(part)) ??
     candidates[0] ??
     value;
@@ -808,11 +846,7 @@ function toAssessmentRequirement(item: MatrixItem): EligibilityViewRequirement {
 function toExtractedRequirement(
   item: Requirement,
   phase:
-    | "ASSESSING"
-    | "AWAITING_DECISION"
-    | "RISK"
-    | "RISK_FAILED"
-    | "EXTRACTING",
+    "ASSESSING" | "AWAITING_DECISION" | "RISK" | "RISK_FAILED" | "EXTRACTING",
 ): EligibilityViewRequirement {
   const citation = item.citations[0] ?? null;
   const statusLabel =
@@ -820,21 +854,21 @@ function toExtractedRequirement(
       ? "Checking eligibility..."
       : phase === "RISK_FAILED"
         ? "Risk analysis failed"
-      : phase === "AWAITING_DECISION"
-        ? "Not assessed yet"
-        : phase === "RISK"
-          ? "Analysing tender..."
-          : "Reading tender...";
+        : phase === "AWAITING_DECISION"
+          ? "Not assessed yet"
+          : phase === "RISK"
+            ? "Analysing tender..."
+            : "Reading tender...";
   const whatToDo =
     phase === "ASSESSING"
       ? "Wait for evidence comparison to finish. The detail panel will update automatically."
       : phase === "RISK_FAILED"
         ? "Retry the failed early risk analysis before eligibility comparison can continue."
-      : phase === "AWAITING_DECISION"
-        ? "Review the extracted tender requirements and record an authorised CONTINUE decision to start eligibility comparison."
-        : phase === "RISK"
-          ? "Early risk analysis is still running before evidence comparison can start."
-          : "Tender extraction is still running. Requirement details will continue to fill in automatically.";
+        : phase === "AWAITING_DECISION"
+          ? "Review the extracted tender requirements and record an authorised CONTINUE decision to start eligibility comparison."
+          : phase === "RISK"
+            ? "Early risk analysis is still running before evidence comparison can start."
+            : "Tender extraction is still running. Requirement details will continue to fill in automatically.";
   const why =
     item.sourceWording.trim() === ""
       ? "This requirement was extracted from the tender source and is waiting for downstream workflow state."
@@ -858,11 +892,11 @@ function toExtractedRequirement(
         ? "ASSESSING"
         : phase === "RISK_FAILED"
           ? "RISK_FAILED"
-        : phase === "AWAITING_DECISION"
-          ? "AWAITING_DECISION"
-          : phase === "RISK"
-            ? "RISK_ANALYSIS"
-            : "EXTRACTING",
+          : phase === "AWAITING_DECISION"
+            ? "AWAITING_DECISION"
+            : phase === "RISK"
+              ? "RISK_ANALYSIS"
+              : "EXTRACTING",
     statement: item.normalizedStatement,
     statusLabel,
     statusTone:
@@ -905,7 +939,9 @@ function topRequirements(matrix: MatrixResult | null): readonly MatrixItem[] {
   });
 }
 
-function extractKeyFields(fields: readonly ExtractedField[]): readonly ExtractedField[] {
+function extractKeyFields(
+  fields: readonly ExtractedField[],
+): readonly ExtractedField[] {
   const keywords = [
     "DEADLINE",
     "VALUE",
@@ -1010,7 +1046,8 @@ function buildActivityItems(
   });
 
   return items.sort((left, right) => {
-    if (left.occurredAt === null && right.occurredAt === null) return left.title.localeCompare(right.title);
+    if (left.occurredAt === null && right.occurredAt === null)
+      return left.title.localeCompare(right.title);
     if (left.occurredAt === null) return 1;
     if (right.occurredAt === null) return -1;
     return right.occurredAt.localeCompare(left.occurredAt);
@@ -1140,17 +1177,24 @@ export function TenderWorkspace({
       readinessHistory,
       packageHistory,
     ] = await Promise.all([
-      safeApi<readonly ExtractionRun[]>(`${base}/versions/${versionId}/extractions`),
-      safeApi<readonly RiskRun[]>(`${base}/versions/${versionId}/risk-analyses`),
+      safeApi<readonly ExtractionRun[]>(
+        `${base}/versions/${versionId}/extractions`,
+      ),
+      safeApi<readonly RiskRun[]>(
+        `${base}/versions/${versionId}/risk-analyses`,
+      ),
       safeApi<readonly AssessmentRun[]>(
         `${base}/versions/${versionId}/eligibility-assessments`,
       ),
-      safeApi<readonly ChecklistRun[]>(`${base}/versions/${versionId}/checklists`),
+      safeApi<readonly ChecklistRun[]>(
+        `${base}/versions/${versionId}/checklists`,
+      ),
       safeApi<readonly DraftRun[]>(`${base}/draft-generation-runs`),
       safeApi<readonly DraftSummary[]>(`${base}/drafts`),
-      safeApi<{ items: readonly FinalReadinessRun[]; next_cursor: string | null }>(
-        `${base}/versions/${versionId}/final-readiness?limit=25`,
-      ),
+      safeApi<{
+        items: readonly FinalReadinessRun[];
+        next_cursor: string | null;
+      }>(`${base}/versions/${versionId}/final-readiness?limit=25`),
       safeApi<PackageHistoryResponse>(
         `${base}/versions/${versionId}/controlled-review-packages`,
       ),
@@ -1167,39 +1211,45 @@ export function TenderWorkspace({
             `${base}/risk-analyses/${latestRiskRun.id}/decisions`,
           )) ?? []);
 
-    const [extractionRequirements, extractionFields, extractionIssues, riskFindings, matrix, checklist] =
-      await Promise.all([
-        latestExtractionRun === null
-          ? Promise.resolve(null)
-          : safeApi<readonly Requirement[]>(
-              `${base}/extractions/${latestExtractionRun.id}/requirements`,
-            ),
-        latestExtractionRun === null
-          ? Promise.resolve(null)
-          : safeApi<readonly ExtractedField[]>(
-              `${base}/extractions/${latestExtractionRun.id}/fields`,
-            ),
-        latestExtractionRun === null
-          ? Promise.resolve(null)
-          : safeApi<readonly ExtractionIssue[]>(
-              `${base}/extractions/${latestExtractionRun.id}/issues`,
-            ),
-        latestRiskRun === null
-          ? Promise.resolve(null)
-          : safeApi<readonly RiskFinding[]>(
-              `${base}/risk-analyses/${latestRiskRun.id}/findings`,
-            ),
-        latestAssessmentRun === null
-          ? Promise.resolve(null)
-          : safeApi<MatrixResult>(
-              `${base}/eligibility-assessments/${latestAssessmentRun.id}/matrix`,
-            ),
-        latestChecklistRun === null
-          ? Promise.resolve(null)
-          : safeApi<ChecklistResult>(
-              `${base}/checklists/${latestChecklistRun.id}/items`,
-            ),
-      ]);
+    const [
+      extractionRequirements,
+      extractionFields,
+      extractionIssues,
+      riskFindings,
+      matrix,
+      checklist,
+    ] = await Promise.all([
+      latestExtractionRun === null
+        ? Promise.resolve(null)
+        : safeApi<readonly Requirement[]>(
+            `${base}/extractions/${latestExtractionRun.id}/requirements`,
+          ),
+      latestExtractionRun === null
+        ? Promise.resolve(null)
+        : safeApi<readonly ExtractedField[]>(
+            `${base}/extractions/${latestExtractionRun.id}/fields`,
+          ),
+      latestExtractionRun === null
+        ? Promise.resolve(null)
+        : safeApi<readonly ExtractionIssue[]>(
+            `${base}/extractions/${latestExtractionRun.id}/issues`,
+          ),
+      latestRiskRun === null
+        ? Promise.resolve(null)
+        : safeApi<readonly RiskFinding[]>(
+            `${base}/risk-analyses/${latestRiskRun.id}/findings`,
+          ),
+      latestAssessmentRun === null
+        ? Promise.resolve(null)
+        : safeApi<MatrixResult>(
+            `${base}/eligibility-assessments/${latestAssessmentRun.id}/matrix`,
+          ),
+      latestChecklistRun === null
+        ? Promise.resolve(null)
+        : safeApi<ChecklistResult>(
+            `${base}/checklists/${latestChecklistRun.id}/items`,
+          ),
+    ]);
 
     setSupport({
       assessmentRun: latestAssessmentRun,
@@ -1244,12 +1294,17 @@ export function TenderWorkspace({
     const values = new FormData(form);
     const files = values
       .getAll("file")
-      .filter((value): value is File => value instanceof File && value.size > 0);
+      .filter(
+        (value): value is File => value instanceof File && value.size > 0,
+      );
     const role = values.get("role");
     const version = workspace.versions[0];
-    if (files.length === 0 || version === undefined || typeof role !== "string") return;
+    if (files.length === 0 || version === undefined || typeof role !== "string")
+      return;
     if (role === "CORRIGENDUM" && files.length !== 1) {
-      setMessage("Upload one corrigendum at a time to preserve version history.");
+      setMessage(
+        "Upload one corrigendum at a time to preserve version history.",
+      );
       return;
     }
 
@@ -1378,7 +1433,8 @@ export function TenderWorkspace({
   }
 
   async function retryRiskAnalysis(): Promise<void> {
-    if (support.riskRun === null || riskRetrying || currentVersionId === "") return;
+    if (support.riskRun === null || riskRetrying || currentVersionId === "")
+      return;
     setRiskRetrying(true);
     try {
       await apiRequest(
@@ -1399,9 +1455,16 @@ export function TenderWorkspace({
     }
   }
 
-  async function recordPursuitDecision(event: FormEvent<HTMLFormElement>): Promise<void> {
+  async function recordPursuitDecision(
+    event: FormEvent<HTMLFormElement>,
+  ): Promise<void> {
     event.preventDefault();
-    if (support.riskRun === null || decisionSubmitting || currentVersionId === "") return;
+    if (
+      support.riskRun === null ||
+      decisionSubmitting ||
+      currentVersionId === ""
+    )
+      return;
     const form = event.currentTarget;
     const values = new FormData(form);
     setDecisionSubmitting(true);
@@ -1430,7 +1493,10 @@ export function TenderWorkspace({
     }
   }
 
-  async function openTenderCitation(documentId: string, pageNumber: number | null): Promise<void> {
+  async function openTenderCitation(
+    documentId: string,
+    pageNumber: number | null,
+  ): Promise<void> {
     const result = await apiRequest<{ download_url: string }>(
       `/organisations/${organisationId}/tenders/${tenderId}/documents/${documentId}/download`,
       { method: "POST" },
@@ -1444,7 +1510,9 @@ export function TenderWorkspace({
 
   const currentVersion = workspace?.versions[0];
   const historicalFileVersions = workspace?.versions.slice(1) ?? [];
-  const hasReadySource = (currentVersion?.documents.some((document) => document.status === "READY") ?? false);
+  const hasReadySource =
+    currentVersion?.documents.some((document) => document.status === "READY") ??
+    false;
   const assessmentSummary = deriveAssessmentLabel({
     assessmentRun: support.assessmentRun,
     currentDecision: support.currentDecision,
@@ -1453,20 +1521,27 @@ export function TenderWorkspace({
     matrix: support.matrix,
     riskRun: support.riskRun,
   });
-  const requirements = useMemo(() => topRequirements(support.matrix), [support.matrix]);
-  const eligibilityRequirements = useMemo<readonly EligibilityViewRequirement[]>(() => {
-    if (support.matrix !== null) return topRequirements(support.matrix).map(toAssessmentRequirement);
+  const requirements = useMemo(
+    () => topRequirements(support.matrix),
+    [support.matrix],
+  );
+  const eligibilityRequirements = useMemo<
+    readonly EligibilityViewRequirement[]
+  >(() => {
+    if (support.matrix !== null)
+      return topRequirements(support.matrix).map(toAssessmentRequirement);
     if (support.extractionRequirements.length === 0) return [];
     const phase =
-      support.assessmentRun !== null && support.assessmentRun.status !== "COMPLETE"
+      support.assessmentRun !== null &&
+      support.assessmentRun.status !== "COMPLETE"
         ? "ASSESSING"
         : support.riskRun?.status === "FAILED"
           ? "RISK_FAILED"
           : support.riskRun?.status !== "COMPLETE"
-          ? "RISK"
-          : support.currentDecision?.decision !== "CONTINUE"
-            ? "AWAITING_DECISION"
-            : "ASSESSING";
+            ? "RISK"
+            : support.currentDecision?.decision !== "CONTINUE"
+              ? "AWAITING_DECISION"
+              : "ASSESSING";
     return support.extractionRequirements.map((item) =>
       toExtractedRequirement(item, phase),
     );
@@ -1484,8 +1559,9 @@ export function TenderWorkspace({
       return;
     }
     setSelectedRequirementId((current) =>
-      current === "" || !eligibilityRequirements.some((item) => item.id === current)
-        ? eligibilityRequirements[0]?.id ?? ""
+      current === "" ||
+      !eligibilityRequirements.some((item) => item.id === current)
+        ? (eligibilityRequirements[0]?.id ?? "")
         : current,
     );
   }, [eligibilityRequirements]);
@@ -1494,28 +1570,46 @@ export function TenderWorkspace({
     eligibilityRequirements.find((item) => item.id === selectedRequirementId) ??
     eligibilityRequirements[0] ??
     null;
-  const eligibilityFilters: readonly { readonly label: string; readonly states: readonly string[]; readonly value: string }[] = [
+  const eligibilityFilters: readonly {
+    readonly label: string;
+    readonly states: readonly string[];
+    readonly value: string;
+  }[] = [
     { label: "All", states: [], value: "ALL" },
-    { label: "Satisfied", states: ["VERIFIED", "LIKELY_MET"], value: "SATISFIED" },
+    {
+      label: "Satisfied",
+      states: ["VERIFIED", "LIKELY_MET"],
+      value: "SATISFIED",
+    },
     { label: "Need info", states: ["MISSING"], value: "MISSING" },
-    { label: "Need review", states: ["HUMAN_REVIEW_REQUIRED"], value: "HUMAN_REVIEW_REQUIRED" },
+    {
+      label: "Need review",
+      states: ["HUMAN_REVIEW_REQUIRED"],
+      value: "HUMAN_REVIEW_REQUIRED",
+    },
     { label: "Blocking", states: ["CONFLICT"], value: "CONFLICT" },
   ];
   const visibleRequirements =
     eligibilityFilter === "ALL"
       ? eligibilityRequirements
       : eligibilityRequirements.filter((item) =>
-          (eligibilityFilters.find((filter) => filter.value === eligibilityFilter)?.states ?? []).includes(
-            item.stateKey,
-          ),
+          (
+            eligibilityFilters.find(
+              (filter) => filter.value === eligibilityFilter,
+            )?.states ?? []
+          ).includes(item.stateKey),
         );
   const unresolvedChecklist = support.checklistItems.filter((item) =>
-    ["OPEN", "IN_PROGRESS", "BLOCKED", "READY_FOR_REASSESSMENT"].includes(item.status),
+    ["OPEN", "IN_PROGRESS", "BLOCKED", "READY_FOR_REASSESSMENT"].includes(
+      item.status,
+    ),
   );
   const overviewAttention = [
     ...requirements
       .filter((item) =>
-        ["CONFLICT", "HUMAN_REVIEW_REQUIRED", "MISSING"].includes(item.currentState),
+        ["CONFLICT", "HUMAN_REVIEW_REQUIRED", "MISSING"].includes(
+          item.currentState,
+        ),
       )
       .slice(0, 3)
       .map((item) => ({
@@ -1537,7 +1631,9 @@ export function TenderWorkspace({
   ].slice(0, 4);
   const keyFields = extractKeyFields(support.extractionFields);
   const currentReadyDocument =
-    currentVersion?.documents.find((document) => document.status === "READY" && document.role === "PRIMARY") ??
+    currentVersion?.documents.find(
+      (document) => document.status === "READY" && document.role === "PRIMARY",
+    ) ??
     currentVersion?.documents.find((document) => document.status === "READY") ??
     null;
   const topRisks = [...support.riskFindings]
@@ -1549,20 +1645,24 @@ export function TenderWorkspace({
         ["LOW", 3],
         ["INFORMATIONAL", 4],
       ]);
-      return (order.get(left.severity) ?? 99) - (order.get(right.severity) ?? 99);
+      return (
+        (order.get(left.severity) ?? 99) - (order.get(right.severity) ?? 99)
+      );
     })
     .slice(0, 4);
   const nextAction = (() => {
     if ((currentVersion?.documents.length ?? 0) === 0)
       return {
         cta: "Upload tender files",
-        description: "Add the primary tender source before downstream review can continue.",
+        description:
+          "Add the primary tender source before downstream review can continue.",
         surface: "files" as TenderSurface,
       };
     if (support.extractionRun?.status !== "COMPLETE")
       return {
         cta: "View tender analysis",
-        description: "The platform is still extracting the current tender source and will keep progressing automatically.",
+        description:
+          "The platform is still extracting the current tender source and will keep progressing automatically.",
         surface: "overview" as TenderSurface,
       };
     if (support.riskRun?.status === "FAILED")
@@ -1576,40 +1676,48 @@ export function TenderWorkspace({
     if (support.riskRun?.status !== "COMPLETE")
       return {
         cta: "View tender analysis",
-        description: "Extraction is complete and early risk analysis is still running for the current tender version.",
+        description:
+          "Extraction is complete and early risk analysis is still running for the current tender version.",
         surface: "overview" as TenderSurface,
       };
     if (support.currentDecision?.decision !== "CONTINUE")
       return {
         cta: "Record pursue decision",
-        description: "Extraction and risk review are ready. Eligibility stays blocked until an authorised CONTINUE decision exists.",
+        description:
+          "Extraction and risk review are ready. Eligibility stays blocked until an authorised CONTINUE decision exists.",
         surface: "overview" as TenderSurface,
       };
     if (support.assessmentRun === null)
       return {
         cta: "Review tender analysis",
-        description: "Real tender requirements are ready. Eligibility comparison will start automatically after an authorised CONTINUE decision.",
+        description:
+          "Real tender requirements are ready. Eligibility comparison will start automatically after an authorised CONTINUE decision.",
         surface: "eligibility" as TenderSurface,
       };
     if (
       requirements.some((item) =>
-        ["CONFLICT", "HUMAN_REVIEW_REQUIRED", "MISSING"].includes(item.currentState),
+        ["CONFLICT", "HUMAN_REVIEW_REQUIRED", "MISSING"].includes(
+          item.currentState,
+        ),
       )
     )
       return {
         cta: "Review eligibility",
-        description: "Resolve the highest-priority evidence and assessment items first.",
+        description:
+          "Resolve the highest-priority evidence and assessment items first.",
         surface: "eligibility" as TenderSurface,
       };
     if (support.drafts.length === 0)
       return {
         cta: "Start the draft",
-        description: "Move into drafting once current evidence and assessment state look stable.",
+        description:
+          "Move into drafting once current evidence and assessment state look stable.",
         surface: "draft" as TenderSurface,
       };
     return {
       cta: "Open Review & Export",
-      description: "Final human review and controlled package actions live in the last step.",
+      description:
+        "Final human review and controlled package actions live in the last step.",
       surface: "review" as TenderSurface,
     };
   })();
@@ -1622,41 +1730,43 @@ export function TenderWorkspace({
     });
     return [...map.entries()];
   }, [activityItems]);
-  const currentPackage = support.packageHistory.find((item) => item.is_current) ?? support.packageHistory[0] ?? null;
+  const currentPackage =
+    support.packageHistory.find((item) => item.is_current) ??
+    support.packageHistory[0] ??
+    null;
   const currentReadinessRun =
-    support.finalReadinessRuns.find((item) => item.is_current) ?? support.finalReadinessRuns[0] ?? null;
+    support.finalReadinessRuns.find((item) => item.is_current) ??
+    support.finalReadinessRuns[0] ??
+    null;
   const visibleVersionDocuments =
     currentVersion?.documents.filter((document) =>
       filesFilter === "ALL" ? true : document.role === "CORRIGENDUM",
     ) ?? [];
-  const workflowSummary =
-    workspace?.workflowState ??
-    {
-      actionLabel: "Open",
-      detail: assessmentSummary.detail,
-      isCompleted: false,
-      isDraft: false,
-      isInProgress: false,
-      needsAttention: false,
-      onHold: false,
-      statusLabel: assessmentSummary.label,
-      tone: assessmentSummary.tone,
-    };
-  const draftBlockedReason =
-    !hasReadySource
-      ? "Upload a current primary tender source before drafting can start."
-      : support.extractionRun?.status !== "COMPLETE"
-        ? "Drafting is blocked until extraction finishes for the current tender version."
-        : support.riskRun?.status === "FAILED"
-          ? (support.riskRun.safeFailureMessage ??
-            "Drafting is blocked until the failed early risk analysis is retried successfully.")
-          : support.riskRun?.status !== "COMPLETE"
-            ? "Drafting is blocked until early risk analysis finishes."
-            : support.currentDecision?.decision !== "CONTINUE"
-              ? "Drafting is blocked until an authorised CONTINUE decision is recorded."
-              : support.assessmentRun?.status !== "COMPLETE"
-                ? "Drafting is blocked until eligibility comparison finishes for the current tender version."
-                : null;
+  const workflowSummary = workspace?.workflowState ?? {
+    actionLabel: "Open",
+    detail: assessmentSummary.detail,
+    isCompleted: false,
+    isDraft: false,
+    isInProgress: false,
+    needsAttention: false,
+    onHold: false,
+    statusLabel: assessmentSummary.label,
+    tone: assessmentSummary.tone,
+  };
+  const draftBlockedReason = !hasReadySource
+    ? "Upload a current primary tender source before drafting can start."
+    : support.extractionRun?.status !== "COMPLETE"
+      ? "Drafting is blocked until extraction finishes for the current tender version."
+      : support.riskRun?.status === "FAILED"
+        ? (support.riskRun.safeFailureMessage ??
+          "Drafting is blocked until the failed early risk analysis is retried successfully.")
+        : support.riskRun?.status !== "COMPLETE"
+          ? "Drafting is blocked until early risk analysis finishes."
+          : support.currentDecision?.decision !== "CONTINUE"
+            ? "Drafting is blocked until an authorised CONTINUE decision is recorded."
+            : support.assessmentRun?.status !== "COMPLETE"
+              ? "Drafting is blocked until eligibility comparison finishes for the current tender version."
+              : null;
 
   const contextualAiLabel =
     activeSurface === "eligibility"
@@ -1690,7 +1800,10 @@ export function TenderWorkspace({
     <div className="workspace-page tender-detail-page">
       <header className="tender-header">
         <div className="tender-header__row">
-          <Link className="tender-header__back" href={`/tenders/${organisationId}`}>
+          <Link
+            className="tender-header__back"
+            href={`/tenders/${organisationId}`}
+          >
             ← Back to Tenders
           </Link>
           <span className="tender-header__deadline">
@@ -1705,7 +1818,9 @@ export function TenderWorkspace({
             <p className="tender-header__buyer">{workspace.buyer}</p>
           </div>
           <div className="tender-header__badges">
-            <span className={`status-badge status-badge--${workflowSummary.tone}`}>
+            <span
+              className={`status-badge status-badge--${workflowSummary.tone}`}
+            >
               {workflowSummary.statusLabel}
             </span>
           </div>
@@ -1718,9 +1833,9 @@ export function TenderWorkspace({
         {workspace.deadlineResolution?.hasMismatch ? (
           <Alert tone="warning" title="Source deadline updated">
             <p>
-              The current tender file deadline differs from the original metadata.
-              The workspace is now showing the source-extracted deadline from the
-              current tender file.
+              The current tender file deadline differs from the original
+              metadata. The workspace is now showing the source-extracted
+              deadline from the current tender file.
             </p>
           </Alert>
         ) : null}
@@ -1735,8 +1850,10 @@ export function TenderWorkspace({
           "review",
         ].includes(resolution.legacyStage) ? (
           <div className="tender-compat-note">
-            This saved link used the legacy <strong>{humanizeEnum(resolution.legacyStage)}</strong> stage.
-            It now opens <strong>{surfaceLabels[activeSurface]}</strong> while keeping the underlying workflow compatible.
+            This saved link used the legacy{" "}
+            <strong>{humanizeEnum(resolution.legacyStage)}</strong> stage. It
+            now opens <strong>{surfaceLabels[activeSurface]}</strong> while
+            keeping the underlying workflow compatible.
           </div>
         ) : null}
         <div className="tender-header__tabbar">
@@ -1751,7 +1868,10 @@ export function TenderWorkspace({
               />
             ))}
           </nav>
-          <nav aria-label="Tender workspace utilities" className="tender-subnav">
+          <nav
+            aria-label="Tender workspace utilities"
+            className="tender-subnav"
+          >
             {secondarySurfaces.map((surface) => (
               <SurfaceLink
                 activeSurface={activeSurface}
@@ -1776,7 +1896,9 @@ export function TenderWorkspace({
                 </div>
               </div>
               <Card className="tender-summary-card">
-                <span className={`status-badge status-badge--${workflowSummary.tone}`}>
+                <span
+                  className={`status-badge status-badge--${workflowSummary.tone}`}
+                >
                   {workflowSummary.statusLabel}
                 </span>
                 <p style={{ marginTop: 10, color: "var(--text-secondary)" }}>
@@ -1785,21 +1907,37 @@ export function TenderWorkspace({
                 <div className="tender-stat-row">
                   <div className="tender-stat">
                     <strong>
-                      {(support.matrix?.counts.find((item) => item.currentState === "VERIFIED")?._count ?? 0) +
-                        (support.matrix?.counts.find((item) => item.currentState === "LIKELY_MET")?._count ?? 0)}
+                      {(support.matrix?.counts.find(
+                        (item) => item.currentState === "VERIFIED",
+                      )?._count ?? 0) +
+                        (support.matrix?.counts.find(
+                          (item) => item.currentState === "LIKELY_MET",
+                        )?._count ?? 0)}
                     </strong>
                     <span>Satisfied</span>
                   </div>
                   <div className="tender-stat">
-                    <strong>{support.matrix?.counts.find((item) => item.currentState === "MISSING")?._count ?? 0}</strong>
+                    <strong>
+                      {support.matrix?.counts.find(
+                        (item) => item.currentState === "MISSING",
+                      )?._count ?? 0}
+                    </strong>
                     <span>Need info</span>
                   </div>
                   <div className="tender-stat">
-                    <strong>{support.matrix?.counts.find((item) => item.currentState === "HUMAN_REVIEW_REQUIRED")?._count ?? 0}</strong>
+                    <strong>
+                      {support.matrix?.counts.find(
+                        (item) => item.currentState === "HUMAN_REVIEW_REQUIRED",
+                      )?._count ?? 0}
+                    </strong>
                     <span>Next review</span>
                   </div>
                   <div className="tender-stat">
-                    <strong>{support.matrix?.counts.find((item) => item.currentState === "CONFLICT")?._count ?? 0}</strong>
+                    <strong>
+                      {support.matrix?.counts.find(
+                        (item) => item.currentState === "CONFLICT",
+                      )?._count ?? 0}
+                    </strong>
                     <span>Blocking</span>
                   </div>
                 </div>
@@ -1815,10 +1953,16 @@ export function TenderWorkspace({
               <div className="workspace-section__header">
                 <div>
                   <h2>What needs your attention</h2>
-                  <p>Highest-value unresolved work from current evidence, checklist, and review state.</p>
+                  <p>
+                    Highest-value unresolved work from current evidence,
+                    checklist, and review state.
+                  </p>
                 </div>
                 {overviewAttention.length > 0 ? (
-                  <Button onClick={() => navigateSurface("eligibility")} variant="quiet">
+                  <Button
+                    onClick={() => navigateSurface("eligibility")}
+                    variant="quiet"
+                  >
                     View all
                   </Button>
                 ) : null}
@@ -1841,7 +1985,10 @@ export function TenderWorkspace({
                           <p>{item.detail}</p>
                         </div>
                         <span />
-                        <Button onClick={() => navigateSurface(item.stage)} variant="secondary">
+                        <Button
+                          onClick={() => navigateSurface(item.stage)}
+                          variant="secondary"
+                        >
                           {item.action}
                         </Button>
                       </li>
@@ -1856,14 +2003,20 @@ export function TenderWorkspace({
             <div className="workspace-section__header">
               <div>
                 <h2>Key tender details</h2>
-                <p>Only source-extracted values currently supported by the application are shown here.</p>
+                <p>
+                  Only source-extracted values currently supported by the
+                  application are shown here.
+                </p>
               </div>
             </div>
-              <div className="workspace-card detail-grid-card">
+            <div className="workspace-card detail-grid-card">
               {keyFields.length === 0 ? (
                 <div className="tender-stat-row">
                   <div className="tender-stat">
-                    <strong>{currentReadyDocument?.displayFilename ?? "No ready source"}</strong>
+                    <strong>
+                      {currentReadyDocument?.displayFilename ??
+                        "No ready source"}
+                    </strong>
                     <span>Current source file</span>
                   </div>
                   <div className="tender-stat">
@@ -1871,11 +2024,19 @@ export function TenderWorkspace({
                     <span>Extracted requirements</span>
                   </div>
                   <div className="tender-stat">
-                    <strong>{support.extractionRun === null ? "Queued automatically" : humanizeEnum(support.extractionRun.status)}</strong>
+                    <strong>
+                      {support.extractionRun === null
+                        ? "Queued automatically"
+                        : humanizeEnum(support.extractionRun.status)}
+                    </strong>
                     <span>Extraction</span>
                   </div>
                   <div className="tender-stat">
-                    <strong>{support.riskRun === null ? "Waiting on extraction" : humanizeEnum(support.riskRun.status)}</strong>
+                    <strong>
+                      {support.riskRun === null
+                        ? "Waiting on extraction"
+                        : humanizeEnum(support.riskRun.status)}
+                    </strong>
                     <span>Early risk</span>
                   </div>
                 </div>
@@ -1896,16 +2057,28 @@ export function TenderWorkspace({
             <div className="workspace-section__header">
               <div>
                 <h2>Important things to consider</h2>
-                <p>Current cited risk and contract findings stay distinct from eligibility decisions.</p>
+                <p>
+                  Current cited risk and contract findings stay distinct from
+                  eligibility decisions.
+                </p>
               </div>
             </div>
             <div className="tender-risk-grid">
               {support.riskRun?.status === "FAILED" ? (
                 <div className="workspace-card">
                   <div className="workspace-empty-row">
-                    <p>{support.riskRun.safeFailureMessage ?? "Early risk analysis failed safely."}</p>
-                    <Button disabled={riskRetrying} onClick={() => void retryRiskAnalysis()} variant="secondary">
-                      {riskRetrying ? "Retrying..." : "Retry early risk analysis"}
+                    <p>
+                      {support.riskRun.safeFailureMessage ??
+                        "Early risk analysis failed safely."}
+                    </p>
+                    <Button
+                      disabled={riskRetrying}
+                      onClick={() => void retryRiskAnalysis()}
+                      variant="secondary"
+                    >
+                      {riskRetrying
+                        ? "Retrying..."
+                        : "Retry early risk analysis"}
                     </Button>
                   </div>
                 </div>
@@ -1922,12 +2095,15 @@ export function TenderWorkspace({
                     key={finding.id}
                     onClick={() => navigateSurface("eligibility")}
                     onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") navigateSurface("eligibility");
+                      if (event.key === "Enter" || event.key === " ")
+                        navigateSurface("eligibility");
                     }}
                     role="button"
                     tabIndex={0}
                   >
-                    <span className={`status-badge status-badge--${statusTone(finding.severity)}`}>
+                    <span
+                      className={`status-badge status-badge--${statusTone(finding.severity)}`}
+                    >
                       {humanizeEnum(finding.severity)}
                     </span>
                     <strong>{finding.title}</strong>
@@ -1942,14 +2118,20 @@ export function TenderWorkspace({
             <div className="workspace-section__header">
               <div>
                 <h2>Next best action</h2>
-                <p>Derived from existing workflow state without making a pursuit decision for the user.</p>
+                <p>
+                  Derived from existing workflow state without making a pursuit
+                  decision for the user.
+                </p>
               </div>
             </div>
             <Card className="tender-summary-card">
               <strong>{nextAction.cta}</strong>
               <p>{nextAction.description}</p>
               {nextAction.cta === "Retry risk analysis" ? (
-                <Button disabled={riskRetrying} onClick={() => void retryRiskAnalysis()}>
+                <Button
+                  disabled={riskRetrying}
+                  onClick={() => void retryRiskAnalysis()}
+                >
                   {riskRetrying ? "Retrying..." : nextAction.cta}
                 </Button>
               ) : (
@@ -1965,7 +2147,10 @@ export function TenderWorkspace({
               <div className="workspace-section__header">
                 <div>
                   <h2>Early pursue decision</h2>
-                  <p>The product now shows the real current tender decision gate instead of implying progress.</p>
+                  <p>
+                    The product now shows the real current tender decision gate
+                    instead of implying progress.
+                  </p>
                 </div>
               </div>
               <Card className="tender-summary-card">
@@ -1982,9 +2167,17 @@ export function TenderWorkspace({
                     {support.currentDecision.rationale}
                   </p>
                 ) : null}
-                <form onSubmit={(event) => void recordPursuitDecision(event)} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+                <form
+                  onSubmit={(event) => void recordPursuitDecision(event)}
+                  style={{ display: "grid", gap: 12, marginTop: 12 }}
+                >
                   <Field htmlFor="pursuit-decision" label="Decision" required>
-                    <Select defaultValue="" id="pursuit-decision" name="decision" required>
+                    <Select
+                      defaultValue=""
+                      id="pursuit-decision"
+                      name="decision"
+                      required
+                    >
                       <option disabled value="">
                         Select CONTINUE, HOLD, or STOP
                       </option>
@@ -1994,15 +2187,32 @@ export function TenderWorkspace({
                     </Select>
                   </Field>
                   <Field htmlFor="pursuit-rationale" label="Rationale" required>
-                    <Textarea id="pursuit-rationale" minLength={20} name="rationale" required />
+                    <Textarea
+                      id="pursuit-rationale"
+                      minLength={20}
+                      name="rationale"
+                      required
+                    />
                   </Field>
-                  <label style={{ display: "flex", gap: 8, alignItems: "start", fontSize: "0.82rem" }}>
+                  <label
+                    style={{
+                      display: "flex",
+                      gap: 8,
+                      alignItems: "start",
+                      fontSize: "0.82rem",
+                    }}
+                  >
                     <input name="acknowledged" required type="checkbox" />
-                    <span>I acknowledge unresolved findings and source-quality limitations.</span>
+                    <span>
+                      I acknowledge unresolved findings and source-quality
+                      limitations.
+                    </span>
                   </label>
                   <div>
                     <Button disabled={decisionSubmitting} type="submit">
-                      {decisionSubmitting ? "Saving decision..." : "Record decision"}
+                      {decisionSubmitting
+                        ? "Saving decision..."
+                        : "Record decision"}
                     </Button>
                   </div>
                 </form>
@@ -2019,16 +2229,23 @@ export function TenderWorkspace({
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <h2 style={{ marginBottom: 0 }}>Eligibility</h2>
-                  <span className={`status-badge status-badge--${assessmentSummary.tone}`}>
+                  <span
+                    className={`status-badge status-badge--${assessmentSummary.tone}`}
+                  >
                     {assessmentSummary.label}
                   </span>
                 </div>
                 <p>
-                  Requirements, evidence, checklist work, and human review stay unified here without changing backend assessment semantics.
+                  Requirements, evidence, checklist work, and human review stay
+                  unified here without changing backend assessment semantics.
                 </p>
               </div>
             </div>
-            <div className="workspace-chip-row workspace-chip-row--left" role="tablist" aria-label="Eligibility filters">
+            <div
+              className="workspace-chip-row workspace-chip-row--left"
+              role="tablist"
+              aria-label="Eligibility filters"
+            >
               {eligibilityFilters.map((filter) => (
                 <button
                   aria-pressed={eligibilityFilter === filter.value}
@@ -2040,7 +2257,9 @@ export function TenderWorkspace({
                   {filter.label} (
                   {filter.value === "ALL"
                     ? eligibilityRequirements.length
-                    : eligibilityRequirements.filter((item) => filter.states.includes(item.stateKey)).length}
+                    : eligibilityRequirements.filter((item) =>
+                        filter.states.includes(item.stateKey),
+                      ).length}
                   )
                 </button>
               ))}
@@ -2076,7 +2295,9 @@ export function TenderWorkspace({
                         <strong>{item.title}</strong>
                         <p>{item.statement}</p>
                       </div>
-                      <span className={`status-badge status-badge--${item.statusTone}`}>
+                      <span
+                        className={`status-badge status-badge--${item.statusTone}`}
+                      >
                         {item.statusLabel}
                       </span>
                     </button>
@@ -2086,7 +2307,10 @@ export function TenderWorkspace({
               <div className="workspace-card requirement-detail">
                 {selectedRequirement === null ? (
                   <div className="workspace-empty-row">
-                    <p>Select a requirement to inspect its current evidence and assessment context.</p>
+                    <p>
+                      Select a requirement to inspect its current evidence and
+                      assessment context.
+                    </p>
                   </div>
                 ) : (
                   <>
@@ -2095,8 +2319,12 @@ export function TenderWorkspace({
                         <h3>{selectedRequirement.title}</h3>
                         <p>{selectedRequirement.statement}</p>
                       </div>
-                      <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
-                        <span className={`status-badge status-badge--${selectedRequirement.statusTone}`}>
+                      <div
+                        style={{ display: "grid", justifyItems: "end", gap: 6 }}
+                      >
+                        <span
+                          className={`status-badge status-badge--${selectedRequirement.statusTone}`}
+                        >
                           {selectedRequirement.statusLabel}
                         </span>
                         <small>{selectedRequirement.reviewStateLabel}</small>
@@ -2109,23 +2337,33 @@ export function TenderWorkspace({
                         <strong>Why:</strong> {selectedRequirement.why}
                       </p>
                       <p>
-                        <strong>What to do:</strong> {selectedRequirement.whatToDo}
+                        <strong>What to do:</strong>{" "}
+                        {selectedRequirement.whatToDo}
                       </p>
                     </div>
                     <div className="requirement-detail__grid">
                       <section>
                         <h4>Tender source</h4>
                         {selectedRequirement.sourceCitation === null ? (
-                          <p>A current tender citation is not available for this extracted requirement.</p>
+                          <p>
+                            A current tender citation is not available for this
+                            extracted requirement.
+                          </p>
                         ) : (
                           <>
-                            <p>{selectedRequirement.sourceCitation.boundedExcerpt}</p>
+                            <p>
+                              {
+                                selectedRequirement.sourceCitation
+                                  .boundedExcerpt
+                              }
+                            </p>
                             <p>
                               {selectedRequirement.sourceCitation.documentName}
                               {selectedRequirement.sourceCitation.clauseLabel
                                 ? `, clause ${selectedRequirement.sourceCitation.clauseLabel}`
                                 : ""}
-                              {selectedRequirement.sourceCitation.pageNumber === null
+                              {selectedRequirement.sourceCitation.pageNumber ===
+                              null
                                 ? ""
                                 : `, page ${selectedRequirement.sourceCitation.pageNumber}`}
                             </p>
@@ -2134,8 +2372,10 @@ export function TenderWorkspace({
                                 selectedRequirement.sourceCitation === null
                                   ? undefined
                                   : void openTenderCitation(
-                                      selectedRequirement.sourceCitation.tenderDocumentId,
-                                      selectedRequirement.sourceCitation.pageNumber,
+                                      selectedRequirement.sourceCitation
+                                        .tenderDocumentId,
+                                      selectedRequirement.sourceCitation
+                                        .pageNumber,
                                     )
                               }
                               variant="secondary"
@@ -2154,19 +2394,30 @@ export function TenderWorkspace({
                               : "No accepted current evidence was found for this requirement."}
                           </p>
                         ) : (
-                          selectedRequirement.evidenceLinks.map((link, index) => (
-                            <div className="evidence-link" key={`${selectedRequirement.id}-${index}`}>
-                              <strong>{link.label}</strong>
-                              <p>{link.excerpt}</p>
-                              <small>{link.supportingText}</small>
-                            </div>
-                          ))
+                          selectedRequirement.evidenceLinks.map(
+                            (link, index) => (
+                              <div
+                                className="evidence-link"
+                                key={`${selectedRequirement.id}-${index}`}
+                              >
+                                <strong>{link.label}</strong>
+                                <p>{link.excerpt}</p>
+                                <small>{link.supportingText}</small>
+                              </div>
+                            ),
+                          )
                         )}
                         <div className="inline-actions">
-                          <Link className="button button--secondary" href={`/documents/${organisationId}`}>
+                          <Link
+                            className="button button--secondary"
+                            href={`/documents/${organisationId}`}
+                          >
                             Open Company Docs
                           </Link>
-                          <Button onClick={() => navigateSurface("files")} variant="secondary">
+                          <Button
+                            onClick={() => navigateSurface("files")}
+                            variant="secondary"
+                          >
                             Upload tender file
                           </Button>
                         </div>
@@ -2182,7 +2433,10 @@ export function TenderWorkspace({
             <details className="disclosure">
               <summary>
                 Evidence &amp; assessment tools
-                <small>Start comparisons, capture company evidence, and record human reviews</small>
+                <small>
+                  Start comparisons, capture company evidence, and record human
+                  reviews
+                </small>
               </summary>
               <div className="disclosure__body tender-tools-panel">
                 {currentVersionId !== "" ? (
@@ -2193,7 +2447,10 @@ export function TenderWorkspace({
                   />
                 ) : (
                   <div className="workspace-empty-row">
-                    <p>The current tender version is unavailable for evidence review.</p>
+                    <p>
+                      The current tender version is unavailable for evidence
+                      review.
+                    </p>
                   </div>
                 )}
               </div>
@@ -2201,7 +2458,9 @@ export function TenderWorkspace({
             <details className="disclosure">
               <summary>
                 Missing documents and actions
-                <small>Checklist work stays tied to the current assessment snapshot</small>
+                <small>
+                  Checklist work stays tied to the current assessment snapshot
+                </small>
               </summary>
               <div className="disclosure__body tender-tools-panel">
                 {currentVersionId !== "" ? (
@@ -2212,7 +2471,10 @@ export function TenderWorkspace({
                   />
                 ) : (
                   <div className="workspace-empty-row">
-                    <p>The current tender version is unavailable for checklist review.</p>
+                    <p>
+                      The current tender version is unavailable for checklist
+                      review.
+                    </p>
                   </div>
                 )}
               </div>
@@ -2242,11 +2504,16 @@ export function TenderWorkspace({
                 <strong>Drafting is currently blocked</strong>
                 <p>{draftBlockedReason}</p>
                 {support.riskRun?.status === "FAILED" ? (
-                  <Button disabled={riskRetrying} onClick={() => void retryRiskAnalysis()}>
+                  <Button
+                    disabled={riskRetrying}
+                    onClick={() => void retryRiskAnalysis()}
+                  >
                     {riskRetrying ? "Retrying..." : "Retry early risk analysis"}
                   </Button>
                 ) : (
-                  <Button onClick={() => navigateSurface("overview")}>Open overview</Button>
+                  <Button onClick={() => navigateSurface("overview")}>
+                    Open overview
+                  </Button>
                 )}
               </Card>
             </section>
@@ -2260,7 +2527,10 @@ export function TenderWorkspace({
             <div className="workspace-section__header">
               <div>
                 <h2>AI Chat</h2>
-                <p>Grounded tender Q&amp;A stays tender-scoped and preserves the existing authorised source modes.</p>
+                <p>
+                  Grounded tender Q&amp;A stays tender-scoped and preserves the
+                  existing authorised source modes.
+                </p>
               </div>
             </div>
             <div className="tender-embedded-section">
@@ -2273,7 +2543,10 @@ export function TenderWorkspace({
                 />
               ) : (
                 <div className="workspace-empty-row">
-                  <p>The current tender version is unavailable for tender-scoped chat.</p>
+                  <p>
+                    The current tender version is unavailable for tender-scoped
+                    chat.
+                  </p>
                 </div>
               )}
             </div>
@@ -2295,9 +2568,15 @@ export function TenderWorkspace({
                     : ` · Current source set · ${currentVersion.reason}`}
                 </p>
               </div>
-              <Button onClick={() => setShowFileUpload(true)}>Upload files</Button>
+              <Button onClick={() => setShowFileUpload(true)}>
+                Upload files
+              </Button>
             </div>
-            <div className="workspace-chip-row workspace-chip-row--left" role="tablist" aria-label="File filters">
+            <div
+              className="workspace-chip-row workspace-chip-row--left"
+              role="tablist"
+              aria-label="File filters"
+            >
               <button
                 aria-pressed={filesFilter === "ALL"}
                 className={`workspace-chip ${filesFilter === "ALL" ? "workspace-chip--active" : ""}`}
@@ -2347,16 +2626,21 @@ export function TenderWorkspace({
                         <tr key={document.id}>
                           <td>
                             <strong>{document.displayFilename}</strong>
-                            <small>SHA-256 {document.sha256.slice(0, 12)}...</small>
+                            <small>
+                              SHA-256 {document.sha256.slice(0, 12)}...
+                            </small>
                           </td>
                           <td>{humanizeEnum(document.role)}</td>
                           <td>
-                            <span className={`status-badge status-badge--${documentStatusTone(document)}`}>
+                            <span
+                              className={`status-badge status-badge--${documentStatusTone(document)}`}
+                            >
                               {documentStatusLabel(document)}
                             </span>
                             {isExpiredUpload(document) ? (
                               <small style={{ display: "block", marginTop: 4 }}>
-                                The upload session expired before this file finished. Re-upload it.
+                                The upload session expired before this file
+                                finished. Re-upload it.
                               </small>
                             ) : null}
                           </td>
@@ -2385,7 +2669,8 @@ export function TenderWorkspace({
                                 </IconButton>
                               </Tooltip>
                             ) : isRemovableReadySource(document, {
-                                documentCount: currentVersion?.documents.length ?? 0,
+                                documentCount:
+                                  currentVersion?.documents.length ?? 0,
                                 isCurrentVersion: true,
                               }) ? (
                               <div className="tender-file-actions">
@@ -2419,20 +2704,20 @@ export function TenderWorkspace({
                                   </IconButton>
                                 </Tooltip>
                               </div>
+                            ) : document.status === "READY" ? (
+                              <Tooltip content="Download file">
+                                <IconButton
+                                  label={`Download ${document.displayFilename}`}
+                                  onClick={() => void download(document.id)}
+                                  type="button"
+                                >
+                                  <Download aria-hidden="true" size={16} />
+                                </IconButton>
+                              </Tooltip>
                             ) : (
-                              document.status === "READY" ? (
-                                <Tooltip content="Download file">
-                                  <IconButton
-                                    label={`Download ${document.displayFilename}`}
-                                    onClick={() => void download(document.id)}
-                                    type="button"
-                                  >
-                                    <Download aria-hidden="true" size={16} />
-                                  </IconButton>
-                                </Tooltip>
-                              ) : (
-                                <span style={{ color: "var(--text-subtle)" }}>-</span>
-                              )
+                              <span style={{ color: "var(--text-subtle)" }}>
+                                -
+                              </span>
                             )}
                           </td>
                         </tr>
@@ -2473,16 +2758,23 @@ export function TenderWorkspace({
             ) : null}
             <div className="tender-compat-note">
               <p>
-                Files added here are tender-scoped. Company certificates and reusable business evidence live in{" "}
+                Files added here are tender-scoped. Company certificates and
+                reusable business evidence live in{" "}
                 <Link href={`/documents/${organisationId}`}>Company Docs</Link>.
               </p>
             </div>
           </section>
 
           {showFileUpload ? (
-            <Modal label="Upload tender files" onClose={() => setShowFileUpload(false)}>
+            <Modal
+              label="Upload tender files"
+              onClose={() => setShowFileUpload(false)}
+            >
               <h2>Upload tender files</h2>
-              <p>Secure direct upload, malware/processing gates, and versioning remain unchanged.</p>
+              <p>
+                Secure direct upload, malware/processing gates, and versioning
+                remain unchanged.
+              </p>
               <form onSubmit={(event) => void upload(event)}>
                 <Field htmlFor="upload-role" label="Document role">
                   <Select
@@ -2494,7 +2786,9 @@ export function TenderWorkspace({
                     <option value="PRIMARY">Primary tender</option>
                     <option value="ANNEXURE">Annexure</option>
                     <option value="BOQ">BOQ</option>
-                    <option value="TECHNICAL_SPECIFICATION">Technical specification</option>
+                    <option value="TECHNICAL_SPECIFICATION">
+                      Technical specification
+                    </option>
                     <option value="FORM">Form</option>
                     <option value="DECLARATION">Declaration</option>
                     <option value="CORRIGENDUM">Corrigendum</option>
@@ -2505,11 +2799,27 @@ export function TenderWorkspace({
                 </Field>
                 {uploadRole === "CORRIGENDUM" ? (
                   <>
-                    <Field htmlFor="upload-corrigendum-id" label="Corrigendum identifier" required>
-                      <Input id="upload-corrigendum-id" name="corrigendum_identifier" required />
+                    <Field
+                      htmlFor="upload-corrigendum-id"
+                      label="Corrigendum identifier"
+                      required
+                    >
+                      <Input
+                        id="upload-corrigendum-id"
+                        name="corrigendum_identifier"
+                        required
+                      />
                     </Field>
-                    <Field htmlFor="upload-corrigendum-desc" label="Corrigendum description" required>
-                      <Input id="upload-corrigendum-desc" name="corrigendum_description" required />
+                    <Field
+                      htmlFor="upload-corrigendum-desc"
+                      label="Corrigendum description"
+                      required
+                    >
+                      <Input
+                        id="upload-corrigendum-desc"
+                        name="corrigendum_description"
+                        required
+                      />
                     </Field>
                   </>
                 ) : null}
@@ -2526,7 +2836,11 @@ export function TenderWorkspace({
                 </Field>
                 <div className="inline-actions">
                   <Button type="submit">Upload source securely</Button>
-                  <Button onClick={() => setShowFileUpload(false)} type="button" variant="secondary">
+                  <Button
+                    onClick={() => setShowFileUpload(false)}
+                    type="button"
+                    variant="secondary"
+                  >
                     Cancel
                   </Button>
                 </div>
@@ -2550,7 +2864,11 @@ export function TenderWorkspace({
                 >
                   Cancel
                 </Button>
-                <Button onClick={() => void removeTenderFile()} type="button" variant="danger">
+                <Button
+                  onClick={() => void removeTenderFile()}
+                  type="button"
+                  variant="danger"
+                >
                   {pendingFileRemoval.confirmLabel}
                 </Button>
               </div>
@@ -2562,7 +2880,10 @@ export function TenderWorkspace({
               <div className="workspace-section__header">
                 <div>
                   <h2>Processing</h2>
-                  <p>Background extraction and source handling remain visible without showing fake progress.</p>
+                  <p>
+                    Background extraction and source handling remain visible
+                    without showing fake progress.
+                  </p>
                 </div>
               </div>
               <div className="workspace-card">
@@ -2578,10 +2899,14 @@ export function TenderWorkspace({
                           <strong>{humanizeEnum(job.currentStage)}</strong>
                           <p>{job.publicMessage}</p>
                         </div>
-                        <span className={`status-badge status-badge--${statusTone(job.state)}`}>
+                        <span
+                          className={`status-badge status-badge--${statusTone(job.state)}`}
+                        >
                           {humanizeEnum(job.state)}
                         </span>
-                        <p className="workspace-row__supporting">{job.progressPercentage}%</p>
+                        <p className="workspace-row__supporting">
+                          {job.progressPercentage}%
+                        </p>
                         <span className="workspace-row__deadline" />
                         <span />
                       </article>
@@ -2611,7 +2936,9 @@ export function TenderWorkspace({
                           <strong>{corrigendum.identifier}</strong>
                           <p>{corrigendum.description}</p>
                         </div>
-                        <span className="status-badge status-badge--info">Corrigendum</span>
+                        <span className="status-badge status-badge--info">
+                          Corrigendum
+                        </span>
                         <p className="workspace-row__supporting">
                           {corrigendum.publicationDate === null
                             ? "Publication date unavailable"
@@ -2635,9 +2962,15 @@ export function TenderWorkspace({
             <div className="workspace-section__header">
               <div>
                 <h2>Activity</h2>
-                <p>Chronological tender activity uses the current workflow and review records already exposed by the application.</p>
+                <p>
+                  Chronological tender activity uses the current workflow and
+                  review records already exposed by the application.
+                </p>
               </div>
-              <Button onClick={() => setShowAuditSummary((value) => !value)} variant="secondary">
+              <Button
+                onClick={() => setShowAuditSummary((value) => !value)}
+                variant="secondary"
+              >
                 View audit summary
               </Button>
             </div>
@@ -2646,14 +2979,21 @@ export function TenderWorkspace({
                 {activityCounts.length === 0 ? (
                   <Card className="tender-summary-card">
                     <strong>No summary available</strong>
-                    <p>No audit categories are currently exposed for this tender.</p>
+                    <p>
+                      No audit categories are currently exposed for this tender.
+                    </p>
                   </Card>
                 ) : (
                   activityCounts.map(([category, count]) => (
                     <Card className="tender-summary-card" key={category}>
-                      <span className="tender-summary-card__label">{category}</span>
+                      <span className="tender-summary-card__label">
+                        {category}
+                      </span>
                       <strong>{count}</strong>
-                      <p>{count === 1 ? "Entry" : "Entries"} currently visible in the activity stream.</p>
+                      <p>
+                        {count === 1 ? "Entry" : "Entries"} currently visible in
+                        the activity stream.
+                      </p>
                     </Card>
                   ))
                 )}
@@ -2667,16 +3007,24 @@ export function TenderWorkspace({
               ) : (
                 <ol className="activity-list">
                   {activityItems.map((item, index) => (
-                    <li className="activity-list__item" key={`${item.category}-${item.title}-${index}`}>
+                    <li
+                      className="activity-list__item"
+                      key={`${item.category}-${item.title}-${index}`}
+                    >
                       <div className="activity-list__dot" aria-hidden="true" />
                       <div className="activity-list__body">
                         <div className="activity-list__meta">
-                          <span className="status-badge status-badge--info">{item.category}</span>
+                          <span className="status-badge status-badge--info">
+                            {item.category}
+                          </span>
                           <small>{formatTimestamp(item.occurredAt)}</small>
                         </div>
                         <strong>{item.title}</strong>
                         <p>{item.description}</p>
-                        <Button onClick={() => navigateSurface(item.stage)} variant="quiet">
+                        <Button
+                          onClick={() => navigateSurface(item.stage)}
+                          variant="quiet"
+                        >
                           Open {surfaceLabels[item.stage]}
                         </Button>
                       </div>
@@ -2696,7 +3044,8 @@ export function TenderWorkspace({
               <div>
                 <h2>Review &amp; Export</h2>
                 <p>
-                  Final readiness findings, human disposition, and the controlled review package for {workspace.title}.
+                  Final readiness findings, human disposition, and the
+                  controlled review package for {workspace.title}.
                 </p>
               </div>
             </div>
@@ -2704,25 +3053,36 @@ export function TenderWorkspace({
               <div className="tender-stat-row">
                 <div className="tender-stat">
                   <strong>
-                    {currentReadinessRun === null ? "—" : humanizeEnum(currentReadinessRun.status)}
+                    {currentReadinessRun === null
+                      ? "—"
+                      : humanizeEnum(currentReadinessRun.status)}
                   </strong>
                   <span>Final readiness</span>
                 </div>
                 <div className="tender-stat">
-                  <strong>{currentReadinessRun?.finding_counts.blockers ?? 0}</strong>
+                  <strong>
+                    {currentReadinessRun?.finding_counts.blockers ?? 0}
+                  </strong>
                   <span>Blockers</span>
                 </div>
                 <div className="tender-stat">
-                  <strong>{currentReadinessRun?.finding_counts.human_disposition_required ?? 0}</strong>
+                  <strong>
+                    {currentReadinessRun?.finding_counts
+                      .human_disposition_required ?? 0}
+                  </strong>
                   <span>Human disposition</span>
                 </div>
                 <div className="tender-stat">
-                  <strong>{currentReadinessRun?.finding_counts.warnings ?? 0}</strong>
+                  <strong>
+                    {currentReadinessRun?.finding_counts.warnings ?? 0}
+                  </strong>
                   <span>Warnings</span>
                 </div>
                 <div className="tender-stat">
                   <strong>
-                    {currentPackage === null ? "—" : humanizeEnum(currentPackage.generation_status)}
+                    {currentPackage === null
+                      ? "—"
+                      : humanizeEnum(currentPackage.generation_status)}
                   </strong>
                   <span>Package</span>
                 </div>
@@ -2737,7 +3097,8 @@ export function TenderWorkspace({
                   <FinalReadinessWorkspace
                     onNavigateStage={(stage) => {
                       if (stage === "draft") navigateSurface("draft");
-                      else if (stage === "evidence" || stage === "checklist") navigateSurface("eligibility");
+                      else if (stage === "evidence" || stage === "checklist")
+                        navigateSurface("eligibility");
                       else navigateSurface("overview");
                     }}
                     organisationId={organisationId}
@@ -2746,22 +3107,30 @@ export function TenderWorkspace({
                   />
                 ) : (
                   <div className="workspace-empty-row">
-                    <p>The current tender version is unavailable for readiness review.</p>
+                    <p>
+                      The current tender version is unavailable for readiness
+                      review.
+                    </p>
                   </div>
                 )}
               </div>
             </div>
             <div className="review-columns__side">
               <Card className="tender-summary-card">
-                <span className="tender-summary-card__label">Human disposition</span>
+                <span className="tender-summary-card__label">
+                  Human disposition
+                </span>
                 <strong>
                   {currentReadinessRun?.current_disposition == null
                     ? "No disposition recorded"
-                    : humanizeEnum(currentReadinessRun.current_disposition.disposition)}
+                    : humanizeEnum(
+                        currentReadinessRun.current_disposition.disposition,
+                      )}
                 </strong>
                 <p>
-                  Final high-stakes decisions remain explicit human actions and are never preselected. Record the
-                  decision in the readiness panel once findings are resolved.
+                  Final high-stakes decisions remain explicit human actions and
+                  are never preselected. Record the decision in the readiness
+                  panel once findings are resolved.
                 </p>
               </Card>
               <div className="workspace-card tender-embedded-section tender-tools-panel">
@@ -2773,19 +3142,36 @@ export function TenderWorkspace({
                   />
                 ) : (
                   <div className="workspace-empty-row">
-                    <p>The current tender version is unavailable for controlled review packaging.</p>
+                    <p>
+                      The current tender version is unavailable for controlled
+                      review packaging.
+                    </p>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          <div className="workspace-card" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px" }}>
-            <Button onClick={() => navigateSurface("draft")} variant="secondary">
+          <div
+            className="workspace-card"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "14px 18px",
+            }}
+          >
+            <Button
+              onClick={() => navigateSurface("draft")}
+              variant="secondary"
+            >
               Back to Draft
             </Button>
-            <span style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}>
-              Final decisions and downloads remain gated by the readiness and package controls above.
+            <span
+              style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}
+            >
+              Final decisions and downloads remain gated by the readiness and
+              package controls above.
             </span>
           </div>
         </div>

@@ -1102,9 +1102,11 @@ describe("tender workspace tenant isolation", () => {
       earlyPursuitDecision: { findMany: vi.fn().mockResolvedValue([]) },
       extractedTenderField: { findMany: vi.fn().mockResolvedValue([]) },
       processingJob: {
-        findMany: vi.fn().mockResolvedValue([
-          { publicMessage: "Upload needs attention.", state: "FAILED" },
-        ]),
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            { publicMessage: "Upload needs attention.", state: "FAILED" },
+          ]),
       },
       tender: {
         findFirst: vi.fn().mockResolvedValue({

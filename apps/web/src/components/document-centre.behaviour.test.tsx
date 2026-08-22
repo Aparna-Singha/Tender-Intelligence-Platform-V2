@@ -73,7 +73,9 @@ describe("company docs workspace", () => {
     expect(
       await screen.findByRole("heading", { name: "Company documents" }),
     ).toBeInTheDocument();
-    const summaryGrid = screen.getByText("Current").closest(".tender-summary-grid");
+    const summaryGrid = screen
+      .getByText("Current")
+      .closest(".tender-summary-grid");
     expect(summaryGrid).toBeInstanceOf(HTMLElement);
     if (!(summaryGrid instanceof HTMLElement)) {
       throw new Error("Expected health summary grid to render");
@@ -83,7 +85,9 @@ describe("company docs workspace", () => {
     const attentionCard = summary.getByText("Need attention").closest("div");
     const expiringCard = summary.getByText("Expiring soon").closest("div");
     const outdatedCard = summary.getByText("Outdated").closest("div");
-    const tableCard = screen.getByRole("table").closest(".company-docs-table-card");
+    const tableCard = screen
+      .getByRole("table")
+      .closest(".company-docs-table-card");
     expect(currentCard).toHaveTextContent("1");
     expect(attentionCard).toHaveTextContent("4");
     expect(expiringCard).toHaveTextContent("1");
@@ -99,7 +103,9 @@ describe("company docs workspace", () => {
     }
     const table = within(tableCard);
     expect(table.getByText("Factory licence")).toBeInTheDocument();
-    expect(table.getAllByText("Purchase order").length).toBeGreaterThanOrEqual(1);
+    expect(table.getAllByText("Purchase order").length).toBeGreaterThanOrEqual(
+      1,
+    );
     expect(screen.getByText("Human review required")).toBeInTheDocument();
     expect(screen.getByText("Unverified")).toBeInTheDocument();
     expect(screen.getByText("Rejected")).toBeInTheDocument();
@@ -110,12 +116,21 @@ describe("company docs workspace", () => {
     const user = userEvent.setup();
     render(<DocumentCentre organisationId="org-1" />);
     await screen.findByRole("heading", { name: "Company documents" });
-    await user.click(screen.getAllByRole("button", { name: "Upload document" })[0]!);
+    await user.click(
+      screen.getAllByRole("button", { name: "Upload document" })[0]!,
+    );
 
-    const dialog = screen.getByRole("dialog", { name: "Upload company document" });
+    const dialog = screen.getByRole("dialog", {
+      name: "Upload company document",
+    });
     const fileInput = dialog.querySelector('input[type="file"]');
-    expect(dialog).toHaveTextContent("PDF, JPG/JPEG, PNG, DOCX, or XLSX up to 25 MB.");
-    expect(fileInput).toHaveAttribute("accept", ".pdf,.jpg,.jpeg,.png,.docx,.xlsx");
+    expect(dialog).toHaveTextContent(
+      "PDF, JPG/JPEG, PNG, DOCX, or XLSX up to 25 MB.",
+    );
+    expect(fileInput).toHaveAttribute(
+      "accept",
+      ".pdf,.jpg,.jpeg,.png,.docx,.xlsx",
+    );
     expect(within(dialog).getByRole("combobox")).toHaveValue("UDYAM");
   });
 });

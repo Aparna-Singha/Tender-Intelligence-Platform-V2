@@ -1,12 +1,7 @@
 import { parseTenderDateTime } from "@tender/domain";
 
 export type WorkflowTone =
-  | "accent"
-  | "danger"
-  | "info"
-  | "neutral"
-  | "success"
-  | "warning";
+  "accent" | "danger" | "info" | "neutral" | "success" | "warning";
 
 export type TenderWorkflowStateCode =
   | "ANALYSIS_READY"
@@ -82,8 +77,8 @@ export function resolveSubmissionDeadline(
   const extracted =
     extractedSubmissionDeadlineText === null
       ? null
-      : parseTenderDateTime(extractedSubmissionDeadlineText)?.toISOString() ??
-        null;
+      : (parseTenderDateTime(extractedSubmissionDeadlineText)?.toISOString() ??
+        null);
   return {
     deadlineSource:
       extracted !== null
@@ -96,9 +91,8 @@ export function resolveSubmissionDeadline(
     hasMismatch:
       metadata !== null &&
       extracted !== null &&
-      Math.abs(
-        new Date(metadata).getTime() - new Date(extracted).getTime(),
-      ) >= 60_000,
+      Math.abs(new Date(metadata).getTime() - new Date(extracted).getTime()) >=
+        60_000,
     metadataSubmissionDeadline: metadata,
     submissionDeadline: extracted ?? metadata,
   };
@@ -178,8 +172,8 @@ export function deriveTenderWorkflowState(
 
   if (
     context.documents.some((document) => document.status === "UPLOADED") ||
-    context.processingJobs.some((job) =>
-      !["CANCELLED", "COMPLETE", "FAILED"].includes(job.state),
+    context.processingJobs.some(
+      (job) => !["CANCELLED", "COMPLETE", "FAILED"].includes(job.state),
     )
   ) {
     return {
@@ -216,8 +210,7 @@ export function deriveTenderWorkflowState(
   }
 
   if (
-    context.extraction === null ||
-    context.extraction.invalidatedAt !== null ||
+    context.extraction?.invalidatedAt !== null ||
     context.extraction.status !== "COMPLETE"
   ) {
     return {
@@ -254,8 +247,7 @@ export function deriveTenderWorkflowState(
   }
 
   if (
-    context.risk === null ||
-    context.risk.invalidatedAt !== null ||
+    context.risk?.invalidatedAt !== null ||
     context.risk.status !== "COMPLETE"
   ) {
     return {
@@ -326,8 +318,7 @@ export function deriveTenderWorkflowState(
   }
 
   if (
-    context.assessment === null ||
-    context.assessment.invalidatedAt !== null ||
+    context.assessment?.invalidatedAt !== null ||
     context.assessment.status !== "COMPLETE"
   ) {
     return {
@@ -363,9 +354,14 @@ export function deriveTenderWorkflowState(
 
   if (
     context.currentDraftRunStatus !== null &&
-    ["QUEUED", "SNAPSHOTTING", "PLANNING", "RETRIEVING", "GENERATING", "VALIDATING"].includes(
-      context.currentDraftRunStatus,
-    )
+    [
+      "QUEUED",
+      "SNAPSHOTTING",
+      "PLANNING",
+      "RETRIEVING",
+      "GENERATING",
+      "VALIDATING",
+    ].includes(context.currentDraftRunStatus)
   ) {
     return {
       actionLabel: "Open",

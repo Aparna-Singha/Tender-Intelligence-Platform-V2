@@ -18,14 +18,19 @@ export default function AcceptInvitationPage(): JSX.Element {
     setBusy(true);
     setStatus("");
     try {
-      const result = await apiRequest<{ organisation_id: string }>("/invitations/accept", {
-        body: JSON.stringify({ token }),
-        method: "POST",
-      });
+      const result = await apiRequest<{ organisation_id: string }>(
+        "/invitations/accept",
+        {
+          body: JSON.stringify({ token }),
+          method: "POST",
+        },
+      );
       await apiRequest(`/organisations/${result.organisation_id}/select`, {
         method: "POST",
       });
-      router.replace(`/settings/${result.organisation_id}?section=people-access`);
+      router.replace(
+        `/settings/${result.organisation_id}?section=people-access`,
+      );
     } catch (caught) {
       setStatus(
         formatApiError(
@@ -53,15 +58,21 @@ export default function AcceptInvitationPage(): JSX.Element {
           <h2>Accept invitation</h2>
           {token === "" ? (
             <Alert tone="warning" title="Invitation token missing">
-              <p>Open the full invitation link from your email, then try again.</p>
+              <p>
+                Open the full invitation link from your email, then try again.
+              </p>
             </Alert>
           ) : (
             <>
               <p>
-                Continue with the invited account. If your session has expired, sign
-                in first and reopen this link.
+                Continue with the invited account. If your session has expired,
+                sign in first and reopen this link.
               </p>
-              <Button loading={busy} onClick={() => void accept()} type="button">
+              <Button
+                loading={busy}
+                onClick={() => void accept()}
+                type="button"
+              >
                 Accept invitation
               </Button>
             </>

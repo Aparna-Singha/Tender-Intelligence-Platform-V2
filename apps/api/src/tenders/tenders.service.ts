@@ -137,6 +137,8 @@ export class TendersService {
     _userId: string,
     _requestId: string,
   ): Promise<unknown> {
+    void _userId;
+    void _requestId;
     const tender = await this.database.tender.findFirst({
       include: {
         corrigenda: { orderBy: { ingestedAt: "desc" } },
@@ -850,7 +852,8 @@ export class TendersService {
           sourceProvenance:
             "Current tender source removed by an authorised organisation member.",
           sourceSnapshot: {
-            previous_source_snapshot: resolvedDocument.tenderVersion.sourceSnapshot,
+            previous_source_snapshot:
+              resolvedDocument.tenderVersion.sourceSnapshot,
             removed_document_id: resolvedDocument.id,
             removed_filename: resolvedDocument.displayFilename,
             removed_role: resolvedDocument.role,
@@ -1273,40 +1276,38 @@ export class TendersService {
   private async decorateTenders<
     TTender extends {
       readonly buyer: string;
-      readonly currentVersion:
-        | {
-            readonly activeEarlyRiskRun: {
-              readonly id: string;
-              readonly invalidatedAt: Date | null;
-              readonly publicMessage?: string | null;
-              readonly safeFailureMessage?: string | null;
-              readonly status: string;
-            } | null;
-            readonly activeEligibilityAssessmentRun: {
-              readonly invalidatedAt: Date | null;
-              readonly publicMessage?: string | null;
-              readonly safeFailureMessage?: string | null;
-              readonly status: string;
-            } | null;
-            readonly activeExtractionRun: {
-              readonly id: string;
-              readonly invalidatedAt: Date | null;
-              readonly publicMessage?: string | null;
-              readonly safeFailureMessage?: string | null;
-              readonly status: string;
-            } | null;
-            readonly documents: readonly {
-              readonly role: string;
-              readonly status: string;
-              readonly uploadSessionExpiresAt: Date;
-            }[];
-            readonly id: string;
-            readonly processingJobs?: readonly {
-              readonly publicMessage: string;
-              readonly state: string;
-            }[];
-          }
-        | null;
+      readonly currentVersion: {
+        readonly activeEarlyRiskRun: {
+          readonly id: string;
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        } | null;
+        readonly activeEligibilityAssessmentRun: {
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        } | null;
+        readonly activeExtractionRun: {
+          readonly id: string;
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        } | null;
+        readonly documents: readonly {
+          readonly role: string;
+          readonly status: string;
+          readonly uploadSessionExpiresAt: Date;
+        }[];
+        readonly id: string;
+        readonly processingJobs?: readonly {
+          readonly publicMessage: string;
+          readonly state: string;
+        }[];
+      } | null;
       readonly currentVersionId?: string | null;
       readonly id: string;
       readonly isDemonstration: boolean;
@@ -1420,7 +1421,10 @@ export class TendersService {
         );
       }
     });
-    const decisionByRiskRunId = new Map<string, { readonly decision: "CONTINUE" | "HOLD" | "STOP" }>();
+    const decisionByRiskRunId = new Map<
+      string,
+      { readonly decision: "CONTINUE" | "HOLD" | "STOP" }
+    >();
     decisions.forEach((decision) => {
       if (!decisionByRiskRunId.has(decision.riskAnalysisRunId)) {
         decisionByRiskRunId.set(decision.riskAnalysisRunId, decision);
@@ -1446,8 +1450,9 @@ export class TendersService {
         currentVersion?.activeExtractionRun === null ||
         currentVersion?.activeExtractionRun === undefined
           ? null
-          : (deadlineByExtractionRunId.get(currentVersion.activeExtractionRun.id) ??
-            null);
+          : (deadlineByExtractionRunId.get(
+              currentVersion.activeExtractionRun.id,
+            ) ?? null);
       const deadlineResolution = resolveSubmissionDeadline(
         tender.submissionDeadline,
         submissionDeadlineText,
@@ -1471,9 +1476,7 @@ export class TendersService {
         documents: currentVersion?.documents ?? [],
         extraction: currentVersion?.activeExtractionRun ?? null,
         processingJobs:
-          tender.processingJobs ??
-          currentVersion?.processingJobs ??
-          [],
+          tender.processingJobs ?? currentVersion?.processingJobs ?? [],
         risk: currentVersion?.activeEarlyRiskRun ?? null,
       });
       return {

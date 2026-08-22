@@ -49,12 +49,7 @@ export interface TenderSummary {
 }
 
 export type TenderTone =
-  | "neutral"
-  | "info"
-  | "success"
-  | "warning"
-  | "danger"
-  | "accent";
+  "neutral" | "info" | "success" | "warning" | "danger" | "accent";
 
 export interface TenderPresentation {
   readonly actionLabel: string;
@@ -82,7 +77,8 @@ function authoritativeLifecycleLabel(
 export function getDeadlineDays(
   submissionDeadline: string | null | undefined,
 ): number | null {
-  if (submissionDeadline === undefined || submissionDeadline === null) return null;
+  if (submissionDeadline === undefined || submissionDeadline === null)
+    return null;
   const deadline = new Date(submissionDeadline);
   if (Number.isNaN(deadline.getTime())) return null;
   const today = new Date();
@@ -120,7 +116,8 @@ export function formatDeadlineCountdown(
 ): string {
   const days = getDeadlineDays(submissionDeadline);
   if (days === null) return "Deadline unavailable";
-  if (days < 0) return `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`;
+  if (days < 0)
+    return `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`;
   if (days === 0) return "Due today";
   if (days === 1) return "1 day left";
   return `${days} days left`;
@@ -246,7 +243,9 @@ export function describeTender(tender: TenderSummary): TenderPresentation {
     onHold: false,
     statusLabel: humanizeEnum(lifecycle),
     supportingLabel:
-      workspaceStatus === "" ? "Awaiting next action" : humanizeEnum(workspaceStatus),
+      workspaceStatus === ""
+        ? "Awaiting next action"
+        : humanizeEnum(workspaceStatus),
     tone: deadlineSoon ? "warning" : "neutral",
   };
 }

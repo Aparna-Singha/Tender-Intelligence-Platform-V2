@@ -42,8 +42,10 @@ describe("worker health server", () => {
   });
 
   it("returns 503 with check results when dependencies are unavailable", async () => {
+    const metrics = { setReady: vi.fn() };
     const server = createHealthServer({
       logger: pino({ enabled: false }),
+      metrics: metrics as never,
       readiness: readinessWith("not_ready"),
       requestIdHeader: "x-request-id",
     });
@@ -61,6 +63,7 @@ describe("worker health server", () => {
       },
     });
     expect(response.json().request_id).toMatch(/^[0-9a-f-]{36}$/);
+    expect(metrics.setReady).toHaveBeenCalledWith(false);
     await server.close();
   });
 });

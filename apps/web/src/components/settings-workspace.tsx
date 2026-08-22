@@ -20,10 +20,7 @@ import {
 import { apiRequest, formatApiError } from "../lib/api";
 
 type SettingsSection =
-  | "organisation"
-  | "people-access"
-  | "security"
-  | "preferences";
+  "organisation" | "people-access" | "security" | "preferences";
 
 interface OrganisationDetails {
   readonly createdAt: string;
@@ -92,7 +89,11 @@ const ownerInviteRoles = [
   "CONSULTANT",
   "REVIEWER",
 ] as const;
-const adminInviteRoles = ["TENDER_EXECUTIVE", "CONSULTANT", "REVIEWER"] as const;
+const adminInviteRoles = [
+  "TENDER_EXECUTIVE",
+  "CONSULTANT",
+  "REVIEWER",
+] as const;
 const ownerChangeRoles = [
   "ADMIN",
   "TENDER_EXECUTIVE",
@@ -112,13 +113,16 @@ function arrayValue(value: unknown): readonly string[] {
 }
 
 function textValue(value: unknown): string {
-  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (typeof value === "string" || typeof value === "number")
+    return String(value);
   return "Not provided";
 }
 
 function listValue(value: unknown): string {
   const entries = arrayValue(value);
-  return entries.length === 0 ? "Not provided" : entries.map(humanizeEnum).join(", ");
+  return entries.length === 0
+    ? "Not provided"
+    : entries.map(humanizeEnum).join(", ");
 }
 
 export function SettingsWorkspace({
@@ -127,8 +131,11 @@ export function SettingsWorkspace({
   readonly organisationId: string;
 }): JSX.Element {
   const searchParams = useSearchParams();
-  const [activeSection, setActiveSection] = useState<SettingsSection>("organisation");
-  const [organisation, setOrganisation] = useState<OrganisationDetails | null>(null);
+  const [activeSection, setActiveSection] =
+    useState<SettingsSection>("organisation");
+  const [organisation, setOrganisation] = useState<OrganisationDetails | null>(
+    null,
+  );
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [members, setMembers] = useState<readonly MemberRecord[]>([]);
   const [session, setSession] = useState<SessionContext | null>(null);
@@ -143,17 +150,25 @@ export function SettingsWorkspace({
 
   async function load(): Promise<void> {
     try {
-      const [loadedOrganisation, loadedMemberships, loadedMembers, loadedSession, loadedSessions, loadedProfile] =
-        await Promise.all([
-          apiRequest<OrganisationDetails>(`/organisations/${organisationId}`),
-          apiRequest<readonly Membership[]>("/organisations"),
-          apiRequest<readonly MemberRecord[]>(
-            `/organisations/${organisationId}/members`,
-          ),
-          apiRequest<SessionContext>("/auth/session"),
-          apiRequest<readonly SessionSummary[]>("/auth/sessions"),
-          apiRequest<ResumeResponse>(`/organisations/${organisationId}/onboarding`),
-        ]);
+      const [
+        loadedOrganisation,
+        loadedMemberships,
+        loadedMembers,
+        loadedSession,
+        loadedSessions,
+        loadedProfile,
+      ] = await Promise.all([
+        apiRequest<OrganisationDetails>(`/organisations/${organisationId}`),
+        apiRequest<readonly Membership[]>("/organisations"),
+        apiRequest<readonly MemberRecord[]>(
+          `/organisations/${organisationId}/members`,
+        ),
+        apiRequest<SessionContext>("/auth/session"),
+        apiRequest<readonly SessionSummary[]>("/auth/sessions"),
+        apiRequest<ResumeResponse>(
+          `/organisations/${organisationId}/onboarding`,
+        ),
+      ]);
       setOrganisation(loadedOrganisation);
       setMemberships(loadedMemberships);
       setMembers(loadedMembers);
@@ -183,7 +198,8 @@ export function SettingsWorkspace({
   }, [searchParams]);
 
   const currentMembership = memberships.find(
-    ({ organisation: currentOrganisation }) => currentOrganisation.id === organisationId,
+    ({ organisation: currentOrganisation }) =>
+      currentOrganisation.id === organisationId,
   );
   const currentRole = currentMembership?.role ?? "";
   const inviteableRoles =
@@ -204,7 +220,10 @@ export function SettingsWorkspace({
         "Minimum preparation days",
         textValue(profile?.values.minimum_preparation_days),
       ],
-      ["Summary language", humanizeEnum(textValue(profile?.values.summary_language))],
+      [
+        "Summary language",
+        humanizeEnum(textValue(profile?.values.summary_language)),
+      ],
       [
         "Notification preferences",
         listValue(profile?.values.notification_preferences),
@@ -230,9 +249,13 @@ export function SettingsWorkspace({
         method: "POST",
       });
       form.reset();
-      setInviteMessage("Invitation sent if delivery is configured for this environment.");
+      setInviteMessage(
+        "Invitation sent if delivery is configured for this environment.",
+      );
     } catch (caught) {
-      setInviteMessage(formatApiError(caught, "The invitation could not be sent."));
+      setInviteMessage(
+        formatApiError(caught, "The invitation could not be sent."),
+      );
     } finally {
       setInviting(false);
     }
@@ -244,10 +267,13 @@ export function SettingsWorkspace({
     setUpdatingRoleId(membershipId);
     setRoleMessage("");
     try {
-      await apiRequest(`/organisations/${organisationId}/members/${membershipId}/role`, {
-        body: JSON.stringify({ role: nextRole }),
-        method: "PATCH",
-      });
+      await apiRequest(
+        `/organisations/${organisationId}/members/${membershipId}/role`,
+        {
+          body: JSON.stringify({ role: nextRole }),
+          method: "PATCH",
+        },
+      );
       setRoleMessage("Membership role updated.");
       setPendingRoles((current) => {
         const next = { ...current };
@@ -272,25 +298,30 @@ export function SettingsWorkspace({
       <div className="settings-layout">
         <aside className="workspace-card settings-rail">
           <nav aria-label="Settings sections" className="settings-rail__nav">
-            {(Object.keys(sectionLabels) as readonly SettingsSection[]).map((section) => (
-              <button
-                className={`settings-rail__link ${activeSection === section ? "settings-rail__link--active" : ""}`}
-                key={section}
-                onClick={() => setActiveSection(section)}
-                type="button"
-              >
-                <span>{sectionLabels[section]}</span>
-                {section === "people-access" && members.length > 0 ? (
-                  <small>{members.length} member(s)</small>
-                ) : section === "security" ? (
-                  <small>{activeSessions.length} active session(s)</small>
-                ) : section === "organisation" && profile !== null ? (
-                  <small>{profile.progress.completed_steps.length}/8 profile steps complete</small>
-                ) : section === "preferences" && profile !== null ? (
-                  <small>{humanizeEnum(profile.display_mode)}</small>
-                ) : null}
-              </button>
-            ))}
+            {(Object.keys(sectionLabels) as readonly SettingsSection[]).map(
+              (section) => (
+                <button
+                  className={`settings-rail__link ${activeSection === section ? "settings-rail__link--active" : ""}`}
+                  key={section}
+                  onClick={() => setActiveSection(section)}
+                  type="button"
+                >
+                  <span>{sectionLabels[section]}</span>
+                  {section === "people-access" && members.length > 0 ? (
+                    <small>{members.length} member(s)</small>
+                  ) : section === "security" ? (
+                    <small>{activeSessions.length} active session(s)</small>
+                  ) : section === "organisation" && profile !== null ? (
+                    <small>
+                      {profile.progress.completed_steps.length}/8 profile steps
+                      complete
+                    </small>
+                  ) : section === "preferences" && profile !== null ? (
+                    <small>{humanizeEnum(profile.display_mode)}</small>
+                  ) : null}
+                </button>
+              ),
+            )}
           </nav>
         </aside>
 
@@ -311,8 +342,9 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Organisation</h2>
                     <p>
-                      Existing editable company information and access controls remain
-                      preserved through the current structured profile flow.
+                      Existing editable company information and access controls
+                      remain preserved through the current structured profile
+                      flow.
                     </p>
                   </div>
                   <button
@@ -334,19 +366,31 @@ export function SettingsWorkspace({
                   </label>
                   <label className="readonly-field">
                     <span>Registered location</span>
-                    <Input readOnly value={textValue(profile?.values.registered_location)} />
+                    <Input
+                      readOnly
+                      value={textValue(profile?.values.registered_location)}
+                    />
                   </label>
                   <label className="readonly-field">
                     <span>Website</span>
-                    <Input readOnly value={textValue(profile?.values.website)} />
+                    <Input
+                      readOnly
+                      value={textValue(profile?.values.website)}
+                    />
                   </label>
                   <label className="readonly-field">
                     <span>Business models</span>
-                    <Input readOnly value={listValue(profile?.values.business_models)} />
+                    <Input
+                      readOnly
+                      value={listValue(profile?.values.business_models)}
+                    />
                   </label>
                   <label className="readonly-field">
                     <span>Years of experience</span>
-                    <Input readOnly value={textValue(profile?.values.years_experience)} />
+                    <Input
+                      readOnly
+                      value={textValue(profile?.values.years_experience)}
+                    />
                   </label>
                 </div>
                 <div className="settings-note">
@@ -354,16 +398,24 @@ export function SettingsWorkspace({
                   {profile === null
                     ? "Unavailable"
                     : `${profile.progress.completed_steps.length} of 8 steps complete`}
-                  . Direct field editing is handled in the existing organisation profile flow.
+                  . Direct field editing is handled in the existing organisation
+                  profile flow.
                 </div>
                 <div className="inline-actions">
-                  <Link className="button button--secondary" href={`/onboarding/${organisationId}`}>
+                  <Link
+                    className="button button--secondary"
+                    href={`/onboarding/${organisationId}`}
+                  >
                     Open organisation profile
                   </Link>
                 </div>
                 <p className="settings-field-hint">
-                  Organisation created {formatTimestamp(organisation.createdAt)}. Current role:{" "}
-                  {currentRole === "" ? "Unavailable" : humanizeEnum(currentRole)}.
+                  Organisation created {formatTimestamp(organisation.createdAt)}
+                  . Current role:{" "}
+                  {currentRole === ""
+                    ? "Unavailable"
+                    : humanizeEnum(currentRole)}
+                  .
                 </p>
               </Card>
             </section>
@@ -376,9 +428,9 @@ export function SettingsWorkspace({
                   <div>
                     <h2>People &amp; access</h2>
                     <p>
-                      Real organisation membership, invitation, and role controls only.
-                      Member removal and custom permissions are not supported by the
-                      current backend.
+                      Real organisation membership, invitation, and role
+                      controls only. Member removal and custom permissions are
+                      not supported by the current backend.
                     </p>
                   </div>
                 </div>
@@ -386,17 +438,30 @@ export function SettingsWorkspace({
                 {inviteableRoles.length === 0 ? (
                   <Alert tone="info" title="Invitation controls unavailable">
                     <p>
-                      Only owner and admin roles can send invitations. Role changes are
-                      limited to owners and never allow assigning owner through this UI.
+                      Only owner and admin roles can send invitations. Role
+                      changes are limited to owners and never allow assigning
+                      owner through this UI.
                     </p>
                   </Alert>
                 ) : (
-                  <form className="settings-invite-form" onSubmit={(event) => void invite(event)}>
+                  <form
+                    className="settings-invite-form"
+                    onSubmit={(event) => void invite(event)}
+                  >
                     <Field label="Invite teammate by email" required>
-                      <Input name="email" placeholder="person@company.com" required type="email" />
+                      <Input
+                        name="email"
+                        placeholder="person@company.com"
+                        required
+                        type="email"
+                      />
                     </Field>
                     <Field label="Role" required>
-                      <Select defaultValue={inviteableRoles[0]} name="role" required>
+                      <Select
+                        defaultValue={inviteableRoles[0]}
+                        name="role"
+                        required
+                      >
                         {inviteableRoles.map((role) => (
                           <option key={role} value={role}>
                             {humanizeEnum(role)}
@@ -410,7 +475,9 @@ export function SettingsWorkspace({
                   </form>
                 )}
                 {inviteMessage !== "" ? (
-                  <FormMessage tone={inviteMessage.includes("sent") ? "success" : "error"}>
+                  <FormMessage
+                    tone={inviteMessage.includes("sent") ? "success" : "error"}
+                  >
                     {inviteMessage}
                   </FormMessage>
                 ) : null}
@@ -421,8 +488,9 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Current members</h2>
                     <p>
-                      Roles reflect current organisation membership only. Invitation
-                      acceptance is handled through the signed invitation link.
+                      Roles reflect current organisation membership only.
+                      Invitation acceptance is handled through the signed
+                      invitation link.
                     </p>
                   </div>
                 </div>
@@ -441,15 +509,22 @@ export function SettingsWorkspace({
                         currentRole === "OWNER" &&
                         session?.user.id !== undefined &&
                         member.user.email !== session.user.email;
-                      const selectedRole = pendingRoles[member.id] ?? member.role;
+                      const selectedRole =
+                        pendingRoles[member.id] ?? member.role;
                       return (
                         <tr key={member.id}>
                           <td>
                             <strong>{member.user.displayName}</strong>
-                            <div className="settings-table-meta">{member.user.email}</div>
+                            <div className="settings-table-meta">
+                              {member.user.email}
+                            </div>
                           </td>
                           <td>
-                            <Badge tone={member.role === "OWNER" ? "success" : "info"}>
+                            <Badge
+                              tone={
+                                member.role === "OWNER" ? "success" : "info"
+                              }
+                            >
                               {humanizeEnum(member.role)}
                             </Badge>
                           </td>
@@ -496,7 +571,9 @@ export function SettingsWorkspace({
                   </tbody>
                 </Table>
                 {roleMessage !== "" ? (
-                  <FormMessage tone={roleMessage.includes("updated") ? "success" : "error"}>
+                  <FormMessage
+                    tone={roleMessage.includes("updated") ? "success" : "error"}
+                  >
                     {roleMessage}
                   </FormMessage>
                 ) : null}
@@ -508,19 +585,27 @@ export function SettingsWorkspace({
             <section className="workspace-section">
               <div className="settings-summary-grid">
                 <Card className="tender-summary-card">
-                  <span className="tender-summary-card__label">Active sessions</span>
+                  <span className="tender-summary-card__label">
+                    Active sessions
+                  </span>
                   <strong>{activeSessions.length}</strong>
                   <p>Authenticated sessions for the signed-in user.</p>
                 </Card>
                 <Card className="tender-summary-card">
-                  <span className="tender-summary-card__label">Other devices</span>
+                  <span className="tender-summary-card__label">
+                    Other devices
+                  </span>
                   <strong>{otherSessions.length}</strong>
                   <p>Revocation is supported, but only at the account level.</p>
                 </Card>
                 <Card className="tender-summary-card">
-                  <span className="tender-summary-card__label">Revoked history</span>
+                  <span className="tender-summary-card__label">
+                    Revoked history
+                  </span>
                   <strong>{revokedSessions}</strong>
-                  <p>Historical sessions remain visible for the current user.</p>
+                  <p>
+                    Historical sessions remain visible for the current user.
+                  </p>
                 </Card>
               </div>
 
@@ -529,8 +614,9 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Security controls</h2>
                     <p>
-                      Organisation-wide MFA, SSO, IP allowlists, and password policy
-                      controls are not available in the current product contract.
+                      Organisation-wide MFA, SSO, IP allowlists, and password
+                      policy controls are not available in the current product
+                      contract.
                     </p>
                   </div>
                   <Link className="button button--secondary" href="/account">
@@ -550,13 +636,21 @@ export function SettingsWorkspace({
                     {sessions.slice(0, 4).map((item) => (
                       <tr key={item.id}>
                         <td>
-                          <strong>{item.current ? "Current session" : "Account session"}</strong>
+                          <strong>
+                            {item.current
+                              ? "Current session"
+                              : "Account session"}
+                          </strong>
                           <div className="settings-table-meta">{item.id}</div>
                         </td>
                         <td>{formatTimestamp(item.createdAt)}</td>
                         <td>{formatTimestamp(item.lastSeenAt)}</td>
                         <td>
-                          <Badge tone={item.revokedAt === null ? "success" : "neutral"}>
+                          <Badge
+                            tone={
+                              item.revokedAt === null ? "success" : "neutral"
+                            }
+                          >
                             {item.revokedAt === null
                               ? item.current
                                 ? "Current"
@@ -579,11 +673,14 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Saved preferences</h2>
                     <p>
-                      These values are sourced from the current organisation profile
-                      and workflow preference steps.
+                      These values are sourced from the current organisation
+                      profile and workflow preference steps.
                     </p>
                   </div>
-                  <Link className="button button--secondary" href={`/onboarding/${organisationId}`}>
+                  <Link
+                    className="button button--secondary"
+                    href={`/onboarding/${organisationId}`}
+                  >
                     Edit preferences
                   </Link>
                 </div>

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from "@tender/database";
 import {
   createStructureAwareChunks,
+  canonicalCompanyEvidenceSourceText,
   isPromptInjectionText,
   RAG_ANSWER_POLICY_VERSION,
   RAG_CANDIDATE_LIMIT,
@@ -13,6 +14,7 @@ import {
 } from "@tender/domain";
 import { createHash } from "node:crypto";
 import type { AnswerGateway, EmbeddingGateway } from "./ai-provider.js";
+import { ProviderResponseError } from "./ai-provider.js";
 
 export type RagJob =
   | {
@@ -85,7 +87,9 @@ export class RagProcessor {
     const failureCode =
       error.message === "AI_PROVIDER_UNAVAILABLE"
         ? "PROVIDER_UNAVAILABLE"
-        : error.message.slice(0, 80);
+        : error instanceof ProviderResponseError
+          ? error.code
+          : error.message.slice(0, 80);
     if (job.kind === "INDEX")
       await this.database.ragIndexRun.updateMany({
         data: { failureCode, status: "FAILED" },
@@ -401,12 +405,6 @@ export class RagProcessor {
         );
         if (version === null || version === undefined || citation === undefined)
           continue;
-        const value =
-          version.textValue ??
-          version.numberValue?.toString() ??
-          version.dateValue?.toISOString().slice(0, 10) ??
-          version.booleanValue?.toString() ??
-          version.textListValue.join(", ");
         sourceMetadata.set(`COMPANY_EVIDENCE:${fact.id}`, {
           citationId: null,
           coordinates: {
@@ -424,7 +422,11 @@ export class RagProcessor {
           pageNumber: citation.pageNumber,
           sourceClass: "COMPANY_EVIDENCE",
           sourceRecordId: fact.id,
-          text: `${fact.factType}: ${value}. Evidence: ${citation.boundedExcerpt}`,
+          text: canonicalCompanyEvidenceSourceText({
+            boundedExcerpt: citation.boundedExcerpt,
+            factType: fact.factType,
+            value: version,
+          }),
         });
       }
     }

@@ -13,6 +13,7 @@ import type { MalwareScanner } from "./malware-scanner.js";
 export interface DocumentJob {
   readonly documentVersionId: string;
   readonly organisationId: string;
+  readonly requestId: string;
 }
 
 export class DocumentProcessor {

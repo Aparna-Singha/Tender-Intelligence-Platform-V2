@@ -65,5 +65,11 @@ jobs:
       - name: Test
         run: pnpm test
 
+      - name: Run deterministic security suite
+        run: pnpm test:security
+
+      - name: Run deterministic AI quality evaluation
+        run: pnpm eval:offline
+
       - name: Build production artifacts
         run: pnpm build

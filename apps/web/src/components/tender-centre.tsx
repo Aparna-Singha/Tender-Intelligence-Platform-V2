@@ -32,7 +32,10 @@ function optionalText(value: FormDataEntryValue | null): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function matchesStatusFilter(tender: TenderSummary, filter: StatusFilter): boolean {
+function matchesStatusFilter(
+  tender: TenderSummary,
+  filter: StatusFilter,
+): boolean {
   const presentation = describeTender(tender);
   if (filter === "ACTIVE") return !presentation.isCompleted;
   if (filter === "NEEDS_ATTENTION") return presentation.needsAttention;
@@ -57,7 +60,11 @@ export function TenderCentre({
 
   async function load(): Promise<void> {
     try {
-      setTenders(await apiRequest<TenderSummary[]>(`/organisations/${organisationId}/tenders`));
+      setTenders(
+        await apiRequest<TenderSummary[]>(
+          `/organisations/${organisationId}/tenders`,
+        ),
+      );
       setMessage("");
     } catch (caught) {
       setMessage(formatApiError(caught, "Unable to load tender workspaces."));
@@ -78,19 +85,26 @@ export function TenderCentre({
     setSubmitting(true);
     setError("");
     try {
-      const created = await apiRequest<CreatedTender>(`/organisations/${organisationId}/tenders`, {
-        body: JSON.stringify({
-          buyer: values.get("buyer"),
-          category: optionalText(values.get("category")),
-          description: optionalText(values.get("description")),
-          official_source_url: optionalText(values.get("official_source_url")),
-          publication_date: optionalText(values.get("publication_date")),
-          source_tender_number: optionalText(values.get("source_tender_number")),
-          submission_deadline: new Date(deadline).toISOString(),
-          title: values.get("title"),
-        }),
-        method: "POST",
-      });
+      const created = await apiRequest<CreatedTender>(
+        `/organisations/${organisationId}/tenders`,
+        {
+          body: JSON.stringify({
+            buyer: values.get("buyer"),
+            category: optionalText(values.get("category")),
+            description: optionalText(values.get("description")),
+            official_source_url: optionalText(
+              values.get("official_source_url"),
+            ),
+            publication_date: optionalText(values.get("publication_date")),
+            source_tender_number: optionalText(
+              values.get("source_tender_number"),
+            ),
+            submission_deadline: new Date(deadline).toISOString(),
+            title: values.get("title"),
+          }),
+          method: "POST",
+        },
+      );
       form.reset();
       window.location.assign(`/tenders/${organisationId}/${created.tender_id}`);
     } catch (caught) {
@@ -103,11 +117,17 @@ export function TenderCentre({
 
   const counts = useMemo(
     () => ({
-      ACTIVE: tenders.filter((tender) => matchesStatusFilter(tender, "ACTIVE")).length,
+      ACTIVE: tenders.filter((tender) => matchesStatusFilter(tender, "ACTIVE"))
+        .length,
       ALL: tenders.length,
-      DRAFTS: tenders.filter((tender) => matchesStatusFilter(tender, "DRAFTS")).length,
-      NEEDS_ATTENTION: tenders.filter((tender) => matchesStatusFilter(tender, "NEEDS_ATTENTION")).length,
-      ON_HOLD: tenders.filter((tender) => matchesStatusFilter(tender, "ON_HOLD")).length,
+      DRAFTS: tenders.filter((tender) => matchesStatusFilter(tender, "DRAFTS"))
+        .length,
+      NEEDS_ATTENTION: tenders.filter((tender) =>
+        matchesStatusFilter(tender, "NEEDS_ATTENTION"),
+      ).length,
+      ON_HOLD: tenders.filter((tender) =>
+        matchesStatusFilter(tender, "ON_HOLD"),
+      ).length,
     }),
     [tenders],
   );
@@ -131,7 +151,9 @@ export function TenderCentre({
       });
   }, [search, sortMode, statusFilter, tenders]);
   const aiChatHref =
-    tenders[0] === undefined ? null : `/tenders/${organisationId}/${tenders[0].id}?stage=ask`;
+    tenders[0] === undefined
+      ? null
+      : `/tenders/${organisationId}/${tenders[0].id}?stage=ask`;
 
   return (
     <div className="workspace-page">
@@ -146,14 +168,20 @@ export function TenderCentre({
         </Button>
       </header>
 
-      <div className="workspace-chip-row workspace-chip-row--left" role="tablist" aria-label="Tender status groups">
-        {([
-          ["ALL", `All ${counts.ALL}`],
-          ["ACTIVE", `Active ${counts.ACTIVE}`],
-          ["NEEDS_ATTENTION", `Needs attention ${counts.NEEDS_ATTENTION}`],
-          ["DRAFTS", `Drafts ${counts.DRAFTS}`],
-          ["ON_HOLD", `On hold ${counts.ON_HOLD}`],
-        ] as const).map(([value, label]) => (
+      <div
+        className="workspace-chip-row workspace-chip-row--left"
+        role="tablist"
+        aria-label="Tender status groups"
+      >
+        {(
+          [
+            ["ALL", `All ${counts.ALL}`],
+            ["ACTIVE", `Active ${counts.ACTIVE}`],
+            ["NEEDS_ATTENTION", `Needs attention ${counts.NEEDS_ATTENTION}`],
+            ["DRAFTS", `Drafts ${counts.DRAFTS}`],
+            ["ON_HOLD", `On hold ${counts.ON_HOLD}`],
+          ] as const
+        ).map(([value, label]) => (
           <button
             aria-pressed={statusFilter === value}
             className={`workspace-chip ${statusFilter === value ? "workspace-chip--active" : ""}`}
@@ -181,7 +209,9 @@ export function TenderCentre({
           <span className="visually-hidden">Filter tenders</span>
           <Select
             aria-label="Filter tenders"
-            onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}
+            onChange={(event) =>
+              setStatusFilter(event.target.value as StatusFilter)
+            }
             value={statusFilter}
           >
             <option value="ALL">All statuses</option>
@@ -249,14 +279,20 @@ export function TenderCentre({
                           <small>{tender.buyer}</small>
                         </td>
                         <td>
-                          <span className={`status-badge status-badge--${presentation.tone}`}>
+                          <span
+                            className={`status-badge status-badge--${presentation.tone}`}
+                          >
                             {presentation.statusLabel}
                           </span>
                         </td>
                         <td>{presentation.supportingLabel}</td>
                         <td>
-                          <strong>{formatDeadlineCountdown(tender.submissionDeadline)}</strong>
-                          <small>{formatDeadline(tender.submissionDeadline)}</small>
+                          <strong>
+                            {formatDeadlineCountdown(tender.submissionDeadline)}
+                          </strong>
+                          <small>
+                            {formatDeadline(tender.submissionDeadline)}
+                          </small>
                         </td>
                         <td>
                           <Link
@@ -297,7 +333,8 @@ export function TenderCentre({
             </IconButton>
           </div>
           <p>
-            Enter only known tender metadata. Secure source upload begins after the workspace is created.
+            Enter only known tender metadata. Secure source upload begins after
+            the workspace is created.
           </p>
           <form onSubmit={(event) => void create(event)}>
             <Field label="Tender title" required>
@@ -317,7 +354,11 @@ export function TenderCentre({
                 <Input name="publication_date" type="date" />
               </Field>
               <Field label="Submission deadline" required>
-                <Input name="submission_deadline" required type="datetime-local" />
+                <Input
+                  name="submission_deadline"
+                  required
+                  type="datetime-local"
+                />
               </Field>
             </div>
             <Field

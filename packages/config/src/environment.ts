@@ -13,6 +13,92 @@ const logLevelSchema = z.enum([
 const portSchema = z.coerce.number().int().min(1).max(65_535);
 const nonEmptyStringSchema = z.string().trim().min(1);
 const urlSchema = z.url();
+const providerSchema = z.enum(["disabled", "gemini"]);
+
+const placeholderPatterns = [
+  /replace-with/i,
+  /changeme/i,
+  /placeholder/i,
+  /example/i,
+] as const;
+
+function isPlaceholder(value: string | undefined): boolean {
+  return (
+    value === undefined ||
+    value.trim().length === 0 ||
+    placeholderPatterns.some((pattern) => pattern.test(value))
+  );
+}
+
+function isLocalUrl(value: string): boolean {
+  const url = new URL(value);
+  return ["localhost", "127.0.0.1", "0.0.0.0"].includes(url.hostname);
+}
+
+function addProductionHardeningIssues(
+  environment: {
+    readonly COOKIE_SECRET: string;
+    readonly DATABASE_URL: string;
+    readonly EMAIL_DELIVERY_TOKEN?: string | undefined;
+    readonly GEMINI_API_KEY?: string | undefined;
+    readonly NODE_ENV: "development" | "test" | "production";
+    readonly REDIS_URL: string;
+    readonly S3_ACCESS_KEY_ID: string;
+    readonly S3_ENDPOINT: string;
+    readonly S3_SECRET_ACCESS_KEY: string;
+    readonly SESSION_COOKIE_SECURE: boolean;
+    readonly TRUST_PROXY: boolean;
+    readonly WEB_APP_URL: string;
+    readonly WEB_ORIGIN: string;
+  },
+  context: z.RefinementCtx,
+): void {
+  if (environment.NODE_ENV !== "production") return;
+
+  for (const [key, value] of [
+    ["COOKIE_SECRET", environment.COOKIE_SECRET],
+    ["DATABASE_URL", environment.DATABASE_URL],
+    ["REDIS_URL", environment.REDIS_URL],
+    ["S3_ACCESS_KEY_ID", environment.S3_ACCESS_KEY_ID],
+    ["S3_SECRET_ACCESS_KEY", environment.S3_SECRET_ACCESS_KEY],
+    ["EMAIL_DELIVERY_TOKEN", environment.EMAIL_DELIVERY_TOKEN],
+  ] as const)
+    if (isPlaceholder(value))
+      context.addIssue({
+        code: "custom",
+        message: `${key} must be supplied from production secrets, not placeholders`,
+        path: [key],
+      });
+
+  for (const [key, value] of [
+    ["WEB_APP_URL", environment.WEB_APP_URL],
+    ["WEB_ORIGIN", environment.WEB_ORIGIN],
+    ["S3_ENDPOINT", environment.S3_ENDPOINT],
+  ] as const) {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || isLocalUrl(value))
+      context.addIssue({
+        code: "custom",
+        message: `${key} must use a production HTTPS endpoint`,
+        path: [key],
+      });
+  }
+
+  if (!environment.SESSION_COOKIE_SECURE)
+    context.addIssue({
+      code: "custom",
+      message: "SESSION_COOKIE_SECURE must be true in production",
+      path: ["SESSION_COOKIE_SECURE"],
+    });
+
+  if (!environment.TRUST_PROXY)
+    context.addIssue({
+      code: "custom",
+      message:
+        "TRUST_PROXY must be enabled only behind the trusted production reverse proxy",
+      path: ["TRUST_PROXY"],
+    });
+}
 
 const serviceBaseSchema = z.object({
   NODE_ENV: nodeEnvironmentSchema.default("development"),
@@ -48,6 +134,8 @@ export const apiEnvironmentSchema = serviceBaseSchema
   .extend({
     API_HOST: nonEmptyStringSchema.default("0.0.0.0"),
     API_PORT: portSchema.default(4000),
+    API_METRICS_HOST: nonEmptyStringSchema.default("127.0.0.1"),
+    API_METRICS_PORT: portSchema.default(4100),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(10),
     AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce
       .number()
@@ -94,11 +182,11 @@ export const apiEnvironmentSchema = serviceBaseSchema
       .min(30)
       .max(300)
       .default(60),
-    RAG_PROVIDER: nonEmptyStringSchema.default("gemini"),
+    RAG_PROVIDER: providerSchema.default("gemini"),
     RAG_CHAT_MODEL: nonEmptyStringSchema.default("gemini-2.5-flash"),
     RAG_EMBEDDING_MODEL: nonEmptyStringSchema.default("gemini-embedding-001"),
     RAG_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(30),
-    DRAFT_PROVIDER: nonEmptyStringSchema.default("gemini"),
+    DRAFT_PROVIDER: providerSchema.default("gemini"),
     DRAFT_MODEL: nonEmptyStringSchema.default("gemini-2.5-flash"),
     GEMINI_API_KEY: z.string().trim().min(16).optional(),
   })
@@ -130,12 +218,40 @@ export const apiEnvironmentSchema = serviceBaseSchema
         path: ["EMAIL_DELIVERY_URL"],
       });
     }
+
+    addProductionHardeningIssues(environment, context);
+
+    if (
+      environment.NODE_ENV === "production" &&
+      environment.RAG_PROVIDER !== "disabled" &&
+      environment.GEMINI_API_KEY === undefined
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "GEMINI_API_KEY is required when RAG provider egress is enabled",
+        path: ["GEMINI_API_KEY"],
+      });
+
+    if (
+      environment.NODE_ENV === "production" &&
+      environment.DRAFT_PROVIDER !== "disabled" &&
+      environment.GEMINI_API_KEY === undefined
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "GEMINI_API_KEY is required when draft provider egress is enabled",
+        path: ["GEMINI_API_KEY"],
+      });
   });
 
 export const workerEnvironmentSchema = serviceBaseSchema
   .extend({
     WORKER_HEALTH_HOST: nonEmptyStringSchema.default("0.0.0.0"),
     WORKER_HEALTH_PORT: portSchema.default(4001),
+    WORKER_METRICS_HOST: nonEmptyStringSchema.default("127.0.0.1"),
+    WORKER_METRICS_PORT: portSchema.default(4101),
     QUEUE_NAME: nonEmptyStringSchema.default("platform-jobs"),
     CLAMAV_HOST: nonEmptyStringSchema,
     CLAMAV_PORT: portSchema.default(3310),
@@ -164,6 +280,7 @@ export const workerEnvironmentSchema = serviceBaseSchema
       .max(1_800_000)
       .default(600_000),
     DRAFT_MODEL: nonEmptyStringSchema.default("gemini-2.5-flash"),
+    DRAFT_PROVIDER: providerSchema.default("gemini"),
     GEMINI_API_KEY: z.string().trim().min(16).optional(),
     GEMINI_CHAT_MODEL: nonEmptyStringSchema.default("gemini-2.5-flash"),
     GEMINI_EMBEDDING_MODEL: nonEmptyStringSchema.default(
@@ -171,7 +288,33 @@ export const workerEnvironmentSchema = serviceBaseSchema
     ),
   })
   .and(dataServicesSchema)
-  .and(objectStorageSchema);
+  .and(objectStorageSchema)
+  .superRefine((environment, context) => {
+    addProductionHardeningIssues(
+      {
+        ...environment,
+        COOKIE_SECRET: "worker-runtime-cookie-secret-not-used-here",
+        EMAIL_DELIVERY_TOKEN: "worker-does-not-use-email",
+        SESSION_COOKIE_SECURE: true,
+        TRUST_PROXY: true,
+        WEB_APP_URL: "https://worker-internal.example.invalid",
+        WEB_ORIGIN: "https://worker-internal.example.invalid",
+      },
+      context,
+    );
+
+    if (
+      environment.NODE_ENV === "production" &&
+      environment.DRAFT_PROVIDER !== "disabled" &&
+      environment.GEMINI_API_KEY === undefined
+    )
+      context.addIssue({
+        code: "custom",
+        message:
+          "GEMINI_API_KEY is required when worker provider egress is enabled",
+        path: ["GEMINI_API_KEY"],
+      });
+  });
 
 export const webEnvironmentSchema = z.object({
   NODE_ENV: nodeEnvironmentSchema.default("development"),

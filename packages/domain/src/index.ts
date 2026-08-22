@@ -97,6 +97,8 @@ export {
 } from "./rag-policy.js";
 export {
   claimSupportState,
+  canonicalCompanyEvidenceSourceText,
+  canonicalCompanyEvidenceStatement,
   DRAFTING_POLICY_VERSION,
   DRAFT_MAX_CLAIMS_PER_SECTION,
   DRAFT_MAX_CONTEXTS_PER_SECTION,

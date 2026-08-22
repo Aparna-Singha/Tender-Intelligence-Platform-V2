@@ -14,19 +14,22 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1097.0",
+    "@napi-rs/canvas": "1.0.5",
     "@tender/config": "workspace:*",
     "@tender/contracts": "workspace:*",
     "@tender/database": "workspace:*",
     "@tender/domain": "workspace:*",
     "@tender/observability": "workspace:*",
+    "@tesseract.js-data/eng": "1.0.0",
     "bullmq": "5.81.2",
     "fastify": "5.10.0",
     "fflate": "0.8.3",
     "file-type": "21.3.2",
     "ioredis": "5.11.1",
     "pdf-lib": "1.17.1",
-    "pdfjs-dist": "6.1.200",
-    "pino": "10.3.1"
+    "pdfjs-dist": "6.2.108",
+    "pino": "10.3.1",
+    "tesseract.js": "6.0.1"
   },
   "devDependencies": {
     "@types/node": "24.10.13",

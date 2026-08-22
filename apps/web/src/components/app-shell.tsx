@@ -29,7 +29,11 @@ interface Session {
 }
 
 interface Membership {
-  readonly organisation: { readonly id: string; readonly name: string; readonly type: string };
+  readonly organisation: {
+    readonly id: string;
+    readonly name: string;
+    readonly type: string;
+  };
   readonly role: string;
 }
 
@@ -40,7 +44,10 @@ interface ShellNavigationItem {
 }
 
 function matchesPath(pathname: string, href: string): boolean {
-  return pathname === href || (href !== "/dashboard" && pathname.startsWith(`${href}/`));
+  return (
+    pathname === href ||
+    (href !== "/dashboard" && pathname.startsWith(`${href}/`))
+  );
 }
 
 function WorkspaceNavItem({
@@ -58,7 +65,10 @@ function WorkspaceNavItem({
 }): JSX.Element {
   if (href === null) {
     return (
-      <span aria-disabled="true" className="workspace-sidebar__nav-link workspace-sidebar__nav-link--disabled">
+      <span
+        aria-disabled="true"
+        className="workspace-sidebar__nav-link workspace-sidebar__nav-link--disabled"
+      >
         <Icon aria-hidden="true" size={16} />
         <span>{label}</span>
       </span>
@@ -127,7 +137,8 @@ function SidebarContents({
   readonly tenders: readonly TenderSummary[];
 }): JSX.Element {
   const organisation = memberships.find(
-    ({ organisation: memberOrganisation }) => memberOrganisation.id === organisationId,
+    ({ organisation: memberOrganisation }) =>
+      memberOrganisation.id === organisationId,
   );
   const pathTenderId =
     /^\/tenders\/[^/]+\/([^/?]+)/.exec(pathname)?.[1] ?? null;
@@ -155,7 +166,10 @@ function SidebarContents({
     .filter((tender) => describeTender(tender).isDraft)
     .slice(0, 2);
   const currentTender = tenders.find((tender) => tender.id === pathTenderId);
-  const chatSeed = currentTender === undefined ? recentTenders : [currentTender, ...recentTenders];
+  const chatSeed =
+    currentTender === undefined
+      ? recentTenders
+      : [currentTender, ...recentTenders];
   const seen = new Set<string>();
   const chatShortcuts = chatSeed
     .filter((tender) => {
@@ -222,7 +236,9 @@ function SidebarContents({
       <div className="workspace-sidebar__content">
         <SidebarSection title="Recent Tenders">
           {recentTenders.length === 0 ? (
-            <p className="workspace-sidebar__empty">No tender workspaces yet.</p>
+            <p className="workspace-sidebar__empty">
+              No tender workspaces yet.
+            </p>
           ) : (
             recentTenders.map((tender) => (
               <QuickAccessLink
@@ -258,7 +274,8 @@ function SidebarContents({
         <SidebarSection title="Chats">
           {chatShortcuts.length === 0 ? (
             <p className="workspace-sidebar__empty">
-              Tender chat stays tender-scoped and appears once a workspace exists.
+              Tender chat stays tender-scoped and appears once a workspace
+              exists.
             </p>
           ) : (
             <>
@@ -269,7 +286,9 @@ function SidebarContents({
                   key={tender.id}
                   {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
                 >
-                  <span className={`workspace-sidebar__chat-indicator ${index === 0 ? "workspace-sidebar__chat-indicator--pinned" : ""}`}>
+                  <span
+                    className={`workspace-sidebar__chat-indicator ${index === 0 ? "workspace-sidebar__chat-indicator--pinned" : ""}`}
+                  >
                     <MessageSquare aria-hidden="true" size={12} />
                   </span>
                   <span>
@@ -283,7 +302,8 @@ function SidebarContents({
                 href={`/tenders/${organisationId ?? ""}`}
                 {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
               >
-                Browse tender chats <ChevronRight aria-hidden="true" size={12} />
+                Browse tender chats{" "}
+                <ChevronRight aria-hidden="true" size={12} />
               </Link>
             </>
           )}
@@ -291,7 +311,9 @@ function SidebarContents({
 
         <div className="workspace-sidebar__footer-links">
           <WorkspaceNavItem
-            href={organisationId === null ? null : `/settings/${organisationId}`}
+            href={
+              organisationId === null ? null : `/settings/${organisationId}`
+            }
             icon={Settings}
             label="Settings"
             pathname={pathname}
@@ -314,14 +336,21 @@ function SidebarContents({
       <div className="workspace-sidebar__footer">
         <div className="workspace-sidebar__account-card">
           <div className="workspace-sidebar__account-summary">
-            <span className="workspace-sidebar__account-mark" aria-hidden="true">
+            <span
+              className="workspace-sidebar__account-mark"
+              aria-hidden="true"
+            >
               {accountInitials}
             </span>
             <div>
-              <strong>{organisation?.organisation.name ?? "Tender Intelligence"}</strong>
+              <strong>
+                {organisation?.organisation.name ?? "Tender Intelligence"}
+              </strong>
               <small>
                 {session?.user.display_name ?? "Loading user"}
-                {organisation === undefined ? "" : ` · ${humanizeEnum(organisation.role)}`}
+                {organisation === undefined
+                  ? ""
+                  : ` · ${humanizeEnum(organisation.role)}`}
               </small>
             </div>
           </div>
@@ -344,8 +373,9 @@ export function AppShell({
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
 
   const pathOrganisationId =
-    /^\/(?:onboarding|documents|settings|tenders)\/([^/]+)/.exec(pathname)?.[1] ??
-    null;
+    /^\/(?:onboarding|documents|settings|tenders)\/([^/]+)/.exec(
+      pathname,
+    )?.[1] ?? null;
   const organisationId =
     pathOrganisationId ??
     session?.active_organisation_id ??
@@ -421,7 +451,10 @@ export function AppShell({
       <aside className="workspace-sidebar">{sidebar}</aside>
       <div className="workspace-main">
         <header className="workspace-mobilebar">
-          <IconButton label="Open navigation" onClick={() => setMobileOpen(true)}>
+          <IconButton
+            label="Open navigation"
+            onClick={() => setMobileOpen(true)}
+          >
             <Menu aria-hidden="true" size={18} />
           </IconButton>
           <div>
@@ -435,7 +468,10 @@ export function AppShell({
         <Drawer label="Navigation" onClose={() => setMobileOpen(false)}>
           <div className="workspace-drawer__header">
             <strong>Workspace</strong>
-            <IconButton label="Close navigation" onClick={() => setMobileOpen(false)}>
+            <IconButton
+              label="Close navigation"
+              onClick={() => setMobileOpen(false)}
+            >
               <X aria-hidden="true" size={18} />
             </IconButton>
           </div>

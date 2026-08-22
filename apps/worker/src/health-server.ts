@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 
 import { requestIdSchema } from "@tender/contracts";
+import type { WorkerMetrics } from "@tender/observability";
 import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
 
 import type { WorkerReadiness } from "./readiness.js";
 
 export interface HealthServerOptions {
   readonly logger: FastifyBaseLogger;
+  readonly metrics?: WorkerMetrics;
   readonly readiness: WorkerReadiness;
   readonly requestIdHeader: string;
 }
@@ -34,6 +36,7 @@ export function createHealthServer(
 
   server.get("/ready", async (request, reply) => {
     const readiness = await options.readiness.check();
+    options.metrics?.setReady(readiness.status === "ready");
 
     if (readiness.status === "not_ready") {
       void reply.status(503);

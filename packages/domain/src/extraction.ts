@@ -47,8 +47,18 @@ export interface ParsedUnit {
   readonly confidence: Confidence;
   readonly label?: string;
   readonly language?: string;
+  readonly ocrConfidence?: number;
+  readonly ocrEngine?: string;
+  readonly ocrEngineVersion?: string;
+  readonly ocrConfiguration?: Readonly<
+    Record<string, string | number | boolean>
+  >;
   readonly ocrStatus:
-    "NOT_REQUIRED" | "OCR_UNAVAILABLE" | "HUMAN_REVIEW_REQUIRED";
+    | "NOT_REQUIRED"
+    | "OCR_PERFORMED"
+    | "OCR_FAILED"
+    | "OCR_UNAVAILABLE"
+    | "HUMAN_REVIEW_REQUIRED";
   readonly unitIndex: number;
   readonly unitType: "ARCHIVE_MEMBER" | "PAGE" | "SHEET";
 }
@@ -328,11 +338,7 @@ export function normalizeTenderCalendarDate(value: string): Date | null {
   const parsedParts = parseTenderDateTimeParts(value);
   if (parsedParts === null) return null;
   return new Date(
-    Date.UTC(
-      parsedParts.year,
-      parsedParts.month - 1,
-      parsedParts.day,
-    ),
+    Date.UTC(parsedParts.year, parsedParts.month - 1, parsedParts.day),
   );
 }
 
@@ -378,7 +384,11 @@ function parseTenderDateTimeParts(
   return { day, hour, minute, month, second, year };
 }
 
-function isValidCalendarDate(year: number, month: number, day: number): boolean {
+function isValidCalendarDate(
+  year: number,
+  month: number,
+  day: number,
+): boolean {
   const daysInMonth = [
     31,
     isLeapYear(year) ? 29 : 28,

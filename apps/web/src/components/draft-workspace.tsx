@@ -188,7 +188,8 @@ export function DraftWorkspace({
       return;
     }
     setSelectedSectionId((current) =>
-      current === "" || !version.sections.some((section) => section.id === current)
+      current === "" ||
+      !version.sections.some((section) => section.id === current)
         ? (version.sections[0]?.id ?? "")
         : current,
     );
@@ -320,7 +321,8 @@ export function DraftWorkspace({
   }
 
   const selectedSection =
-    version?.sections.find((section) => section.id === selectedSectionId) ?? null;
+    version?.sections.find((section) => section.id === selectedSectionId) ??
+    null;
   const readiness =
     version === null || version.sections.length === 0
       ? null
@@ -330,7 +332,9 @@ export function DraftWorkspace({
             100,
         );
   const blockingPlaceholders =
-    selectedSection?.placeholders.filter((placeholder) => placeholder.approvalBlocking) ?? [];
+    selectedSection?.placeholders.filter(
+      (placeholder) => placeholder.approvalBlocking,
+    ) ?? [];
 
   return (
     <section aria-labelledby="draft-heading" className="draft-columns">
@@ -363,7 +367,9 @@ export function DraftWorkspace({
           Your proposal draft
         </h2>
         {version?.invalidatedAt != null && (
-          <p className="warning">This version is invalidated and not current.</p>
+          <p className="warning">
+            This version is invalidated and not current.
+          </p>
         )}
         {selectedSection === null ? (
           <div className="draft-center__header">
@@ -390,10 +396,13 @@ export function DraftWorkspace({
               <div>
                 <h3>{selectedSection.heading}</h3>
                 <p style={{ margin: "2px 0 0", fontSize: "0.78rem" }}>
-                  Content stays limited to authorised tender sources and approved evidence.
+                  Content stays limited to authorised tender sources and
+                  approved evidence.
                 </p>
               </div>
-              <Badge tone={isSectionReady(selectedSection) ? "success" : "warning"}>
+              <Badge
+                tone={isSectionReady(selectedSection) ? "success" : "warning"}
+              >
                 {humanizeEnum(selectedSection.reviewState)}
               </Badge>
             </div>
@@ -403,7 +412,8 @@ export function DraftWorkspace({
                 <h4>Placeholders</h4>
                 {blockingPlaceholders.map((placeholder) => (
                   <p className="warning" key={placeholder.id}>
-                    <strong>{placeholder.markerText}</strong> — {placeholder.explanation}
+                    <strong>{placeholder.markerText}</strong> —{" "}
+                    {placeholder.explanation}
                   </p>
                 ))}
               </div>
@@ -448,11 +458,15 @@ export function DraftWorkspace({
         </div>
         {version !== null && (
           <p style={{ fontSize: "0.76rem", margin: 0 }}>
-            Version {version.versionNumber} · {humanizeEnum(version.reviewState)}
+            Version {version.versionNumber} ·{" "}
+            {humanizeEnum(version.reviewState)}
           </p>
         )}
         <div className="draft-rail__actions">
-          <Button onClick={() => void review("REQUEST_CHANGES")} variant="secondary">
+          <Button
+            onClick={() => void review("REQUEST_CHANGES")}
+            variant="secondary"
+          >
             Request changes
           </Button>
           <Button onClick={() => void review("APPROVE_VERSION")}>
@@ -496,7 +510,8 @@ export function DraftWorkspace({
                 <ol>
                   {versionHistory.map((item) => (
                     <li key={item.id}>
-                      Version {item.versionNumber} · {humanizeEnum(item.reviewState)}
+                      Version {item.versionNumber} ·{" "}
+                      {humanizeEnum(item.reviewState)}
                       {item.invalidatedAt === null ? "" : " · invalidated"}
                     </li>
                   ))}
@@ -508,17 +523,23 @@ export function DraftWorkspace({
                 <h4>Generation history</h4>
                 {runs.map((run) => (
                   <p key={run.id}>
-                    {humanizeEnum(run.currentStage)} · {humanizeEnum(run.status)} ·{" "}
-                    {run.progressPercentage}% · {run.validatedClaimCount} validated
-                    claims · {run.citationCount} citations ·{" "}
-                    {run.placeholderCount} placeholders
-                    {run.safeFailureCode === null ? "" : ` · ${run.safeFailureCode}`}
+                    {humanizeEnum(run.currentStage)} ·{" "}
+                    {humanizeEnum(run.status)} · {run.progressPercentage}% ·{" "}
+                    {run.validatedClaimCount} validated claims ·{" "}
+                    {run.citationCount} citations · {run.placeholderCount}{" "}
+                    placeholders
+                    {run.safeFailureCode === null
+                      ? ""
+                      : ` · ${run.safeFailureCode}`}
                   </p>
                 ))}
               </>
             )}
             {templates.length === 0 && (
-              <button onClick={() => void createControlledTemplate()} type="button">
+              <button
+                onClick={() => void createControlledTemplate()}
+                type="button"
+              >
                 Create controlled draft template
               </button>
             )}
@@ -538,7 +559,9 @@ export function DraftWorkspace({
                 Authorised source mode
                 <select
                   value={mode}
-                  onChange={(event) => setMode(event.target.value as SourceMode)}
+                  onChange={(event) =>
+                    setMode(event.target.value as SourceMode)
+                  }
                 >
                   <option value="TENDER_ONLY">Tender only</option>
                   <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">

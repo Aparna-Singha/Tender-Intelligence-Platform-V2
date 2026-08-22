@@ -145,7 +145,8 @@ function verificationTone(
 
 function expiryLabel(value: string | null): string {
   if (value === null) return "Not supplied";
-  if (isExpired(value)) return `Expired ${new Date(value).toLocaleDateString()}`;
+  if (isExpired(value))
+    return `Expired ${new Date(value).toLocaleDateString()}`;
   if (isExpiringSoon(value))
     return `Expiring soon ${new Date(value).toLocaleDateString()}`;
   return new Date(value).toLocaleDateString();
@@ -157,7 +158,8 @@ function documentHealth(document: DocumentSummary): {
   readonly needsAttention: boolean;
   readonly outdated: boolean;
 } {
-  const outdated = document.status === "EXPIRED" || isExpired(document.expiryDate);
+  const outdated =
+    document.status === "EXPIRED" || isExpired(document.expiryDate);
   const expiringSoon = !outdated && isExpiringSoon(document.expiryDate);
   const needsAttention =
     ["FAILED", "REJECTED", "QUARANTINED"].includes(document.status) ||
@@ -188,7 +190,8 @@ function uploadErrorMessage(error: unknown): string {
   }
 
   const requestId =
-    error.source instanceof PublicApiError && error.source.requestId !== undefined
+    error.source instanceof PublicApiError &&
+    error.source.requestId !== undefined
       ? ` Request ID: ${error.source.requestId}`
       : "";
 
@@ -208,7 +211,10 @@ function uploadErrorMessage(error: unknown): string {
     return `Security checks or processing rejected this upload.${requestId}`;
   }
   if (error.source instanceof PublicApiError) {
-    if (error.source.status === 409 && error.source.message === "Duplicate document") {
+    if (
+      error.source.status === 409 &&
+      error.source.message === "Duplicate document"
+    ) {
       return `This exact document has already been uploaded.${requestId}`;
     }
     if (error.source.message === "File type is not allowed") {
@@ -273,7 +279,9 @@ export function DocumentCentre({
 
   const availableCategories = useMemo(() => {
     const values = [...new Set(documents.map((document) => document.category))];
-    return values.sort((left, right) => humanizeEnum(left).localeCompare(humanizeEnum(right)));
+    return values.sort((left, right) =>
+      humanizeEnum(left).localeCompare(humanizeEnum(right)),
+    );
   }, [documents]);
 
   const healthSummary = useMemo(() => {
@@ -294,7 +302,8 @@ export function DocumentCentre({
   const filteredDocuments = useMemo(() => {
     const trimmedQuery = query.trim().toLowerCase();
     return documents.filter((document) => {
-      if (selectedCategory !== "" && document.category !== selectedCategory) return false;
+      if (selectedCategory !== "" && document.category !== selectedCategory)
+        return false;
       if (statusFilter !== "" && document.status !== statusFilter) return false;
       if (trimmedQuery === "") return true;
       return (
@@ -328,7 +337,7 @@ export function DocumentCentre({
                 : "Upload the first organisation document to begin building reusable evidence.",
             title: "Evidence health is stable",
             tone: "success" as const,
-        };
+          };
 
   async function refreshUploadedDocument(documentId: string): Promise<void> {
     for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -407,7 +416,10 @@ export function DocumentCentre({
       try {
         await apiRequest(
           `/organisations/${organisationId}/documents/upload-sessions/${session.upload_session_id}/complete`,
-          { body: JSON.stringify({ checksum_sha256: checksum }), method: "POST" },
+          {
+            body: JSON.stringify({ checksum_sha256: checksum }),
+            method: "POST",
+          },
         );
       } catch (caught) {
         throw new CompanyDocumentUploadError("verification", caught);
@@ -472,12 +484,18 @@ export function DocumentCentre({
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Current</span>
           <strong>{healthSummary.current}</strong>
-          <p>Ready documents with verified review state and without expired validity.</p>
+          <p>
+            Ready documents with verified review state and without expired
+            validity.
+          </p>
         </Card>
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Need attention</span>
           <strong>{healthSummary.needsAttention}</strong>
-          <p>Processing failures, quarantine, or verification states that still need review.</p>
+          <p>
+            Processing failures, quarantine, or verification states that still
+            need review.
+          </p>
         </Card>
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Expiring soon</span>
@@ -487,7 +505,10 @@ export function DocumentCentre({
         <Card className="tender-summary-card">
           <span className="tender-summary-card__label">Outdated</span>
           <strong>{healthSummary.outdated}</strong>
-          <p>Expired documents or records already marked with expired processing state.</p>
+          <p>
+            Expired documents or records already marked with expired processing
+            state.
+          </p>
         </Card>
       </div>
 
@@ -495,7 +516,9 @@ export function DocumentCentre({
         <aside className="workspace-card company-docs-sidebar">
           <div className="company-docs-sidebar__header">
             <h2>Categories</h2>
-            <p>Use the current classification already stored with each document.</p>
+            <p>
+              Use the current classification already stored with each document.
+            </p>
           </div>
           <button
             className={`company-docs-sidebar__link ${selectedCategory === "" ? "company-docs-sidebar__link--active" : ""}`}
@@ -549,9 +572,9 @@ export function DocumentCentre({
           <div className="security-note">
             <ShieldCheck aria-hidden="true" size={20} />
             <p>
-              Files upload directly to private storage using a short-lived signed
-              URL. Downloads always require fresh authorisation, and processing
-              alone does not verify tender suitability.
+              Files upload directly to private storage using a short-lived
+              signed URL. Downloads always require fresh authorisation, and
+              processing alone does not verify tender suitability.
             </p>
           </div>
 
@@ -618,7 +641,9 @@ export function DocumentCentre({
                           </Badge>
                         </td>
                         <td>
-                          <Badge tone={verificationTone(document.verificationStatus)}>
+                          <Badge
+                            tone={verificationTone(document.verificationStatus)}
+                          >
                             {humanizeEnum(document.verificationStatus)}
                           </Badge>
                         </td>
@@ -693,7 +718,9 @@ export function DocumentCentre({
             <Field label="Expiry date, if applicable">
               <Input name="expiry_date" type="date" />
             </Field>
-            {uploadError !== "" ? <FormMessage>{uploadError}</FormMessage> : null}
+            {uploadError !== "" ? (
+              <FormMessage>{uploadError}</FormMessage>
+            ) : null}
             <div className="inline-actions">
               <Button loading={uploading} type="submit">
                 {uploading ? "Uploading securely..." : "Upload securely"}

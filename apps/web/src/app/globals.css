@@ -1711,7 +1711,9 @@ article {
   cursor: pointer;
   font-weight: 650;
   font-size: 0.82rem;
-  transition: color 0.15s ease, border-color 0.15s ease;
+  transition:
+    color 0.15s ease,
+    border-color 0.15s ease;
 }
 .tender-nav__link:hover {
   color: var(--text);

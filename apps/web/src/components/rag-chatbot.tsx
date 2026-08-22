@@ -85,7 +85,9 @@ interface ConversationDetail extends Conversation {
 function buildConversationTitle(question: string): string {
   const trimmed = question.trim();
   if (trimmed === "") return "New tender conversation";
-  return trimmed.length <= 64 ? trimmed : `${trimmed.slice(0, 61).trimEnd()}...`;
+  return trimmed.length <= 64
+    ? trimmed
+    : `${trimmed.slice(0, 61).trimEnd()}...`;
 }
 
 function formatTimestamp(value: string | undefined): string {
@@ -102,7 +104,9 @@ function readPinnedIds(tenderId: string): readonly string[] {
   try {
     const raw = window.localStorage.getItem(pinStorageKey(tenderId));
     const parsed: unknown = raw === null ? [] : JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : [];
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string")
+      : [];
   } catch {
     return [];
   }
@@ -120,7 +124,9 @@ export function RagChatbot({
   readonly versionId: string;
 }): JSX.Element {
   const [indexes, setIndexes] = useState<readonly RagIndex[]>([]);
-  const [conversations, setConversations] = useState<readonly Conversation[]>([]);
+  const [conversations, setConversations] = useState<readonly Conversation[]>(
+    [],
+  );
   const [selectedConversation, setSelectedConversation] = useState("");
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [mode, setMode] = useState<SourceMode>("TENDER_ONLY");
@@ -130,7 +136,9 @@ export function RagChatbot({
   const deferredSearch = useDeferredValue(searchQuery);
   const [busyAction, setBusyAction] = useState("");
   const [draftTitle, setDraftTitle] = useState("");
-  const [pinnedIds, setPinnedIds] = useState<readonly string[]>(() => readPinnedIds(tenderId));
+  const [pinnedIds, setPinnedIds] = useState<readonly string[]>(() =>
+    readPinnedIds(tenderId),
+  );
 
   const base = `/organisations/${organisationId}/tenders/${tenderId}`;
 
@@ -144,7 +152,10 @@ export function RagChatbot({
         ? current.filter((id) => id !== conversationId)
         : [...current, conversationId];
       if (typeof window !== "undefined") {
-        window.localStorage.setItem(pinStorageKey(tenderId), JSON.stringify(next));
+        window.localStorage.setItem(
+          pinStorageKey(tenderId),
+          JSON.stringify(next),
+        );
       }
       return next;
     });
@@ -154,12 +165,17 @@ export function RagChatbot({
     try {
       const [loadedIndexes, loadedConversations] = await Promise.all([
         apiRequest<readonly RagIndex[]>(`${base}/rag-indexes`),
-        apiRequest<readonly Conversation[]>(`${base}/rag-conversations?limit=50`),
+        apiRequest<readonly Conversation[]>(
+          `${base}/rag-conversations?limit=50`,
+        ),
       ]);
       setIndexes(loadedIndexes);
       setConversations(loadedConversations);
       setSelectedConversation((current) => {
-        if (current !== "" && loadedConversations.some((item) => item.id === current)) {
+        if (
+          current !== "" &&
+          loadedConversations.some((item) => item.id === current)
+        ) {
           return current;
         }
         const firstActive = loadedConversations.find(
@@ -224,8 +240,12 @@ export function RagChatbot({
       return item.title.toLowerCase().includes(query);
     });
   }, [conversations, deferredSearch]);
-  const pinnedConversations = filteredConversations.filter((item) => pinnedIds.includes(item.id));
-  const recentConversations = filteredConversations.filter((item) => !pinnedIds.includes(item.id));
+  const pinnedConversations = filteredConversations.filter((item) =>
+    pinnedIds.includes(item.id),
+  );
+  const recentConversations = filteredConversations.filter(
+    (item) => !pinnedIds.includes(item.id),
+  );
 
   const starterPrompts = [
     "Summarise the biggest eligibility blockers in this tender.",
@@ -239,7 +259,7 @@ export function RagChatbot({
     return detail.messages.map((message) => {
       const answerRun =
         message.role === "ASSISTANT"
-          ? detail.answerRuns[++assistantIndex] ?? null
+          ? (detail.answerRuns[++assistantIndex] ?? null)
           : null;
       return { answerRun, message };
     });
@@ -272,13 +292,19 @@ export function RagChatbot({
 
   async function createConversation(question: string): Promise<string | null> {
     try {
-      const conversation = await apiRequest<Conversation>(`${base}/rag-conversations`, {
-        body: JSON.stringify({
-          source_mode: mode,
-          title: draftTitle.trim() === "" ? buildConversationTitle(question) : draftTitle.trim(),
-        }),
-        method: "POST",
-      });
+      const conversation = await apiRequest<Conversation>(
+        `${base}/rag-conversations`,
+        {
+          body: JSON.stringify({
+            source_mode: mode,
+            title:
+              draftTitle.trim() === ""
+                ? buildConversationTitle(question)
+                : draftTitle.trim(),
+          }),
+          method: "POST",
+        },
+      );
       setDraftTitle("");
       setSelectedConversation(conversation.id);
       await load();
@@ -307,13 +333,16 @@ export function RagChatbot({
         if (created === null) return;
         conversationId = created;
       }
-      await apiRequest(`${base}/rag-conversations/${conversationId}/questions`, {
-        body: JSON.stringify({
-          idempotency_key: crypto.randomUUID(),
-          question,
-        }),
-        method: "POST",
-      });
+      await apiRequest(
+        `${base}/rag-conversations/${conversationId}/questions`,
+        {
+          body: JSON.stringify({
+            idempotency_key: crypto.randomUUID(),
+            question,
+          }),
+          method: "POST",
+        },
+      );
       setComposer("");
       await loadConversation();
     } catch (caught) {
@@ -332,14 +361,19 @@ export function RagChatbot({
     if (selectedConversation === "") return;
     setBusyAction("archive");
     try {
-      await apiRequest(`${base}/rag-conversations/${selectedConversation}/archive`, {
-        method: "PATCH",
-      });
+      await apiRequest(
+        `${base}/rag-conversations/${selectedConversation}/archive`,
+        {
+          method: "PATCH",
+        },
+      );
       setSelectedConversation("");
       await load();
       setStatus("Conversation archived.");
     } catch (caught) {
-      setStatus(formatApiError(caught, "The conversation could not be archived."));
+      setStatus(
+        formatApiError(caught, "The conversation could not be archived."),
+      );
     } finally {
       setBusyAction("");
     }
@@ -355,7 +389,9 @@ export function RagChatbot({
       await load();
       setStatus("Conversation deleted.");
     } catch (caught) {
-      setStatus(formatApiError(caught, "The conversation could not be deleted."));
+      setStatus(
+        formatApiError(caught, "The conversation could not be deleted."),
+      );
     } finally {
       setBusyAction("");
     }
@@ -404,11 +440,17 @@ export function RagChatbot({
             <Home aria-hidden="true" size={16} />
             <span>Home</span>
           </Link>
-          <Link className="chat-rail__shortcut" href={`/tenders/${organisationId}`}>
+          <Link
+            className="chat-rail__shortcut"
+            href={`/tenders/${organisationId}`}
+          >
             <FileText aria-hidden="true" size={16} />
             <span>Tenders</span>
           </Link>
-          <Link className="chat-rail__shortcut" href={`/documents/${organisationId}`}>
+          <Link
+            className="chat-rail__shortcut"
+            href={`/documents/${organisationId}`}
+          >
             <FileText aria-hidden="true" size={16} />
             <span>Company Docs</span>
           </Link>
@@ -492,7 +534,10 @@ export function RagChatbot({
         </div>
 
         <div className="chat-rail__footer">
-          <Link className="chat-rail__shortcut" href={`/settings/${organisationId}`}>
+          <Link
+            className="chat-rail__shortcut"
+            href={`/settings/${organisationId}`}
+          >
             <Settings aria-hidden="true" size={16} />
             <span>Settings</span>
           </Link>
@@ -514,10 +559,16 @@ export function RagChatbot({
               <span>Using tender:</span>
               <strong>{tenderTitle ?? tenderId}</strong>
             </div>
-            <h2>{detail?.title ?? (selectedConversation === "" ? "New tender conversation" : "Tender conversation")}</h2>
+            <h2>
+              {detail?.title ??
+                (selectedConversation === ""
+                  ? "New tender conversation"
+                  : "Tender conversation")}
+            </h2>
             <p>
               Answers remain grounded in authorised tender and company evidence
-              sources only. No legal advice or autonomous bid decisions are made here.
+              sources only. No legal advice or autonomous bid decisions are made
+              here.
             </p>
           </div>
 
@@ -540,7 +591,11 @@ export function RagChatbot({
                 </option>
               </Select>
             </label>
-            <Button loading={busyAction === "index"} onClick={() => void buildIndex()} variant="secondary">
+            <Button
+              loading={busyAction === "index"}
+              onClick={() => void buildIndex()}
+              variant="secondary"
+            >
               Build current index
             </Button>
             {selectedConversation !== "" ? (
@@ -563,9 +618,7 @@ export function RagChatbot({
               : `${humanizeEnum(currentIndex.status)} (${currentIndex.progressPercentage}%)`}
           </Badge>
           <Badge tone="neutral">{humanizeEnum(mode)}</Badge>
-          <span className="chat-canvas__status-note">
-            {currentIndexNote}
-          </span>
+          <span className="chat-canvas__status-note">{currentIndexNote}</span>
         </div>
 
         <div className="chat-canvas__messages">
@@ -586,16 +639,25 @@ export function RagChatbot({
                 key={message.id}
               >
                 <div className="chat-message__meta">
-                  <strong>{message.role === "USER" ? "You" : "Tender Intelligence"}</strong>
+                  <strong>
+                    {message.role === "USER" ? "You" : "Tender Intelligence"}
+                  </strong>
                   {answerRun !== null ? (
-                    <Badge tone={answerRun.status === "COMPLETED" ? "success" : "warning"}>
+                    <Badge
+                      tone={
+                        answerRun.status === "COMPLETED" ? "success" : "warning"
+                      }
+                    >
                       {humanizeEnum(answerRun.status)}
                     </Badge>
                   ) : null}
                 </div>
                 <p>{message.content}</p>
                 {answerRun?.status === "INSUFFICIENT_EVIDENCE" ? (
-                  <Alert tone="warning" title="Insufficient authorised evidence">
+                  <Alert
+                    tone="warning"
+                    title="Insufficient authorised evidence"
+                  >
                     <p>No answer could be grounded for this question.</p>
                   </Alert>
                 ) : null}
@@ -612,7 +674,10 @@ export function RagChatbot({
                 {answerRun !== null && answerRun.citations.length > 0 ? (
                   <div className="chat-citation-list">
                     {answerRun.citations.map((citation) => (
-                      <Card className="chat-citation-card" key={`${answerRun.id}:${citation.handle}`}>
+                      <Card
+                        className="chat-citation-card"
+                        key={`${answerRun.id}:${citation.handle}`}
+                      >
                         <strong>
                           [{citation.handle}] {citation.documentName}
                         </strong>

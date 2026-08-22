@@ -32,7 +32,9 @@ describe("tender storage cleanup", () => {
       tenderId: "tender-a",
     };
 
-    await expect(processor.cleanupRemovedDocument(job)).resolves.toBeUndefined();
+    await expect(
+      processor.cleanupRemovedDocument(job),
+    ).resolves.toBeUndefined();
     expect(storage.send).toHaveBeenCalledTimes(2);
     expect(storage.send).toHaveBeenNthCalledWith(
       1,
@@ -59,9 +61,10 @@ describe("tender worker authority guard", () => {
       $transaction: vi.fn().mockResolvedValue(undefined),
       processingJob: {
         findFirst: vi.fn().mockResolvedValue({ id: "job-a", state: "QUEUED" }),
-        findUnique: vi
-          .fn()
-          .mockResolvedValue({ cancellationRequestedAt: null, state: "SCANNING" }),
+        findUnique: vi.fn().mockResolvedValue({
+          cancellationRequestedAt: null,
+          state: "SCANNING",
+        }),
         update: vi.fn().mockResolvedValue(undefined),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
       },

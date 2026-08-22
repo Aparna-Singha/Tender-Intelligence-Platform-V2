@@ -67,17 +67,20 @@ export function AccountWorkspace(): JSX.Element {
 
   async function load(): Promise<void> {
     try {
-      const [loadedSession, loadedMemberships, loadedSessions] = await Promise.all([
-        apiRequest<SessionContext>("/auth/session"),
-        apiRequest<readonly Membership[]>("/organisations"),
-        apiRequest<readonly SessionSummary[]>("/auth/sessions"),
-      ]);
+      const [loadedSession, loadedMemberships, loadedSessions] =
+        await Promise.all([
+          apiRequest<SessionContext>("/auth/session"),
+          apiRequest<readonly Membership[]>("/organisations"),
+          apiRequest<readonly SessionSummary[]>("/auth/sessions"),
+        ]);
       setSession(loadedSession);
       setMemberships(loadedMemberships);
       setSessions(loadedSessions);
       setStatus("");
     } catch (caught) {
-      setStatus(formatApiError(caught, "Account details are unavailable right now."));
+      setStatus(
+        formatApiError(caught, "Account details are unavailable right now."),
+      );
     }
   }
 
@@ -88,8 +91,11 @@ export function AccountWorkspace(): JSX.Element {
   const activeMembership = useMemo(
     () =>
       memberships.find(
-        ({ organisation }) => organisation.id === session?.active_organisation_id,
-      ) ?? memberships[0] ?? null,
+        ({ organisation }) =>
+          organisation.id === session?.active_organisation_id,
+      ) ??
+      memberships[0] ??
+      null,
     [memberships, session?.active_organisation_id],
   );
 
@@ -110,7 +116,9 @@ export function AccountWorkspace(): JSX.Element {
   async function revoke(sessionId: string, current: boolean): Promise<void> {
     setBusy(sessionId);
     try {
-      await apiRequest(`/auth/sessions/${sessionId}/revoke`, { method: "POST" });
+      await apiRequest(`/auth/sessions/${sessionId}/revoke`, {
+        method: "POST",
+      });
       if (current) {
         clearCsrfToken();
         router.replace("/login");
@@ -129,11 +137,15 @@ export function AccountWorkspace(): JSX.Element {
     setBusy("revoke-others");
     try {
       for (const item of otherActiveSessions) {
-        await apiRequest(`/auth/sessions/${item.id}/revoke`, { method: "POST" });
+        await apiRequest(`/auth/sessions/${item.id}/revoke`, {
+          method: "POST",
+        });
       }
       await load();
     } catch (caught) {
-      setStatus(formatApiError(caught, "Some other sessions could not be revoked."));
+      setStatus(
+        formatApiError(caught, "Some other sessions could not be revoked."),
+      );
     } finally {
       setBusy("");
     }
@@ -165,7 +177,8 @@ export function AccountWorkspace(): JSX.Element {
               <div>
                 <strong>{session?.user.display_name ?? "Unavailable"}</strong>
                 <small>
-                  {activeMembership?.organisation.name ?? "No organisation selected"}
+                  {activeMembership?.organisation.name ??
+                    "No organisation selected"}
                 </small>
               </div>
             </div>
@@ -178,15 +191,19 @@ export function AccountWorkspace(): JSX.Element {
               <div>
                 <h2>Personal information</h2>
                 <p>
-                  Identity details are visible here. Direct account profile mutation is
-                  not supported by the current frontend/API contract.
+                  Identity details are visible here. Direct account profile
+                  mutation is not supported by the current frontend/API
+                  contract.
                 </p>
               </div>
             </div>
             <div className="settings-form-grid">
               <label className="readonly-field">
                 <span>Display name</span>
-                <Input readOnly value={session?.user.display_name ?? "Unavailable"} />
+                <Input
+                  readOnly
+                  value={session?.user.display_name ?? "Unavailable"}
+                />
               </label>
               <label className="readonly-field">
                 <span>Email</span>
@@ -196,14 +213,21 @@ export function AccountWorkspace(): JSX.Element {
                 <span>Current organisation</span>
                 <Input
                   readOnly
-                  value={activeMembership?.organisation.name ?? "No organisation selected"}
+                  value={
+                    activeMembership?.organisation.name ??
+                    "No organisation selected"
+                  }
                 />
               </label>
               <label className="readonly-field">
                 <span>Current role</span>
                 <Input
                   readOnly
-                  value={activeMembership === null ? "Unavailable" : humanizeEnum(activeMembership.role)}
+                  value={
+                    activeMembership === null
+                      ? "Unavailable"
+                      : humanizeEnum(activeMembership.role)
+                  }
                 />
               </label>
             </div>
@@ -214,7 +238,8 @@ export function AccountWorkspace(): JSX.Element {
               <div>
                 <h2>Security &amp; sessions</h2>
                 <p>
-                  Session revocation and sign-out use the existing authentication flow.
+                  Session revocation and sign-out use the existing
+                  authentication flow.
                 </p>
               </div>
             </div>
@@ -222,14 +247,19 @@ export function AccountWorkspace(): JSX.Element {
               <div className="account-session-summary__row">
                 <div>
                   <strong>Active session</strong>
-                  <small>{activeSessions.length} authenticated session(s)</small>
+                  <small>
+                    {activeSessions.length} authenticated session(s)
+                  </small>
                 </div>
                 <Badge tone="success">Current</Badge>
               </div>
               <div className="account-session-summary__row">
                 <div>
                   <strong>Password &amp; security</strong>
-                  <small>Password reset and deeper account security controls stay under the existing auth flow.</small>
+                  <small>
+                    Password reset and deeper account security controls stay
+                    under the existing auth flow.
+                  </small>
                 </div>
               </div>
               <div className="account-session-summary__row">
@@ -238,7 +268,11 @@ export function AccountWorkspace(): JSX.Element {
                   <small>Review current and historical sessions below.</small>
                 </div>
                 <Button
-                  onClick={() => document.getElementById("account-sessions")?.scrollIntoView({ behavior: "smooth" })}
+                  onClick={() =>
+                    document
+                      .getElementById("account-sessions")
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
                   variant="secondary"
                 >
                   Manage sessions
@@ -249,7 +283,10 @@ export function AccountWorkspace(): JSX.Element {
                   <strong>Sign out</strong>
                   <small>End the current session on this device.</small>
                 </div>
-                <Button loading={busy === "logout"} onClick={() => void logout()}>
+                <Button
+                  loading={busy === "logout"}
+                  onClick={() => void logout()}
+                >
                   Log out
                 </Button>
               </div>
@@ -264,8 +301,8 @@ export function AccountWorkspace(): JSX.Element {
             <div>
               <h2>Sessions</h2>
               <p>
-                Review current and historical sessions, revoke other devices, or log
-                out using the existing authentication flow.
+                Review current and historical sessions, revoke other devices, or
+                log out using the existing authentication flow.
               </p>
             </div>
             <Button
@@ -277,7 +314,7 @@ export function AccountWorkspace(): JSX.Element {
               Revoke other sessions
             </Button>
           </div>
-            <Table>
+          <Table>
             <thead>
               <tr>
                 <th>Session</th>
@@ -294,14 +331,18 @@ export function AccountWorkspace(): JSX.Element {
               {sessions.map((item) => (
                 <tr key={item.id}>
                   <td>
-                    <strong>{item.current ? "Current session" : "Account session"}</strong>
+                    <strong>
+                      {item.current ? "Current session" : "Account session"}
+                    </strong>
                     <div className="settings-table-meta">{item.id}</div>
                   </td>
                   <td>{formatTimestamp(item.createdAt)}</td>
                   <td>{formatTimestamp(item.lastSeenAt)}</td>
                   <td>{formatTimestamp(item.expiresAt)}</td>
                   <td>
-                    <Badge tone={item.revokedAt === null ? "success" : "neutral"}>
+                    <Badge
+                      tone={item.revokedAt === null ? "success" : "neutral"}
+                    >
                       {item.revokedAt === null
                         ? item.current
                           ? "Current"

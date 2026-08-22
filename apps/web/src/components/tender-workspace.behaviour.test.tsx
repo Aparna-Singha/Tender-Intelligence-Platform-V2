@@ -145,17 +145,31 @@ describe("tender workspace stages", () => {
     const user = userEvent.setup();
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
     await screen.findByText("Office equipment tender");
-    expect(screen.getByRole("heading", { name: "Assessment summary" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "What needs your attention" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Overview" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Eligibility" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "What needs your attention" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Overview" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Eligibility" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Draft" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI Chat" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Tender Files" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Activity" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Tender Files" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Activity" }),
+    ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Eligibility" }));
     await waitFor(() =>
-      expect(push).toHaveBeenCalledWith("/tenders/org-1/tender-1?stage=eligibility"),
+      expect(push).toHaveBeenCalledWith(
+        "/tenders/org-1/tender-1?stage=eligibility",
+      ),
     );
   });
 
@@ -173,16 +187,24 @@ describe("tender workspace stages", () => {
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
     await screen.findByRole("heading", { name: "Tender Files" });
     await user.click(screen.getByRole("button", { name: "Upload files" }));
-    expect(screen.getByRole("button", { name: "Upload source securely" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Upload source securely" }),
+    ).toBeInTheDocument();
   });
 
   it("maps legacy risk routes safely back to overview", async () => {
     search = new URLSearchParams("stage=risks");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
-    expect(await screen.findByRole("heading", { name: "Assessment summary" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
     const compatNote = document.querySelector(".tender-compat-note");
-    expect(compatNote).toHaveTextContent("This saved link used the legacy risks stage.");
-    expect(screen.queryByText("Readiness module mounted")).not.toBeInTheDocument();
+    expect(compatNote).toHaveTextContent(
+      "This saved link used the legacy risks stage.",
+    );
+    expect(
+      screen.queryByText("Readiness module mounted"),
+    ).not.toBeInTheDocument();
   });
 
   it("mounts review and export from legacy readiness and export URLs", async () => {
@@ -197,7 +219,9 @@ describe("tender workspace stages", () => {
     view.rerender(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
-    expect(await screen.findByRole("heading", { name: "Review & Export" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Review & Export" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Readiness module mounted")).toBeInTheDocument();
     expect(screen.getByText("Export module mounted")).toBeInTheDocument();
   });
@@ -212,30 +236,48 @@ describe("tender workspace stages", () => {
     view.rerender(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
-    expect(await screen.findByRole("heading", { name: "Draft" })).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Assessment summary" })).not.toBeInTheDocument();
-    expect(await screen.findByText("Drafting is currently blocked")).toBeInTheDocument();
-    expect(screen.queryByText("Readiness module mounted")).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Draft" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Assessment summary" }),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByText("Drafting is currently blocked"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Readiness module mounted"),
+    ).not.toBeInTheDocument();
     search = new URLSearchParams("stage=readiness");
     view.rerender(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
-    expect(await screen.findByRole("heading", { name: "Review & Export" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Review & Export" }),
+    ).toBeInTheDocument();
   });
 
   it("retains the safe overview fallback for an unsupported stage", async () => {
     search = new URLSearchParams("stage=submission");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
-    expect(await screen.findByRole("heading", { name: "Assessment summary" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
     const compatNote = document.querySelector(".tender-compat-note");
-    expect(compatNote).toHaveTextContent("This saved link used the legacy submission stage.");
-    expect(screen.queryByText("Readiness module mounted")).not.toBeInTheDocument();
+    expect(compatNote).toHaveTextContent(
+      "This saved link used the legacy submission stage.",
+    );
+    expect(
+      screen.queryByText("Readiness module mounted"),
+    ).not.toBeInTheDocument();
   });
 
   it("renders AI chat safely when controlled package history is empty in the live envelope shape", async () => {
     search = new URLSearchParams("stage=ask");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
-    expect(await screen.findByRole("heading", { name: "AI Chat" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "AI Chat" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Ask module mounted")).toBeInTheDocument();
   });
 
@@ -267,63 +309,71 @@ describe("tender workspace stages", () => {
         path.includes("/checklists") ||
         path.endsWith("/draft-generation-runs") ||
         path.endsWith("/drafts")
-        ) {
+      ) {
         return [];
       }
       return baseWorkspace;
     });
     search = new URLSearchParams("stage=activity");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
-    expect(await screen.findByRole("heading", { name: "Activity" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Activity" }),
+    ).toBeInTheDocument();
     expect(
       await screen.findByText("Controlled review package Package ready"),
     ).toBeInTheDocument();
-    expect(screen.getByText("Human review required review state.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Human review required review state."),
+    ).toBeInTheDocument();
   });
 
   it("shows a direct failed-upload trash action, confirms removal, and keeps ready-row actions direct", async () => {
     const user = userEvent.setup();
     let workspaceState = structuredClone(failedUploadWorkspace);
 
-    apiRequest.mockImplementation((path: string, init?: RequestInit): unknown => {
-      if (path.includes("/final-readiness?")) {
-        return { items: [], next_cursor: null };
-      }
-      if (path.includes("/controlled-review-packages")) {
-        return { items: [], next_cursor: null };
-      }
-      if (
-        path.includes("/extractions") ||
-        path.includes("/risk-analyses") ||
-        path.includes("/eligibility-assessments") ||
-        path.includes("/checklists") ||
-        path.endsWith("/draft-generation-runs") ||
-        path.endsWith("/drafts")
-      ) {
-        return [];
-      }
-      if (
-        path.endsWith("/documents/failed-document") &&
-        init?.method === "DELETE"
-      ) {
-        workspaceState = {
-          ...workspaceState,
-          versions: workspaceState.versions.map((version) => ({
-            ...version,
-            documents: version.documents.filter(
-              (document) => document.id !== "failed-document",
-            ),
-          })),
-        };
-        return { removed: true };
-      }
-      return workspaceState;
-    });
+    apiRequest.mockImplementation(
+      (path: string, init?: RequestInit): unknown => {
+        if (path.includes("/final-readiness?")) {
+          return { items: [], next_cursor: null };
+        }
+        if (path.includes("/controlled-review-packages")) {
+          return { items: [], next_cursor: null };
+        }
+        if (
+          path.includes("/extractions") ||
+          path.includes("/risk-analyses") ||
+          path.includes("/eligibility-assessments") ||
+          path.includes("/checklists") ||
+          path.endsWith("/draft-generation-runs") ||
+          path.endsWith("/drafts")
+        ) {
+          return [];
+        }
+        if (
+          path.endsWith("/documents/failed-document") &&
+          init?.method === "DELETE"
+        ) {
+          workspaceState = {
+            ...workspaceState,
+            versions: workspaceState.versions.map((version) => ({
+              ...version,
+              documents: version.documents.filter(
+                (document) => document.id !== "failed-document",
+              ),
+            })),
+          };
+          return { removed: true };
+        }
+        return workspaceState;
+      },
+    );
 
     search = new URLSearchParams("stage=files");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
-    expect(await screen.findByRole("heading", { name: "Tender Files" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Tender Files" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("GeM-Bidding-9646270.pdf")).toBeInTheDocument();
     expect(screen.getByText("Upload failed")).toBeInTheDocument();
     expect(
@@ -373,7 +423,9 @@ describe("tender workspace stages", () => {
       }),
     );
     await waitFor(() =>
-      expect(screen.queryByText("GeM-Bidding-9646270.pdf")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByText("GeM-Bidding-9646270.pdf"),
+      ).not.toBeInTheDocument(),
     );
     expect(
       await screen.findByText(
@@ -408,42 +460,49 @@ describe("tender workspace stages", () => {
       ],
     };
 
-    apiRequest.mockImplementation((path: string, init?: RequestInit): unknown => {
-      if (path.includes("/final-readiness?")) {
-        return { items: [], next_cursor: null };
-      }
-      if (path.includes("/controlled-review-packages")) {
-        return { items: [], next_cursor: null };
-      }
-      if (
-        path.includes("/extractions") ||
-        path.includes("/risk-analyses") ||
-        path.includes("/eligibility-assessments") ||
-        path.includes("/checklists") ||
-        path.endsWith("/draft-generation-runs") ||
-        path.endsWith("/drafts")
-      ) {
-        return [];
-      }
-      if (path.endsWith("/documents/ready-document") && init?.method === "DELETE") {
-        workspaceState = {
-          ...workspaceState,
-          versions: workspaceState.versions.map((version) => ({
-            ...version,
-            documents: version.documents.filter(
-              (document) => document.id !== "ready-document",
-            ),
-          })),
-        };
-        return { removed: true };
-      }
-      return workspaceState;
-    });
+    apiRequest.mockImplementation(
+      (path: string, init?: RequestInit): unknown => {
+        if (path.includes("/final-readiness?")) {
+          return { items: [], next_cursor: null };
+        }
+        if (path.includes("/controlled-review-packages")) {
+          return { items: [], next_cursor: null };
+        }
+        if (
+          path.includes("/extractions") ||
+          path.includes("/risk-analyses") ||
+          path.includes("/eligibility-assessments") ||
+          path.includes("/checklists") ||
+          path.endsWith("/draft-generation-runs") ||
+          path.endsWith("/drafts")
+        ) {
+          return [];
+        }
+        if (
+          path.endsWith("/documents/ready-document") &&
+          init?.method === "DELETE"
+        ) {
+          workspaceState = {
+            ...workspaceState,
+            versions: workspaceState.versions.map((version) => ({
+              ...version,
+              documents: version.documents.filter(
+                (document) => document.id !== "ready-document",
+              ),
+            })),
+          };
+          return { removed: true };
+        }
+        return workspaceState;
+      },
+    );
 
     search = new URLSearchParams("stage=files");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
-    expect(await screen.findByRole("heading", { name: "Tender Files" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "Tender Files" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
         name: "Download GeM-Bidding-9646270.pdf",
@@ -473,7 +532,9 @@ describe("tender workspace stages", () => {
     await user.click(screen.getByRole("button", { name: "Remove file" }));
 
     await waitFor(() =>
-      expect(screen.queryByText("GeM-Bidding-9646270.pdf")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByText("GeM-Bidding-9646270.pdf"),
+      ).not.toBeInTheDocument(),
     );
     expect(
       await screen.findByText(

@@ -208,16 +208,24 @@ describe("dashboard home parity behavior", () => {
       ),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Use Home as a work queue across active tender workspaces."),
+      screen.queryByText(
+        "Use Home as a work queue across active tender workspaces.",
+      ),
     ).not.toBeInTheDocument();
     expect(
-      screen.queryByText("Shown only when the backend exposes real running work."),
+      screen.queryByText(
+        "Shown only when the backend exposes real running work.",
+      ),
     ).not.toBeInTheDocument();
 
-    const tendersHeading = screen.getByRole("heading", { name: "Your tenders" });
+    const tendersHeading = screen.getByRole("heading", {
+      name: "Your tenders",
+    });
     const tendersSection = tendersHeading.closest("section");
     expect(tendersSection).not.toBeNull();
-    expect(within(tendersSection!).getByRole("button", { name: "All 2" })).toBeInTheDocument();
+    expect(
+      within(tendersSection!).getByRole("button", { name: "All 2" }),
+    ).toBeInTheDocument();
     expect(
       within(tendersSection!).getByRole("button", { name: "Active 2" }),
     ).toBeInTheDocument();

@@ -29,6 +29,94 @@ describe("Phase 12 controlled review-package API boundaries", () => {
     });
   });
 
+  it("does not issue a download grant for a cross-tenant run", async () => {
+    type TransactionCallback = (transaction: unknown) => Promise<unknown>;
+    const database = {
+      $transaction: vi.fn((callback: TransactionCallback) =>
+        callback(database),
+      ),
+      controlledReviewPackageRun: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+    };
+    const service = new ControlledReviewPackageService(
+      database as never,
+      {} as never,
+      { evaluate: vi.fn().mockResolvedValue({ fresh: true }) } as never,
+    );
+
+    await expect(
+      service.grant(
+        "organisation-a",
+        "tender-a",
+        "run-b",
+        "user-a",
+        "REVIEWER",
+        { artifact_id: "artifact-b" },
+        "request-a",
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+    expect(database.controlledReviewPackageRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "run-b",
+          organisationId: "organisation-a",
+          tenderId: "tender-a",
+        },
+      }),
+    );
+  });
+
+  it("does not redeem an expired or revoked controlled download grant", async () => {
+    const database = {
+      packageDownloadGrant: {
+        findFirst: vi.fn().mockResolvedValue({
+          artifact: {
+            integrityVerifiedAt: new Date(),
+            malwareStatus: "CLEAN",
+            promotionStatus: "PROMOTED",
+            sha256: "a".repeat(64),
+          },
+          artifactChecksum: "a".repeat(64),
+          expiresAt: new Date("2026-01-01T00:00:00.000Z"),
+          invalidatedAt: null,
+          revokedAt: null,
+          run: {
+            generationStatus: "GENERATED",
+            inputFingerprint: "f".repeat(64),
+            invalidatedAt: null,
+            reviewStatus: "APPROVED",
+            staleAt: null,
+            supersededAt: null,
+            tenderVersion: { currentControlledPackageRunId: "run-a" },
+          },
+          runFingerprint: "f".repeat(64),
+        }),
+      },
+    };
+    const storage = { send: vi.fn() };
+    const service = new ControlledReviewPackageService(
+      database as never,
+      {} as never,
+      {} as never,
+      storage as never,
+      { S3_BUCKET: "private-packages" } as never,
+    );
+
+    await expect(
+      service.redeem(
+        "organisation-a",
+        "tender-a",
+        "run-a",
+        "grant-a",
+        "user-a",
+      ),
+    ).rejects.toMatchObject({
+      publicCode: "CONTROLLED_PACKAGE_DOWNLOAD_NOT_AUTHORISED",
+    });
+    expect(storage.send).not.toHaveBeenCalled();
+  });
+
   it("replays equivalent idempotency without dispatching another job", async () => {
     const existing = {
       createdAt: new Date("2026-08-04T12:00:00.000Z"),

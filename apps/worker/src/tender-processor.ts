@@ -141,8 +141,7 @@ export class TenderProcessor {
         where: { id: document.id },
       });
       if (
-        latestDocument === null ||
-        latestDocument.deletedAt !== null ||
+        latestDocument?.deletedAt !== null ||
         !["UPLOADED", "SCANNING"].includes(latestDocument.status)
       ) {
         await this.deleteObjectIfPresent(approvedKey);

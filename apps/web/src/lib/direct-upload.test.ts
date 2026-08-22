@@ -1,7 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  uploadFileToSignedStorageUrl,
-} from "./direct-upload";
+import { uploadFileToSignedStorageUrl } from "./direct-upload";
 import type { DirectUploadError } from "./direct-upload";
 
 describe("direct signed upload", () => {
@@ -24,8 +22,10 @@ describe("direct signed upload", () => {
       method: "PUT",
     });
     expect(
-      (fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> } | undefined)
-        ?.headers,
+      (
+        fetchMock.mock.calls[0]?.[1] as
+          { headers?: Record<string, string> } | undefined
+      )?.headers,
     ).not.toHaveProperty("x-amz-meta-sha256");
   });
 

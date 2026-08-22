@@ -60,7 +60,11 @@ function mockSettingsLoad(role: string): void {
     if (path === "/organisations/org-1/onboarding")
       return Promise.resolve({
         display_mode: "PROFESSIONAL",
-        progress: { completed_steps: [1, 2], current_step: 3, status: "IN_PROGRESS" },
+        progress: {
+          completed_steps: [1, 2],
+          current_step: 3,
+          status: "IN_PROGRESS",
+        },
         values: {},
       });
     return Promise.reject(new Error(`Unexpected request: ${path}`));
@@ -75,15 +79,23 @@ describe("settings workspace", () => {
   it("shows invitation and role controls only when the current membership supports them", async () => {
     mockSettingsLoad("OWNER");
     render(<SettingsWorkspace organisationId="org-1" />);
-    expect(await screen.findByRole("heading", { name: "People & access" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send invitation" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "People & access" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Send invitation" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
   });
 
   it("falls back to honest unsupported messaging for non-admin roles", async () => {
     mockSettingsLoad("REVIEWER");
     render(<SettingsWorkspace organisationId="org-1" />);
-    expect(await screen.findByText(/Invitation controls unavailable/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Send invitation" })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText(/Invitation controls unavailable/),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Send invitation" }),
+    ).not.toBeInTheDocument();
   });
 });

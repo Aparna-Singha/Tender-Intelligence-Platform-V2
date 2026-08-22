@@ -28,12 +28,20 @@ interface Session {
 }
 
 interface Membership {
-  readonly organisation: { readonly id: string; readonly name: string; readonly type: string };
+  readonly organisation: {
+    readonly id: string;
+    readonly name: string;
+    readonly type: string;
+  };
   readonly role: string;
 }
 
 interface DashboardGuidance {
-  readonly recommendations: readonly { readonly action: string; readonly id: string; readonly priority: string }[];
+  readonly recommendations: readonly {
+    readonly action: string;
+    readonly id: string;
+    readonly priority: string;
+  }[];
 }
 
 type HomeFilter = "ALL" | "ACTIVE" | "IN_PROGRESS" | "COMPLETED";
@@ -104,7 +112,9 @@ export function Dashboard(): JSX.Element {
           apiRequest<DashboardGuidance>(
             `/organisations/${organisationId}/dashboard-recommendations`,
           ),
-          apiRequest<TenderSummary[]>(`/organisations/${organisationId}/tenders`),
+          apiRequest<TenderSummary[]>(
+            `/organisations/${organisationId}/tenders`,
+          ),
         ]);
         setGuidance(nextGuidance);
         setTenders(nextTenders);
@@ -113,7 +123,10 @@ export function Dashboard(): JSX.Element {
       setError("");
     } catch (caught) {
       setError(
-        formatApiError(caught, "Unable to load your workspace. Please try again."),
+        formatApiError(
+          caught,
+          "Unable to load your workspace. Please try again.",
+        ),
       );
     } finally {
       setLoading(false);
@@ -164,20 +177,23 @@ export function Dashboard(): JSX.Element {
     [tenders],
   );
   const attentionRows = useMemo(() => {
-    const recommendationRows = (guidance?.recommendations ?? []).slice(0, 3).map((recommendation) => ({
-      actionLabel: "Review",
-      deadline: "Organisation profile",
-      issue: recommendation.action,
-      key: recommendation.id,
-      tenderName: selectedOrganisation?.organisation.name ?? "Organisation profile",
-      tone:
-        recommendation.priority === "HIGH"
-          ? "danger"
-          : recommendation.priority === "MEDIUM"
-            ? "warning"
-            : "info",
-      href: selectedId === null ? "/dashboard" : `/settings/${selectedId}`,
-    }));
+    const recommendationRows = (guidance?.recommendations ?? [])
+      .slice(0, 3)
+      .map((recommendation) => ({
+        actionLabel: "Review",
+        deadline: "Organisation profile",
+        issue: recommendation.action,
+        key: recommendation.id,
+        tenderName:
+          selectedOrganisation?.organisation.name ?? "Organisation profile",
+        tone:
+          recommendation.priority === "HIGH"
+            ? "danger"
+            : recommendation.priority === "MEDIUM"
+              ? "warning"
+              : "info",
+        href: selectedId === null ? "/dashboard" : `/settings/${selectedId}`,
+      }));
     const tenderAttention = tenderModels
       .filter(({ presentation }) => presentation.needsAttention)
       .sort((left, right) => compareAttention(left.tender, right.tender))
@@ -192,11 +208,16 @@ export function Dashboard(): JSX.Element {
       }));
     return [...tenderAttention, ...recommendationRows].slice(0, 3);
   }, [guidance, selectedId, selectedOrganisation, tenderModels]);
-  const inProgressRows = tenderModels.filter(({ presentation }) => presentation.isInProgress);
+  const inProgressRows = tenderModels.filter(
+    ({ presentation }) => presentation.isInProgress,
+  );
   const counts = {
-    ACTIVE: tenderModels.filter(({ presentation }) => !presentation.isCompleted).length,
+    ACTIVE: tenderModels.filter(({ presentation }) => !presentation.isCompleted)
+      .length,
     ALL: tenderModels.length,
-    COMPLETED: tenderModels.filter(({ presentation }) => presentation.isCompleted).length,
+    COMPLETED: tenderModels.filter(
+      ({ presentation }) => presentation.isCompleted,
+    ).length,
     IN_PROGRESS: inProgressRows.length,
   };
   const visibleTenders = tenderModels.filter(({ presentation }) => {
@@ -236,7 +257,10 @@ export function Dashboard(): JSX.Element {
             Create organisation
           </Button>
         ) : (
-          <Link className="button button--primary workspace-cta" href={`/tenders/${selectedId}`}>
+          <Link
+            className="button button--primary workspace-cta"
+            href={`/tenders/${selectedId}`}
+          >
             <Plus aria-hidden="true" size={18} />
             Analyse new tender
           </Link>
@@ -290,10 +314,15 @@ export function Dashboard(): JSX.Element {
                         <strong>{row.tenderName}</strong>
                         <p>{row.issue}</p>
                       </div>
-                      <span className={`deadline-text deadline-text--${row.tone}`}>
+                      <span
+                        className={`deadline-text deadline-text--${row.tone}`}
+                      >
                         {row.deadline}
                       </span>
-                      <Link className="button button--secondary" href={row.href}>
+                      <Link
+                        className="button button--secondary"
+                        href={row.href}
+                      >
                         {row.actionLabel}
                       </Link>
                     </li>
@@ -313,12 +342,14 @@ export function Dashboard(): JSX.Element {
                 role="tablist"
                 aria-label="Tender filters"
               >
-                {([
-                  ["ALL", `All ${counts.ALL}`],
-                  ["ACTIVE", `Active ${counts.ACTIVE}`],
-                  ["IN_PROGRESS", `In progress ${counts.IN_PROGRESS}`],
-                  ["COMPLETED", `Completed ${counts.COMPLETED}`],
-                ] as const).map(([value, label]) => (
+                {(
+                  [
+                    ["ALL", `All ${counts.ALL}`],
+                    ["ACTIVE", `Active ${counts.ACTIVE}`],
+                    ["IN_PROGRESS", `In progress ${counts.IN_PROGRESS}`],
+                    ["COMPLETED", `Completed ${counts.COMPLETED}`],
+                  ] as const
+                ).map(([value, label]) => (
                   <button
                     aria-pressed={filter === value}
                     className={`workspace-chip ${filter === value ? "workspace-chip--active" : ""}`}
@@ -344,7 +375,9 @@ export function Dashboard(): JSX.Element {
                         <strong>{tender.title}</strong>
                         <p>{tender.buyer}</p>
                       </div>
-                      <span className={`status-badge status-badge--${presentation.tone}`}>
+                      <span
+                        className={`status-badge status-badge--${presentation.tone}`}
+                      >
                         {presentation.statusLabel}
                       </span>
                       <p className="workspace-row__supporting">
@@ -375,10 +408,16 @@ export function Dashboard(): JSX.Element {
               </div>
               <div className="workspace-progress-grid">
                 {inProgressRows.map(({ presentation, tender }) => (
-                  <article className="workspace-card progress-card" key={tender.id}>
+                  <article
+                    className="workspace-card progress-card"
+                    key={tender.id}
+                  >
                     <div className="progress-card__header">
-                      <strong>{progressHeading(presentation, tender.title)}</strong>
-                      {typeof tender.workspace?.processingProgress === "number" &&
+                      <strong>
+                        {progressHeading(presentation, tender.title)}
+                      </strong>
+                      {typeof tender.workspace?.processingProgress ===
+                        "number" &&
                       tender.workspace.processingProgress > 0 &&
                       tender.workspace.processingProgress < 100 ? (
                         <span>{tender.workspace.processingProgress}%</span>
@@ -441,14 +480,15 @@ export function Dashboard(): JSX.Element {
             </IconButton>
           </div>
           <p>
-            Organisation membership controls access to company evidence and tender work.
+            Organisation membership controls access to company evidence and
+            tender work.
           </p>
           <form onSubmit={(event) => void create(event)}>
             <Field label="Organisation name" required>
               <Input autoFocus maxLength={160} name="name" required />
             </Field>
             <Field
-              hint="MSME is for your company&apos;s tender work. Consultant is for tender professionals managing client workspaces."
+              hint="MSME is for your company's tender work. Consultant is for tender professionals managing client workspaces."
               label="Organisation type"
               required
             >
@@ -457,7 +497,9 @@ export function Dashboard(): JSX.Element {
                 <option value="CONSULTANT">Consultant</option>
               </Select>
             </Field>
-            {createError !== "" ? <FormMessage>{createError}</FormMessage> : null}
+            {createError !== "" ? (
+              <FormMessage>{createError}</FormMessage>
+            ) : null}
             <div className="inline-actions">
               <Button loading={creating} type="submit">
                 {creating ? "Creating..." : "Create organisation"}

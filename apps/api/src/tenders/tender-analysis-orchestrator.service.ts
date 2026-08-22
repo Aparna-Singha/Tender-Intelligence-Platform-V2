@@ -51,7 +51,13 @@ export class TenderAnalysisOrchestratorService {
       return;
 
     await Promise.all([
-      this.tryStartRisk(organisationId, tenderId, version.id, userId, requestId),
+      this.tryStartRisk(
+        organisationId,
+        tenderId,
+        version.id,
+        userId,
+        requestId,
+      ),
       this.tryStartTenderOnlyRag(
         organisationId,
         tenderId,
@@ -70,16 +76,18 @@ export class TenderAnalysisOrchestratorService {
     )
       return;
 
-    const continueDecision = await this.database.earlyPursuitDecision.findFirst({
-      where: {
-        decision: "CONTINUE",
-        organisationId,
-        riskAnalysisRunId: risk.id,
-        supersededAt: null,
-        tenderId,
-        tenderVersionId: riskVersion.id,
+    const continueDecision = await this.database.earlyPursuitDecision.findFirst(
+      {
+        where: {
+          decision: "CONTINUE",
+          organisationId,
+          riskAnalysisRunId: risk.id,
+          supersededAt: null,
+          tenderId,
+          tenderVersionId: riskVersion.id,
+        },
       },
-    });
+    );
     if (continueDecision === null) return;
 
     await this.tryStartEligibility(
@@ -95,10 +103,7 @@ export class TenderAnalysisOrchestratorService {
       tenderId,
     );
     const assessment = assessmentVersion?.activeEligibilityAssessmentRun;
-    if (
-      assessment?.status !== "COMPLETE" ||
-      assessment.invalidatedAt !== null
-    )
+    if (assessment?.status !== "COMPLETE" || assessment.invalidatedAt !== null)
       return;
 
     await this.tryStartChecklist(
@@ -113,33 +118,30 @@ export class TenderAnalysisOrchestratorService {
   private loadCurrentVersion(
     organisationId: string,
     tenderId: string,
-  ): Promise<
-    | {
-        readonly activeEarlyRiskRun: {
-          readonly id: string;
-          readonly invalidatedAt: Date | null;
-          readonly status: string;
-        } | null;
-        readonly activeEligibilityAssessmentRun: {
-          readonly id: string;
-          readonly invalidatedAt: Date | null;
-          readonly snapshot: { readonly capturedAt: Date };
-          readonly status: string;
-        } | null;
-        readonly activeExtractionRun: {
-          readonly id: string;
-          readonly invalidatedAt: Date | null;
-          readonly status: string;
-        } | null;
-        readonly documents: readonly {
-          readonly approvedObjectKey: string | null;
-          readonly role: string;
-          readonly status: string;
-        }[];
-        readonly id: string;
-      }
-    | null
-  > {
+  ): Promise<{
+    readonly activeEarlyRiskRun: {
+      readonly id: string;
+      readonly invalidatedAt: Date | null;
+      readonly status: string;
+    } | null;
+    readonly activeEligibilityAssessmentRun: {
+      readonly id: string;
+      readonly invalidatedAt: Date | null;
+      readonly snapshot: { readonly capturedAt: Date };
+      readonly status: string;
+    } | null;
+    readonly activeExtractionRun: {
+      readonly id: string;
+      readonly invalidatedAt: Date | null;
+      readonly status: string;
+    } | null;
+    readonly documents: readonly {
+      readonly approvedObjectKey: string | null;
+      readonly role: string;
+      readonly status: string;
+    }[];
+    readonly id: string;
+  } | null> {
     return this.database.tenderVersion.findFirst({
       include: {
         activeEarlyRiskRun: true,

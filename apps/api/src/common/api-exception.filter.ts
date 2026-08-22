@@ -46,7 +46,8 @@ const publicErrors: Readonly<
   },
   [HttpStatus.SERVICE_UNAVAILABLE]: {
     code: "SERVICE_UNAVAILABLE",
-    message: "The service is not ready.",
+    message:
+      "The service is temporarily unavailable. Please try again shortly.",
   },
 };
 
@@ -75,8 +76,15 @@ export class ApiExceptionFilter implements ExceptionFilter {
     if (status >= 500) {
       request.log.error(
         {
+          error_category:
+            status === 503 ? "dependency_unavailable" : "unexpected_error",
           error_type:
             exception instanceof Error ? exception.name : "UnknownException",
+          method: request.method,
+          request_id: request.id,
+          route: request.routeOptions.url ?? "unknown",
+          status_class: `${Math.trunc(status / 100)}xx`,
+          status_code: status,
         },
         "Request failed",
       );

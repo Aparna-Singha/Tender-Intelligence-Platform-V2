@@ -528,261 +528,274 @@ export function FinalReadinessWorkspace({
       <details className="disclosure">
         <summary>Start preflight</summary>
         <div className="disclosure__body">
-        <Alert tone="warning">
-          <p>
-            Independent platform, not affiliated with GeM, CPPP or another
-            government portal. Proceed permits only future controlled Phase 12
-            export review; it is not approval to submit.
-          </p>
-        </Alert>
-        {preflight === null ? (
-          <p>Loading informational prerequisite check…</p>
-        ) : (
-          <>
+          <Alert tone="warning">
             <p>
-              <strong>
-                {preflight.hard_prerequisites_pass
-                  ? "Hard prerequisites currently pass"
-                  : "Hard prerequisites need attention"}
-              </strong>
+              Independent platform, not affiliated with GeM, CPPP or another
+              government portal. Proceed permits only future controlled Phase 12
+              export review; it is not approval to submit.
             </p>
-            <dl className="detail-list">
-              <div>
-                <dt>Current tender version</dt>
-                <dd>{preflight.tender_version_id}</dd>
-              </div>
-              <div>
-                <dt>Qualifying consolidated draft</dt>
-                <dd>
-                  {preflight.qualifying_consolidated_draft_version_id ?? "None"}
-                </dd>
-              </div>
-              <div>
-                <dt>Independent decision actor</dt>
-                <dd>
-                  {preflight.eligible_independent_decision_actor_exists
-                    ? "Available"
-                    : "Not currently available—invite or assign an eligible reviewer"}
-                </dd>
-              </div>
-              <div>
-                <dt>Policy</dt>
-                <dd>{preflight.policy_version}</dd>
-              </div>
-              <div>
-                <dt>Evaluated</dt>
-                <dd>{when(preflight.evaluated_at)}</dd>
-              </div>
-            </dl>
-            {preflight.prerequisite_denials.map((denial) => (
-              <div
-                key={`${denial.prerequisite}:${denial.code}`}
-                className="warning"
-              >
-                <strong>{humanizeEnum(denial.prerequisite)}</strong>:{" "}
-                {humanizeEnum(denial.code)}{" "}
-                {prerequisiteStages[denial.prerequisite] !== undefined && (
-                  <Button
-                    variant="quiet"
-                    onClick={() =>
-                      onNavigateStage(prerequisiteStages[denial.prerequisite]!)
-                    }
-                  >
-                    Open{" "}
-                    {humanizeEnum(prerequisiteStages[denial.prerequisite]!)}
-                  </Button>
-                )}
-              </div>
-            ))}
-            <p className="disclaimer">
-              Informational and race-prone: starting repeats every prerequisite
-              check transactionally.
-            </p>
-            {canOperate && (
-              <Button
-                disabled={!preflight.hard_prerequisites_pass}
-                onClick={() => void start()}
-              >
-                Start final-readiness audit
-              </Button>
-            )}
-          </>
-        )}
+          </Alert>
+          {preflight === null ? (
+            <p>Loading informational prerequisite check…</p>
+          ) : (
+            <>
+              <p>
+                <strong>
+                  {preflight.hard_prerequisites_pass
+                    ? "Hard prerequisites currently pass"
+                    : "Hard prerequisites need attention"}
+                </strong>
+              </p>
+              <dl className="detail-list">
+                <div>
+                  <dt>Current tender version</dt>
+                  <dd>{preflight.tender_version_id}</dd>
+                </div>
+                <div>
+                  <dt>Qualifying consolidated draft</dt>
+                  <dd>
+                    {preflight.qualifying_consolidated_draft_version_id ??
+                      "None"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Independent decision actor</dt>
+                  <dd>
+                    {preflight.eligible_independent_decision_actor_exists
+                      ? "Available"
+                      : "Not currently available—invite or assign an eligible reviewer"}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Policy</dt>
+                  <dd>{preflight.policy_version}</dd>
+                </div>
+                <div>
+                  <dt>Evaluated</dt>
+                  <dd>{when(preflight.evaluated_at)}</dd>
+                </div>
+              </dl>
+              {preflight.prerequisite_denials.map((denial) => (
+                <div
+                  key={`${denial.prerequisite}:${denial.code}`}
+                  className="warning"
+                >
+                  <strong>{humanizeEnum(denial.prerequisite)}</strong>:{" "}
+                  {humanizeEnum(denial.code)}{" "}
+                  {prerequisiteStages[denial.prerequisite] !== undefined && (
+                    <Button
+                      variant="quiet"
+                      onClick={() =>
+                        onNavigateStage(
+                          prerequisiteStages[denial.prerequisite]!,
+                        )
+                      }
+                    >
+                      Open{" "}
+                      {humanizeEnum(prerequisiteStages[denial.prerequisite]!)}
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <p className="disclaimer">
+                Informational and race-prone: starting repeats every
+                prerequisite check transactionally.
+              </p>
+              {canOperate && (
+                <Button
+                  disabled={!preflight.hard_prerequisites_pass}
+                  onClick={() => void start()}
+                >
+                  Start final-readiness audit
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </details>
 
       <details className="disclosure">
         <summary>
           Run history &amp; linked risk analysis
-          <small>Preflight runs, policy versions, and the linked final-risk analysis</small>
+          <small>
+            Preflight runs, policy versions, and the linked final-risk analysis
+          </small>
         </summary>
         <div className="disclosure__body">
-        <Card>
-        <h3>Run history</h3>
-        {runs.length === 0 ? (
-          <EmptyState
-            title="No final-readiness run"
-            description="Run preflight and start an audit after authoritative prerequisite records are current."
-          />
-        ) : (
-          <>
-            <label>
-              Selected current or historical run
-              <select
-                value={selectedRunId}
-                onChange={(event) => setSelectedRunId(event.target.value)}
-              >
-                {runs.map((run) => (
-                  <option key={run.id} value={run.id}>
-                    {run.is_current ? "Current" : "Historical"} ·{" "}
-                    {humanizeEnum(run.status)} · {when(run.created_at)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {historyCursor !== null && (
-              <Button onClick={() => void loadOlderRuns()} variant="quiet">
-                Load older runs
-              </Button>
-            )}
-            {selectedRun !== null && (
+          <Card>
+            <h3>Run history</h3>
+            {runs.length === 0 ? (
+              <EmptyState
+                title="No final-readiness run"
+                description="Run preflight and start an audit after authoritative prerequisite records are current."
+              />
+            ) : (
               <>
-                <div className="tender-header-meta">
-                  <Badge>
-                    {selectedRun.is_current ? "Current" : "Historical"}
-                  </Badge>
-                  <Badge
-                    tone={
-                      selectedRun.invalidated || selectedRun.stale
-                        ? "warning"
-                        : "info"
-                    }
+                <label>
+                  Selected current or historical run
+                  <select
+                    value={selectedRunId}
+                    onChange={(event) => setSelectedRunId(event.target.value)}
                   >
-                    {selectedRun.invalidated
-                      ? "Invalidated"
-                      : selectedRun.stale
-                        ? "Stale"
-                        : humanizeEnum(selectedRun.status)}
-                  </Badge>
-                </div>
-                {progress !== null && (
-                  <Progress
-                    label={`${humanizeEnum(progress.stage)} · ${progress.status}`}
-                    value={progress.progress_percent}
-                  />
+                    {runs.map((run) => (
+                      <option key={run.id} value={run.id}>
+                        {run.is_current ? "Current" : "Historical"} ·{" "}
+                        {humanizeEnum(run.status)} · {when(run.created_at)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {historyCursor !== null && (
+                  <Button onClick={() => void loadOlderRuns()} variant="quiet">
+                    Load older runs
+                  </Button>
                 )}
-                <dl className="detail-list">
-                  <div>
-                    <dt>Policy</dt>
-                    <dd>{selectedRun.policy_version}</dd>
-                  </div>
-                  <div>
-                    <dt>Created</dt>
-                    <dd>{when(selectedRun.created_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Started</dt>
-                    <dd>{when(selectedRun.started_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Completed</dt>
-                    <dd>{when(selectedRun.completed_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Updated</dt>
-                    <dd>{when(selectedRun.updated_at)}</dd>
-                  </div>
-                  <div>
-                    <dt>Safe failure/invalidation</dt>
-                    <dd>
-                      {selectedRun.failure_code === null
-                        ? "None"
-                        : humanizeEnum(selectedRun.failure_code)}
-                    </dd>
-                  </div>
-                </dl>
-                <div className="summary-grid">
-                  <Card>
-                    <strong>{selectedRun.finding_counts.blockers}</strong>
-                    <span> Blockers</span>
-                  </Card>
-                  <Card>
-                    <strong>
-                      {selectedRun.finding_counts.human_disposition_required}
-                    </strong>
-                    <span> Human disposition required</span>
-                  </Card>
-                  <Card>
-                    <strong>{selectedRun.finding_counts.warnings}</strong>
-                    <span> Warnings</span>
-                  </Card>
-                  <Card>
-                    <strong>{selectedRun.finding_counts.informational}</strong>
-                    <span> Informational</span>
-                  </Card>
-                </div>
-                <p>
-                  Current human disposition:{" "}
-                  {selectedRun.current_disposition === null
-                    ? "None recorded"
-                    : dispositionLabels[
-                        selectedRun.current_disposition.disposition
-                      ]}
-                </p>
-                {riskFindings.length === 0 ? (
-                  <p>No source-supported final-risk findings are available.</p>
-                ) : (
-                  riskFindings.map((risk) => (
-                    <article key={risk.id}>
-                      <h4>{risk.title}</h4>
+                {selectedRun !== null && (
+                  <>
+                    <div className="tender-header-meta">
+                      <Badge>
+                        {selectedRun.is_current ? "Current" : "Historical"}
+                      </Badge>
+                      <Badge
+                        tone={
+                          selectedRun.invalidated || selectedRun.stale
+                            ? "warning"
+                            : "info"
+                        }
+                      >
+                        {selectedRun.invalidated
+                          ? "Invalidated"
+                          : selectedRun.stale
+                            ? "Stale"
+                            : humanizeEnum(selectedRun.status)}
+                      </Badge>
+                    </div>
+                    {progress !== null && (
+                      <Progress
+                        label={`${humanizeEnum(progress.stage)} · ${progress.status}`}
+                        value={progress.progress_percent}
+                      />
+                    )}
+                    <dl className="detail-list">
+                      <div>
+                        <dt>Policy</dt>
+                        <dd>{selectedRun.policy_version}</dd>
+                      </div>
+                      <div>
+                        <dt>Created</dt>
+                        <dd>{when(selectedRun.created_at)}</dd>
+                      </div>
+                      <div>
+                        <dt>Started</dt>
+                        <dd>{when(selectedRun.started_at)}</dd>
+                      </div>
+                      <div>
+                        <dt>Completed</dt>
+                        <dd>{when(selectedRun.completed_at)}</dd>
+                      </div>
+                      <div>
+                        <dt>Updated</dt>
+                        <dd>{when(selectedRun.updated_at)}</dd>
+                      </div>
+                      <div>
+                        <dt>Safe failure/invalidation</dt>
+                        <dd>
+                          {selectedRun.failure_code === null
+                            ? "None"
+                            : humanizeEnum(selectedRun.failure_code)}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="summary-grid">
+                      <Card>
+                        <strong>{selectedRun.finding_counts.blockers}</strong>
+                        <span> Blockers</span>
+                      </Card>
+                      <Card>
+                        <strong>
+                          {
+                            selectedRun.finding_counts
+                              .human_disposition_required
+                          }
+                        </strong>
+                        <span> Human disposition required</span>
+                      </Card>
+                      <Card>
+                        <strong>{selectedRun.finding_counts.warnings}</strong>
+                        <span> Warnings</span>
+                      </Card>
+                      <Card>
+                        <strong>
+                          {selectedRun.finding_counts.informational}
+                        </strong>
+                        <span> Informational</span>
+                      </Card>
+                    </div>
+                    <p>
+                      Current human disposition:{" "}
+                      {selectedRun.current_disposition === null
+                        ? "None recorded"
+                        : dispositionLabels[
+                            selectedRun.current_disposition.disposition
+                          ]}
+                    </p>
+                    {riskFindings.length === 0 ? (
                       <p>
-                        Severity: {humanizeEnum(risk.severity)} · Confidence:{" "}
-                        {humanizeEnum(risk.confidence)} · Materiality:{" "}
-                        {humanizeEnum(risk.materiality)}
+                        No source-supported final-risk findings are available.
                       </p>
-                      <p>{risk.explanation}</p>
-                      <p>
-                        {humanizeEnum(risk.findingStatus)} ·{" "}
-                        {humanizeEnum(risk.reviewState)}
-                      </p>
-                    </article>
-                  ))
+                    ) : (
+                      riskFindings.map((risk) => (
+                        <article key={risk.id}>
+                          <h4>{risk.title}</h4>
+                          <p>
+                            Severity: {humanizeEnum(risk.severity)} ·
+                            Confidence: {humanizeEnum(risk.confidence)} ·
+                            Materiality: {humanizeEnum(risk.materiality)}
+                          </p>
+                          <p>{risk.explanation}</p>
+                          <p>
+                            {humanizeEnum(risk.findingStatus)} ·{" "}
+                            {humanizeEnum(risk.reviewState)}
+                          </p>
+                        </article>
+                      ))
+                    )}
+                    {canOperate &&
+                      ["QUEUED", "PROCESSING"].includes(selectedRun.status) && (
+                        <Button onClick={() => void cancel()} variant="quiet">
+                          Cancel run
+                        </Button>
+                      )}
+                    {canOperate &&
+                      ["FAILED", "CANCELLED"].includes(selectedRun.status) && (
+                        <Button onClick={() => void retry()} variant="quiet">
+                          Retry as a new run
+                        </Button>
+                      )}
+                  </>
                 )}
-                {canOperate &&
-                  ["QUEUED", "PROCESSING"].includes(selectedRun.status) && (
-                    <Button onClick={() => void cancel()} variant="quiet">
-                      Cancel run
-                    </Button>
-                  )}
-                {canOperate &&
-                  ["FAILED", "CANCELLED"].includes(selectedRun.status) && (
-                    <Button onClick={() => void retry()} variant="quiet">
-                      Retry as a new run
-                    </Button>
-                  )}
               </>
             )}
-          </>
-        )}
-      </Card>
+          </Card>
 
-      {selectedRun !== null && (
-        <Card>
-          <h3>Linked FINAL_READINESS risk analysis</h3>
-          <p>
-            Status:{" "}
-            <strong>{humanizeEnum(selectedRun.final_risk_status)}</strong>
-          </p>
-          <p>
-            Risk severity describes importance; readiness treatment describes
-            the workflow action required. A severe risk is not automatically
-            proof of ineligibility. Accepted risks remain visible and auditable.
-          </p>
-          <Button variant="quiet" onClick={() => onNavigateStage("risks")}>
-            Open risk workspace
-          </Button>
-        </Card>
-      )}
+          {selectedRun !== null && (
+            <Card>
+              <h3>Linked FINAL_READINESS risk analysis</h3>
+              <p>
+                Status:{" "}
+                <strong>{humanizeEnum(selectedRun.final_risk_status)}</strong>
+              </p>
+              <p>
+                Risk severity describes importance; readiness treatment
+                describes the workflow action required. A severe risk is not
+                automatically proof of ineligibility. Accepted risks remain
+                visible and auditable.
+              </p>
+              <Button variant="quiet" onClick={() => onNavigateStage("risks")}>
+                Open risk workspace
+              </Button>
+            </Card>
+          )}
         </div>
       </details>
 
