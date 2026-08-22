@@ -10,7 +10,11 @@ describe("early risk-analysis tenant and source boundary", () => {
     const database = {
       riskAnalysisRun: { findFirst: vi.fn().mockResolvedValue(null) },
     };
-    const service = new RisksService(database as never, {} as never);
+    const service = new RisksService(
+      database as never,
+      {} as never,
+      {} as never,
+    );
     await expect(
       service.getRun("organisation-b", "tender-a", "run-a"),
     ).rejects.toBeInstanceOf(NotFoundException);
@@ -30,7 +34,11 @@ describe("early risk-analysis tenant and source boundary", () => {
       },
     };
     const jobs = { add: vi.fn() };
-    const service = new RisksService(database as never, jobs as never);
+    const service = new RisksService(
+      database as never,
+      jobs as never,
+      {} as never,
+    );
     await expect(
       service.start(
         "organisation-a",
@@ -53,6 +61,128 @@ describe("early risk-analysis tenant and source boundary", () => {
           },
         },
       }),
+    );
+  });
+
+  it.each(["HOLD", "STOP"] as const)(
+    "records %s without scheduling eligibility progression",
+    async (decisionCode) => {
+      const schedule = vi.fn();
+      const database = {
+        $transaction: vi.fn(
+          (
+            callback: (
+              transaction: Record<string, unknown>,
+            ) => Promise<unknown>,
+          ) =>
+            callback({
+              auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+              checklistGenerationRun: { updateMany: vi.fn() },
+              checklistItem: { updateMany: vi.fn() },
+              earlyPursuitDecision: {
+                create: vi.fn().mockResolvedValue({
+                  decision: decisionCode,
+                  id: "decision-a",
+                }),
+                findFirst: vi.fn().mockResolvedValue(null),
+              },
+              eligibilityAssessment: { updateMany: vi.fn() },
+              eligibilityAssessmentRun: { updateMany: vi.fn() },
+              tenderVersion: { updateMany: vi.fn() },
+            }),
+        ),
+        riskAnalysisRun: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "run-a",
+            invalidatedAt: null,
+            status: "COMPLETE",
+            tenderId: "tender-a",
+            tenderVersionId: "version-a",
+          }),
+        },
+        riskFinding: { count: vi.fn().mockResolvedValue(0) },
+      };
+      const service = new RisksService(
+        database as never,
+        {} as never,
+        { schedule } as never,
+      );
+
+      await service.decision(
+        "organisation-a",
+        "tender-a",
+        "run-a",
+        {
+          acknowledged_limitations: true,
+          decision: decisionCode,
+          rationale: `${decisionCode} for now`,
+        },
+        "user-a",
+        "request-a",
+      );
+
+      expect(schedule).not.toHaveBeenCalled();
+    },
+  );
+
+  it("records CONTINUE and schedules authoritative eligibility progression", async () => {
+    const schedule = vi.fn().mockResolvedValue(undefined);
+    const database = {
+      $transaction: vi.fn(
+        (
+          callback: (transaction: Record<string, unknown>) => Promise<unknown>,
+        ) =>
+          callback({
+            auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+            checklistGenerationRun: { updateMany: vi.fn() },
+            checklistItem: { updateMany: vi.fn() },
+            earlyPursuitDecision: {
+              create: vi.fn().mockResolvedValue({
+                decision: "CONTINUE",
+                id: "decision-a",
+              }),
+              findFirst: vi.fn().mockResolvedValue(null),
+            },
+            eligibilityAssessment: { updateMany: vi.fn() },
+            eligibilityAssessmentRun: { updateMany: vi.fn() },
+            tenderVersion: { updateMany: vi.fn() },
+          }),
+      ),
+      riskAnalysisRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "run-a",
+          invalidatedAt: null,
+          status: "COMPLETE",
+          tenderId: "tender-a",
+          tenderVersionId: "version-a",
+        }),
+      },
+      riskFinding: { count: vi.fn().mockResolvedValue(2) },
+    };
+    const service = new RisksService(
+      database as never,
+      {} as never,
+      { schedule } as never,
+    );
+
+    await service.decision(
+      "organisation-a",
+      "tender-a",
+      "run-a",
+      {
+        acknowledged_limitations: true,
+        decision: "CONTINUE",
+        rationale: "Authorised to proceed",
+      },
+      "user-a",
+      "request-a",
+    );
+
+    expect(schedule).toHaveBeenCalledWith(
+      "organisation-a",
+      "tender-a",
+      "user-a",
+      "request-a",
     );
   });
 });

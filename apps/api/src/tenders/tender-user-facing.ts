@@ -209,8 +209,24 @@ export function deriveTenderWorkflowState(
     };
   }
 
+  if (context.extraction === null) {
+    return {
+      actionLabel: "Open",
+      code: "FAILED_RECOVERABLE",
+      detail:
+        "The current tender source is ready, but extraction has not started yet. Automatic progression will retry from the current authoritative source state.",
+      isCompleted: false,
+      isDraft: false,
+      isInProgress: false,
+      needsAttention: true,
+      onHold: false,
+      statusLabel: "Extraction not started",
+      tone: "warning",
+    };
+  }
+
   if (
-    context.extraction?.invalidatedAt !== null ||
+    context.extraction.invalidatedAt !== null ||
     context.extraction.status !== "COMPLETE"
   ) {
     return {
@@ -246,8 +262,24 @@ export function deriveTenderWorkflowState(
     };
   }
 
+  if (context.risk === null) {
+    return {
+      actionLabel: "Open",
+      code: "FAILED_RECOVERABLE",
+      detail:
+        "Tender extraction is complete, but early risk analysis has not started yet. Automatic progression will retry from the current authoritative version.",
+      isCompleted: false,
+      isDraft: false,
+      isInProgress: false,
+      needsAttention: true,
+      onHold: false,
+      statusLabel: "Risk analysis not started",
+      tone: "warning",
+    };
+  }
+
   if (
-    context.risk?.invalidatedAt !== null ||
+    context.risk.invalidatedAt !== null ||
     context.risk.status !== "COMPLETE"
   ) {
     return {
@@ -317,8 +349,24 @@ export function deriveTenderWorkflowState(
     };
   }
 
+  if (context.assessment === null) {
+    return {
+      actionLabel: "Open",
+      code: "FAILED_RECOVERABLE",
+      detail:
+        "A current authorised CONTINUE decision exists, but eligibility comparison has not started yet. Automatic progression will retry from the current authoritative version.",
+      isCompleted: false,
+      isDraft: false,
+      isInProgress: false,
+      needsAttention: true,
+      onHold: false,
+      statusLabel: "Eligibility not started",
+      tone: "warning",
+    };
+  }
+
   if (
-    context.assessment?.invalidatedAt !== null ||
+    context.assessment.invalidatedAt !== null ||
     context.assessment.status !== "COMPLETE"
   ) {
     return {

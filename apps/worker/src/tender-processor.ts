@@ -5,6 +5,7 @@ import {
 } from "@aws-sdk/client-s3";
 import type { S3Client } from "@aws-sdk/client-s3";
 import type { PrismaClient } from "@tender/database";
+import type { TenderWorkflowProgressJob } from "@tender/contracts";
 import {
   isAllowedMimeExtension,
   validateZipEntries,
@@ -42,11 +43,11 @@ export class TenderProcessor {
   public async process(
     data: TenderDocumentJob,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<TenderWorkflowProgressJob | null> {
     const job = await this.database.processingJob.findFirst({
       where: { id: data.jobId, organisationId: data.organisationId },
     });
-    if (job === null || job.state === "CANCELLED") return;
+    if (job === null || job.state === "CANCELLED") return null;
     const document = await this.database.tenderDocument.findFirst({
       include: {
         tenderVersion: {
@@ -72,8 +73,10 @@ export class TenderProcessor {
         object.Body === undefined ||
         object.ContentLength !== Number(document.sizeBytes) ||
         object.ContentLength > MAX_TENDER_UPLOAD_BYTES
-      )
-        return this.reject(data, "BOUNDED_SIZE_CHECK_FAILED", null);
+      ) {
+        await this.reject(data, "BOUNDED_SIZE_CHECK_FAILED", null);
+        return null;
+      }
       const content = await object.Body.transformToByteArray();
       signal?.throwIfAborted();
       const checksum = createHash("sha256").update(content).digest("hex");
@@ -86,14 +89,18 @@ export class TenderProcessor {
         detectedMime === null ||
         !isTenderMimeAllowed(detectedMime, document.extension) ||
         detectedMime !== document.declaredMimeType
-      )
-        return this.reject(data, "FILE_TYPE_MISMATCH", detectedMime);
+      ) {
+        await this.reject(data, "FILE_TYPE_MISMATCH", detectedMime);
+        return null;
+      }
       if (document.extension === ".zip")
         validateZipEntries(readZipDirectory(content));
       signal?.throwIfAborted();
       const scan = await this.scanner.scan(content);
-      if (scan.status === "INFECTED")
-        return this.reject(data, "MALWARE_DETECTED", detectedMime);
+      if (scan.status === "INFECTED") {
+        await this.reject(data, "MALWARE_DETECTED", detectedMime);
+        return null;
+      }
       if (scan.status === "ERROR") {
         await this.database.tenderDocument.update({
           data: { status: "QUARANTINED" },
@@ -102,7 +109,7 @@ export class TenderProcessor {
         throw new Error("Malware scanner unavailable");
       }
       signal?.throwIfAborted();
-      if (await this.isCancelled(data.jobId)) return;
+      if (await this.isCancelled(data.jobId)) return null;
       await this.stage(data.jobId, "PROCESSING", 75, "Securing tender source");
       const approvedKey = `tender-approved/${data.organisationId}/${document.id}`;
       await this.storage.send(
@@ -118,7 +125,7 @@ export class TenderProcessor {
         await this.storage.send(
           new DeleteObjectCommand({ Bucket: this.bucket, Key: approvedKey }),
         );
-        return;
+        return null;
       }
       await this.storage.send(
         new DeleteObjectCommand({
@@ -156,7 +163,7 @@ export class TenderProcessor {
           },
           where: { id: data.jobId, state: { not: "CANCELLED" } },
         });
-        return;
+        return null;
       }
       const currentVersionStillActive =
         latestDocument.tenderVersion.tender.currentVersionId ===
@@ -202,6 +209,14 @@ export class TenderProcessor {
             ]
           : []),
       ]);
+      return currentVersionStillActive
+        ? {
+            organisationId: data.organisationId,
+            requestId: data.requestId,
+            tenderId: latestDocument.tenderVersion.tenderId,
+            userId: document.uploadedByUserId,
+          }
+        : null;
     } catch (error: unknown) {
       if (signal?.aborted === true)
         await this.fail(

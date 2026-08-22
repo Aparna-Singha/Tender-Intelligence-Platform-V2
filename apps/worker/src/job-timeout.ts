@@ -1,7 +1,7 @@
-export async function runWithTimeout(
+export async function runWithTimeout<T>(
   timeoutMs: number,
-  operation: (signal: AbortSignal) => Promise<void>,
-): Promise<void> {
+  operation: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const controller = new AbortController();
   let timeout: NodeJS.Timeout | undefined;
   const deadline = new Promise<never>((_resolve, reject) => {
@@ -11,7 +11,7 @@ export async function runWithTimeout(
     }, timeoutMs);
   });
   try {
-    await Promise.race([operation(controller.signal), deadline]);
+    return await Promise.race([operation(controller.signal), deadline]);
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }

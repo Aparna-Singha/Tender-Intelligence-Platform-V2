@@ -301,6 +301,90 @@ describe("tender analysis orchestrator", () => {
     expect(checklists.start).not.toHaveBeenCalled();
   });
 
+  it.each(["HOLD", "STOP"] as const)(
+    "does not start eligibility for a current %s decision",
+    async (decision) => {
+      const database = {
+        earlyPursuitDecision: {
+          findFirst: vi.fn().mockResolvedValue({
+            decision,
+            id: "decision-a",
+          }),
+        },
+        tenderVersion: {
+          findFirst: vi
+            .fn()
+            .mockResolvedValueOnce({
+              activeEarlyRiskRun: {
+                id: "risk-a",
+                invalidatedAt: null,
+                status: "COMPLETE",
+              },
+              activeEligibilityAssessmentRun: null,
+              activeExtractionRun: {
+                id: "extract-a",
+                invalidatedAt: null,
+                status: "COMPLETE",
+              },
+              documents: [
+                {
+                  approvedObjectKey: "approved/object-key",
+                  role: "PRIMARY",
+                  status: "READY",
+                },
+              ],
+              id: "version-a",
+            })
+            .mockResolvedValueOnce({
+              activeEarlyRiskRun: {
+                id: "risk-a",
+                invalidatedAt: null,
+                status: "COMPLETE",
+              },
+              activeEligibilityAssessmentRun: null,
+              activeExtractionRun: {
+                id: "extract-a",
+                invalidatedAt: null,
+                status: "COMPLETE",
+              },
+              documents: [
+                {
+                  approvedObjectKey: "approved/object-key",
+                  role: "PRIMARY",
+                  status: "READY",
+                },
+              ],
+              id: "version-a",
+            }),
+        },
+      };
+      const extractions = { start: vi.fn().mockResolvedValue(undefined) };
+      const risks = { start: vi.fn().mockResolvedValue(undefined) };
+      const eligibility = { start: vi.fn().mockResolvedValue(undefined) };
+      const checklists = { start: vi.fn().mockResolvedValue(undefined) };
+      const rag = { startIndex: vi.fn().mockResolvedValue(undefined) };
+
+      const service = new TenderAnalysisOrchestratorService(
+        database as never,
+        extractions as never,
+        risks as never,
+        eligibility as never,
+        checklists as never,
+        rag as never,
+      );
+
+      await service.ensureCurrentPipeline(
+        "organisation-a",
+        "tender-a",
+        "user-a",
+        "request-a",
+      );
+
+      expect(eligibility.start).not.toHaveBeenCalled();
+      expect(checklists.start).not.toHaveBeenCalled();
+    },
+  );
+
   it("starts checklist when a later pass sees a current completed eligibility assessment", async () => {
     const database = {
       earlyPursuitDecision: {

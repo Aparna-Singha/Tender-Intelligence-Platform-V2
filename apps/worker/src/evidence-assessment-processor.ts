@@ -1,4 +1,5 @@
 import type { Prisma, PrismaClient } from "@tender/database";
+import type { TenderWorkflowProgressJob } from "@tender/contracts";
 import {
   EVIDENCE_COMPARISON_POLICY_VERSION,
   proposeEligibilityAssessment,
@@ -17,7 +18,7 @@ export class EvidenceAssessmentProcessor {
   public async process(
     job: EvidenceAssessmentJob,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<TenderWorkflowProgressJob | null> {
     const run = await this.database.eligibilityAssessmentRun.findFirst({
       include: {
         snapshot: {
@@ -40,7 +41,7 @@ export class EvidenceAssessmentProcessor {
       where: { id: job.assessmentRunId, organisationId: job.organisationId },
     });
     if (run === null) throw new Error("ASSESSMENT_RUN_NOT_FOUND");
-    if (run.status === "COMPLETE" || run.status === "INVALIDATED") return;
+    if (run.status === "COMPLETE" || run.status === "INVALIDATED") return null;
     await this.checkpoint(
       run.id,
       signal,
@@ -80,7 +81,7 @@ export class EvidenceAssessmentProcessor {
       decision === null
     ) {
       await this.invalidate(run.id);
-      return;
+      return null;
     }
 
     const requirements = await this.database.structuredRequirement.findMany({
@@ -250,6 +251,12 @@ export class EvidenceAssessmentProcessor {
         },
       });
     });
+    return {
+      organisationId: job.organisationId,
+      requestId: job.requestId,
+      tenderId: run.tenderId,
+      userId: run.requestedByUserId,
+    };
   }
 
   public async fail(runId: string, category: string): Promise<void> {

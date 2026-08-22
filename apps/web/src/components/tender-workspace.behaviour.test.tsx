@@ -22,6 +22,33 @@ const baseWorkspace = {
   workspace: { processingProgress: 0, sourceSectionStatus: "NOT_STARTED" },
 };
 
+const inProgressWorkspace = {
+  ...baseWorkspace,
+  workflowState: {
+    actionLabel: "Open",
+    code: "EXTRACTING",
+    detail: "Reading the current tender source.",
+    isCompleted: false,
+    isDraft: false,
+    isInProgress: true,
+    needsAttention: false,
+    onHold: false,
+    statusLabel: "Reading tender...",
+    tone: "info",
+  },
+};
+
+function createDeferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((value) => {
+    resolve = value;
+  });
+  return { promise, resolve };
+}
+
 const failedUploadWorkspace = {
   ...baseWorkspace,
   versions: [
@@ -141,6 +168,56 @@ beforeEach(() => {
 });
 
 describe("tender workspace stages", () => {
+  it("refreshes support data while authoritative workflow progress is active without overlapping calls", async () => {
+    vi.useFakeTimers();
+    try {
+      const extractionDeferred = createDeferred<readonly []>();
+      let extractionRequests = 0;
+
+      apiRequest.mockImplementation((path: string): unknown => {
+        if (path === "/organisations/org-1/tenders/tender-1") {
+          return inProgressWorkspace;
+        }
+        if (path.includes("/final-readiness?")) {
+          return { items: [], next_cursor: null };
+        }
+        if (path.includes("/controlled-review-packages")) {
+          return { items: [], next_cursor: null };
+        }
+        if (path.endsWith("/versions/version-1/extractions")) {
+          extractionRequests += 1;
+          return extractionDeferred.promise;
+        }
+        if (
+          path.endsWith("/versions/version-1/risk-analyses") ||
+          path.endsWith("/versions/version-1/eligibility-assessments") ||
+          path.endsWith("/versions/version-1/checklists") ||
+          path.endsWith("/draft-generation-runs") ||
+          path.endsWith("/drafts")
+        ) {
+          return [];
+        }
+        return [];
+      });
+
+      render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => expect(extractionRequests).toBe(1));
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(extractionRequests).toBe(1);
+
+      extractionDeferred.resolve([]);
+      await vi.waitFor(() => expect(extractionRequests).toBe(1));
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await vi.waitFor(() => expect(extractionRequests).toBe(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("starts at overview, exposes the new primary and secondary navigation, and updates the URL", async () => {
     const user = userEvent.setup();
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);

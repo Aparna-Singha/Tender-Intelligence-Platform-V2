@@ -10,6 +10,7 @@ import {
   parseEnvironment,
   type ApiEnvironment,
 } from "@tender/config";
+import { tenderWorkflowProgressQueueName } from "@tender/contracts";
 import { createPrismaClient, type PrismaClient } from "@tender/database";
 import { Redis } from "ioredis";
 import { Queue } from "bullmq";
@@ -20,18 +21,23 @@ import {
   REDIS_CLIENT,
   S3_CLIENT,
   JOB_QUEUE,
+  WORKFLOW_PROGRESS_QUEUE,
 } from "./infrastructure.tokens.js";
+import { TenderWorkflowProgressionScheduler } from "./common/tender-workflow-progression-scheduler.service.js";
 
 class InfrastructureShutdown implements OnApplicationShutdown {
   public constructor(
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(JOB_QUEUE) private readonly queue: Queue,
+    @Inject(WORKFLOW_PROGRESS_QUEUE)
+    private readonly workflowProgressQueue: Queue,
   ) {}
 
   public async onApplicationShutdown(): Promise<void> {
     await Promise.allSettled([
       this.queue.close(),
+      this.workflowProgressQueue.close(),
       this.database.$disconnect(),
       this.redis.quit(),
     ]);
@@ -51,6 +57,17 @@ class InfrastructureShutdown implements OnApplicationShutdown {
       inject: [API_ENVIRONMENT],
       useFactory: (environment: ApiEnvironment): Queue =>
         new Queue(environment.QUEUE_NAME, {
+          connection: new Redis(environment.REDIS_URL, {
+            lazyConnect: true,
+            maxRetriesPerRequest: null,
+          }),
+        }),
+    },
+    {
+      provide: WORKFLOW_PROGRESS_QUEUE,
+      inject: [API_ENVIRONMENT],
+      useFactory: (environment: ApiEnvironment): Queue =>
+        new Queue(tenderWorkflowProgressQueueName(environment.QUEUE_NAME), {
           connection: new Redis(environment.REDIS_URL, {
             lazyConnect: true,
             maxRetriesPerRequest: null,
@@ -98,8 +115,17 @@ class InfrastructureShutdown implements OnApplicationShutdown {
           requestChecksumCalculation: "WHEN_REQUIRED",
         }),
     },
+    TenderWorkflowProgressionScheduler,
     InfrastructureShutdown,
   ],
-  exports: [API_ENVIRONMENT, PRISMA_CLIENT, REDIS_CLIENT, S3_CLIENT, JOB_QUEUE],
+  exports: [
+    API_ENVIRONMENT,
+    PRISMA_CLIENT,
+    REDIS_CLIENT,
+    S3_CLIENT,
+    JOB_QUEUE,
+    WORKFLOW_PROGRESS_QUEUE,
+    TenderWorkflowProgressionScheduler,
+  ],
 })
 export class InfrastructureModule {}

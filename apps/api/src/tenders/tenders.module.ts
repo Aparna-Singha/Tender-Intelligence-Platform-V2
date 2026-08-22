@@ -7,6 +7,7 @@ import { RisksModule } from "../risks/risks.module.js";
 import { TenderAnalysisOrchestratorService } from "./tender-analysis-orchestrator.service.js";
 import { TendersController } from "./tenders.controller.js";
 import { TendersService } from "./tenders.service.js";
+import { TenderWorkflowProgressionWorker } from "./tender-workflow-progression.worker.js";
 
 @Module({
   imports: [
@@ -17,6 +18,10 @@ import { TendersService } from "./tenders.service.js";
     RagModule,
   ],
   controllers: [TendersController],
-  providers: [TenderAnalysisOrchestratorService, TendersService],
+  providers: [
+    TenderAnalysisOrchestratorService,
+    TenderWorkflowProgressionWorker,
+    TendersService,
+  ],
 })
 export class TendersModule {}

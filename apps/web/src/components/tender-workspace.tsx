@@ -3,7 +3,14 @@
 import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+} from "react";
 import {
   Alert,
   Button,
@@ -712,6 +719,14 @@ function deriveAssessmentLabel(input: {
       tone: "neutral",
     };
   }
+  if (input.extractionRun === null) {
+    return {
+      detail:
+        "The current tender source is ready, but extraction has not started yet. Automatic progression will retry from the authoritative source state.",
+      label: "Extraction not started",
+      tone: "warning",
+    };
+  }
   if (input.extractionRun?.status !== "COMPLETE") {
     return {
       detail:
@@ -727,6 +742,14 @@ function deriveAssessmentLabel(input: {
         "Early risk analysis failed safely for the current source version.",
       label: "Risk analysis failed",
       tone: "danger",
+    };
+  }
+  if (input.riskRun === null) {
+    return {
+      detail:
+        "Tender extraction is complete, but early risk analysis has not started yet. Automatic progression will retry from the authoritative current version.",
+      label: "Risk analysis not started",
+      tone: "warning",
     };
   }
   if (input.riskRun?.status !== "COMPLETE") {
@@ -756,6 +779,17 @@ function deriveAssessmentLabel(input: {
       detail: `The current early bid decision is ${humanizeEnum(input.currentDecision.decision)}. Eligibility comparison will not proceed until that decision changes.`,
       label: humanizeEnum(input.currentDecision.decision),
       tone: input.currentDecision.decision === "HOLD" ? "warning" : "danger",
+    };
+  }
+  if (
+    input.currentDecision?.decision === "CONTINUE" &&
+    input.assessmentRun === null
+  ) {
+    return {
+      detail:
+        "A current authorised CONTINUE decision exists, but eligibility comparison has not started yet. Automatic progression will retry from the authoritative current version.",
+      label: "Eligibility not started",
+      tone: "warning",
     };
   }
   return {
@@ -846,29 +880,43 @@ function toAssessmentRequirement(item: MatrixItem): EligibilityViewRequirement {
 function toExtractedRequirement(
   item: Requirement,
   phase:
-    "ASSESSING" | "AWAITING_DECISION" | "RISK" | "RISK_FAILED" | "EXTRACTING",
+    | "ASSESSING"
+    | "ASSESSMENT_NOT_STARTED"
+    | "AWAITING_DECISION"
+    | "RISK"
+    | "RISK_FAILED"
+    | "RISK_NOT_STARTED"
+    | "EXTRACTING",
 ): EligibilityViewRequirement {
   const citation = item.citations[0] ?? null;
   const statusLabel =
     phase === "ASSESSING"
       ? "Checking eligibility..."
-      : phase === "RISK_FAILED"
-        ? "Risk analysis failed"
-        : phase === "AWAITING_DECISION"
-          ? "Not assessed yet"
-          : phase === "RISK"
-            ? "Analysing tender..."
-            : "Reading tender...";
+      : phase === "ASSESSMENT_NOT_STARTED"
+        ? "Eligibility not started"
+        : phase === "RISK_FAILED"
+          ? "Risk analysis failed"
+          : phase === "RISK_NOT_STARTED"
+            ? "Risk analysis not started"
+            : phase === "AWAITING_DECISION"
+              ? "Not assessed yet"
+              : phase === "RISK"
+                ? "Analysing tender..."
+                : "Reading tender...";
   const whatToDo =
     phase === "ASSESSING"
       ? "Wait for evidence comparison to finish. The detail panel will update automatically."
-      : phase === "RISK_FAILED"
-        ? "Retry the failed early risk analysis before eligibility comparison can continue."
-        : phase === "AWAITING_DECISION"
-          ? "Review the extracted tender requirements and record an authorised CONTINUE decision to start eligibility comparison."
-          : phase === "RISK"
-            ? "Early risk analysis is still running before evidence comparison can start."
-            : "Tender extraction is still running. Requirement details will continue to fill in automatically.";
+      : phase === "ASSESSMENT_NOT_STARTED"
+        ? "Automatic progression has not started eligibility comparison yet. The current CONTINUE decision remains authoritative."
+        : phase === "RISK_FAILED"
+          ? "Retry the failed early risk analysis before eligibility comparison can continue."
+          : phase === "RISK_NOT_STARTED"
+            ? "Automatic progression has not started early risk analysis yet for the current extraction."
+            : phase === "AWAITING_DECISION"
+              ? "Review the extracted tender requirements and record an authorised CONTINUE decision to start eligibility comparison."
+              : phase === "RISK"
+                ? "Early risk analysis is still running before evidence comparison can start."
+                : "Tender extraction is still running. Requirement details will continue to fill in automatically.";
   const why =
     item.sourceWording.trim() === ""
       ? "This requirement was extracted from the tender source and is waiting for downstream workflow state."
@@ -890,19 +938,25 @@ function toExtractedRequirement(
     stateKey:
       phase === "ASSESSING"
         ? "ASSESSING"
-        : phase === "RISK_FAILED"
-          ? "RISK_FAILED"
-          : phase === "AWAITING_DECISION"
-            ? "AWAITING_DECISION"
-            : phase === "RISK"
-              ? "RISK_ANALYSIS"
-              : "EXTRACTING",
+        : phase === "ASSESSMENT_NOT_STARTED"
+          ? "ASSESSMENT_NOT_STARTED"
+          : phase === "RISK_FAILED"
+            ? "RISK_FAILED"
+            : phase === "RISK_NOT_STARTED"
+              ? "RISK_NOT_STARTED"
+              : phase === "AWAITING_DECISION"
+                ? "AWAITING_DECISION"
+                : phase === "RISK"
+                  ? "RISK_ANALYSIS"
+                  : "EXTRACTING",
     statement: item.normalizedStatement,
     statusLabel,
     statusTone:
       phase === "RISK_FAILED"
         ? "danger"
-        : phase === "AWAITING_DECISION"
+        : phase === "AWAITING_DECISION" ||
+            phase === "ASSESSMENT_NOT_STARTED" ||
+            phase === "RISK_NOT_STARTED"
           ? "warning"
           : phase === "ASSESSING" || phase === "RISK" || phase === "EXTRACTING"
             ? "info"
@@ -1131,6 +1185,7 @@ export function TenderWorkspace({
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionFeedback, setDecisionFeedback] = useState("");
   const [riskRetrying, setRiskRetrying] = useState(false);
+  const supportLoadPromise = useRef<Promise<void> | null>(null);
   const [pendingFileRemoval, setPendingFileRemoval] = useState<null | {
     readonly confirmLabel: string;
     readonly description: string;
@@ -1274,6 +1329,22 @@ export function TenderWorkspace({
     });
   }
 
+  async function refreshSupportData(versionId: string): Promise<void> {
+    if (supportLoadPromise.current !== null) {
+      await supportLoadPromise.current;
+      return;
+    }
+    const pending = loadSupportData(versionId);
+    supportLoadPromise.current = pending;
+    try {
+      await pending;
+    } finally {
+      if (supportLoadPromise.current === pending) {
+        supportLoadPromise.current = null;
+      }
+    }
+  }
+
   useEffect(() => {
     void loadWorkspace();
     const timer = window.setInterval(() => void loadWorkspace(), 5000);
@@ -1284,8 +1355,31 @@ export function TenderWorkspace({
 
   useEffect(() => {
     if (currentVersionId === "") return;
-    void loadSupportData(currentVersionId);
+    void refreshSupportData(currentVersionId);
   }, [currentVersionId, organisationId, tenderId]);
+
+  useEffect(() => {
+    if (
+      currentVersionId === "" ||
+      workspace?.workflowState?.isInProgress !== true
+    )
+      return;
+    let cancelled = false;
+    const refresh = async (): Promise<void> => {
+      if (cancelled) return;
+      await refreshSupportData(currentVersionId);
+    };
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    currentVersionId,
+    organisationId,
+    tenderId,
+    workspace?.workflowState?.isInProgress,
+  ]);
 
   async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -1445,7 +1539,7 @@ export function TenderWorkspace({
         },
       );
       setDecisionFeedback("Early risk analysis retry queued.");
-      await loadSupportData(currentVersionId);
+      await refreshSupportData(currentVersionId);
     } catch (caught) {
       setDecisionFeedback(
         formatApiError(caught, "The early risk analysis could not be retried."),
@@ -1482,7 +1576,7 @@ export function TenderWorkspace({
       );
       form.reset();
       setDecisionFeedback("Human pursue decision recorded.");
-      await loadSupportData(currentVersionId);
+      await refreshSupportData(currentVersionId);
       await loadWorkspace();
     } catch (caught) {
       setDecisionFeedback(
@@ -1537,11 +1631,15 @@ export function TenderWorkspace({
         ? "ASSESSING"
         : support.riskRun?.status === "FAILED"
           ? "RISK_FAILED"
-          : support.riskRun?.status !== "COMPLETE"
-            ? "RISK"
-            : support.currentDecision?.decision !== "CONTINUE"
-              ? "AWAITING_DECISION"
-              : "ASSESSING";
+          : support.riskRun === null
+            ? "RISK_NOT_STARTED"
+            : support.riskRun.status !== "COMPLETE"
+              ? "RISK"
+              : support.currentDecision?.decision !== "CONTINUE"
+                ? "AWAITING_DECISION"
+                : support.assessmentRun === null
+                  ? "ASSESSMENT_NOT_STARTED"
+                  : "ASSESSING";
     return support.extractionRequirements.map((item) =>
       toExtractedRequirement(item, phase),
     );

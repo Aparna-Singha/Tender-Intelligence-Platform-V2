@@ -114,7 +114,7 @@ describe("tender workspace tenant isolation", () => {
     };
 
     expect(result.id).toBe("tender-a");
-    expect(result.workflowState.code).toBe("EXTRACTING");
+    expect(result.workflowState.code).toBe("FAILED_RECOVERABLE");
     expect(workflowStartWrite).not.toHaveBeenCalled();
     expect(database.auditEvent.create).not.toHaveBeenCalled();
   });

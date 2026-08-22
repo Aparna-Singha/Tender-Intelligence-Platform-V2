@@ -1,6 +1,11 @@
 import { Queue, Worker, type Job } from "bullmq";
 import { S3Client } from "@aws-sdk/client-s3";
 import { parseEnvironment, workerEnvironmentSchema } from "@tender/config";
+import {
+  TENDER_WORKFLOW_PROGRESS_JOB,
+  tenderWorkflowProgressQueueName,
+  type TenderWorkflowProgressJob,
+} from "@tender/contracts";
 import { createPrismaClient, type PrismaClient } from "@tender/database";
 import {
   createLogger,
@@ -99,6 +104,12 @@ async function bootstrap(): Promise<void> {
   const queue = new Queue(environment.QUEUE_NAME, {
     connection: redis,
   });
+  const workflowProgressQueue = new Queue<TenderWorkflowProgressJob>(
+    tenderWorkflowProgressQueueName(environment.QUEUE_NAME),
+    {
+      connection: redis,
+    },
+  );
   const storage = new S3Client({
     credentials: {
       accessKeyId: environment.S3_ACCESS_KEY_ID,
@@ -163,6 +174,18 @@ async function bootstrap(): Promise<void> {
       const lifecycle = startJobLifecycle(job, logger, metrics);
       try {
         const result = await dispatchJob(job);
+        if (isTenderWorkflowProgressJob(result)) {
+          await workflowProgressQueue.add(
+            TENDER_WORKFLOW_PROGRESS_JOB,
+            result,
+            {
+              attempts: 5,
+              backoff: { delay: 2_000, type: "exponential" },
+              jobId: `${TENDER_WORKFLOW_PROGRESS_JOB}:${result.organisationId}:${result.tenderId}`,
+              removeOnComplete: 100,
+            },
+          );
+        }
         lifecycle.complete();
         return result;
       } catch (error: unknown) {
@@ -383,6 +406,7 @@ async function bootstrap(): Promise<void> {
       server.close(),
       metricsServer.close(),
       queue.close(),
+      workflowProgressQueue.close(),
       documentWorker.close(),
       redis.quit(),
       database.$disconnect(),
@@ -440,6 +464,19 @@ function isExtractionJob(value: PlatformJob): value is ExtractionJob {
 
 function isRiskAnalysisJob(value: PlatformJob): value is RiskAnalysisJob {
   return "riskAnalysisRunId" in value && "requestId" in value;
+}
+
+function isTenderWorkflowProgressJob(
+  value: unknown,
+): value is TenderWorkflowProgressJob {
+  if (typeof value !== "object" || value === null) return false;
+  const item = value as Record<string, unknown>;
+  return (
+    typeof item.organisationId === "string" &&
+    typeof item.requestId === "string" &&
+    typeof item.tenderId === "string" &&
+    typeof item.userId === "string"
+  );
 }
 
 void bootstrap().catch((error: unknown) => {

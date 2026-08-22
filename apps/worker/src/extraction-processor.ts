@@ -1,4 +1,5 @@
 import { GetObjectCommand, type S3Client } from "@aws-sdk/client-s3";
+import type { TenderWorkflowProgressJob } from "@tender/contracts";
 import type { PrismaClient } from "@tender/database";
 import {
   classifySections,
@@ -46,7 +47,7 @@ export class ExtractionProcessor {
   public async process(
     data: ExtractionJob,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<TenderWorkflowProgressJob | null> {
     const run = await this.database.extractionRun.findFirst({
       include: {
         tenderVersion: {
@@ -65,7 +66,7 @@ export class ExtractionProcessor {
       run === null ||
       ["CANCELLED", "COMPLETE", "INVALIDATED"].includes(run.status)
     )
-      return;
+      return null;
     if (
       run.tenderVersion.tender.organisationId !== data.organisationId ||
       run.tenderVersion.tenderId !== run.tenderId ||
@@ -74,8 +75,10 @@ export class ExtractionProcessor {
         (document) =>
           document.status !== "READY" || document.approvedObjectKey === null,
       )
-    )
-      return this.fail(run.id, "SOURCE_CHANGED", "Approved source changed");
+    ) {
+      await this.fail(run.id, "SOURCE_CHANGED", "Approved source changed");
+      return null;
+    }
     try {
       await this.stage(
         run.id,
@@ -86,7 +89,7 @@ export class ExtractionProcessor {
       const parsedSources: ParsedSource[] = [];
       for (const [index, document] of run.tenderVersion.documents.entries()) {
         signal?.throwIfAborted();
-        if (await this.cancelled(run.id)) return;
+        if (await this.cancelled(run.id)) return null;
         const object = await this.storage.send(
           new GetObjectCommand({
             Bucket: this.bucket,
@@ -128,7 +131,7 @@ export class ExtractionProcessor {
         );
       }
       signal?.throwIfAborted();
-      if (await this.cancelled(run.id)) return;
+      if (await this.cancelled(run.id)) return null;
       await this.stage(
         run.id,
         "STRUCTURING",
@@ -136,6 +139,12 @@ export class ExtractionProcessor {
         "Structuring source-grounded requirements",
       );
       await this.persist(run.id, run.tenderVersionId, parsedSources, signal);
+      return {
+        organisationId: data.organisationId,
+        requestId: data.requestId,
+        tenderId: run.tenderId,
+        userId: run.requestedByUserId,
+      };
     } catch (error: unknown) {
       if (signal?.aborted === true)
         await this.fail(

@@ -88,6 +88,11 @@ export type {
   ImportTenderRequest,
   UpdateTenderRequest,
 } from "./tenders.js";
+export {
+  TENDER_WORKFLOW_PROGRESS_JOB,
+  tenderWorkflowProgressQueueName,
+  type TenderWorkflowProgressJob,
+} from "./tender-workflow.js";
 export type {
   CompleteUploadRequest,
   CreateUploadSessionRequest,
