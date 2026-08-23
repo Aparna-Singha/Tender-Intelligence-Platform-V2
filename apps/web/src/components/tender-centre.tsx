@@ -14,6 +14,7 @@ import {
   Select,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 import {
   describeTender,
   formatDeadline,
@@ -150,10 +151,7 @@ export function TenderCentre({
         );
       });
   }, [search, sortMode, statusFilter, tenders]);
-  const aiChatHref =
-    tenders[0] === undefined
-      ? null
-      : `/tenders/${organisationId}/${tenders[0].id}?stage=ask`;
+  const aiChatHref = assistantHref(organisationId);
 
   return (
     <div className="workspace-page">
@@ -388,21 +386,12 @@ export function TenderCentre({
         </Modal>
       ) : null}
 
-      {aiChatHref === null ? (
-        <button className="workspace-floating-ai" disabled type="button">
-          <span>
-            <Sparkles aria-hidden="true" size={16} />
-          </span>
-          Ask across tenders
-        </button>
-      ) : (
-        <Link className="workspace-floating-ai" href={aiChatHref}>
-          <span>
-            <Sparkles aria-hidden="true" size={16} />
-          </span>
-          Ask across tenders
-        </Link>
-      )}
+      <Link className="workspace-floating-ai" href={aiChatHref}>
+        <span>
+          <Sparkles aria-hidden="true" size={16} />
+        </span>
+        AI Assistant
+      </Link>
     </div>
   );
 }

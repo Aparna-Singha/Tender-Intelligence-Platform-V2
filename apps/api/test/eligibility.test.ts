@@ -100,6 +100,88 @@ describe("Phase 6 gate and tenant boundary", () => {
       );
     },
   );
+
+  it("reuses an existing current run when the authoritative fingerprint matches across different client keys", async () => {
+    const existingRun = {
+      id: "assessment-run-existing",
+      idempotencyKey:
+        "organisation-a:system-auto-eligibility:fingerprint-existing",
+      sourceFingerprint:
+        "2f91d6d2bd9d0d93a0b7d8d44d18f4e510fdfdb4e4b2d55e4f8a7d7966f8f9f1",
+      status: "COMPLETE",
+    };
+    const database = {
+      checklistGenerationRun: { updateMany: vi.fn() },
+      checklistItem: { updateMany: vi.fn() },
+      companyEvidenceFact: { findMany: vi.fn().mockResolvedValue([]) },
+      companyProfileValue: { findMany: vi.fn().mockResolvedValue([]) },
+      document: { findMany: vi.fn().mockResolvedValue([]) },
+      documentReadiness: { findMany: vi.fn().mockResolvedValue([]) },
+      earlyPursuitDecision: {
+        findFirst: vi.fn().mockResolvedValue({
+          decision: "CONTINUE",
+          id: "decision-a",
+        }),
+      },
+      eligibilityAssessment: { updateMany: vi.fn() },
+      eligibilityAssessmentRun: {
+        findFirst: vi.fn().mockResolvedValue(existingRun),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      tenderVersion: {
+        findFirst: vi.fn().mockResolvedValue({
+          activeEarlyRiskRun: {
+            extractionRunId: "extraction-a",
+            id: "risk-a",
+            invalidatedAt: null,
+            status: "COMPLETE",
+          },
+          activeExtractionRun: {
+            id: "extraction-a",
+            invalidatedAt: null,
+            status: "COMPLETE",
+          },
+        }),
+      },
+      companyTurnover: { findMany: vi.fn().mockResolvedValue([]) },
+      $transaction: vi.fn(),
+    };
+    const jobs = { add: vi.fn() };
+    const service = new EligibilityService(database as never, jobs as never);
+
+    await expect(
+      service.start(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "user-a",
+        "release-evidence-synthetic",
+        "request-a",
+      ),
+    ).resolves.toBe(existingRun);
+
+    expect(database.eligibilityAssessmentRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          invalidatedAt: null,
+          organisationId: "organisation-a",
+          status: {
+            in: [
+              "QUEUED",
+              "SNAPSHOTTING",
+              "MATCHING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
+          tenderId: "tender-a",
+          tenderVersionId: "version-a",
+        }),
+      }),
+    );
+    expect(jobs.add).not.toHaveBeenCalled();
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
 });
 
 describe("company evidence source boundary", () => {

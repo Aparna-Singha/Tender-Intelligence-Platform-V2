@@ -15,6 +15,7 @@ import {
   Select,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 import {
   describeTender,
   getDeadlineDays,
@@ -226,10 +227,7 @@ export function Dashboard(): JSX.Element {
     if (filter === "IN_PROGRESS") return presentation.isInProgress;
     return true;
   });
-  const aiChatHref =
-    selectedId !== null && tenders[0] !== undefined
-      ? `/tenders/${selectedId}/${tenders[0].id}?stage=ask`
-      : null;
+  const aiChatHref = selectedId === null ? null : assistantHref(selectedId);
 
   if (loading) {
     return (
@@ -448,14 +446,14 @@ export function Dashboard(): JSX.Element {
           <span>
             <Sparkles aria-hidden="true" size={16} />
           </span>
-          Ask about my tenders
+          AI Assistant
         </button>
       ) : (
         <Link className="workspace-floating-ai" href={aiChatHref}>
           <span>
             <Sparkles aria-hidden="true" size={16} />
           </span>
-          Ask about my tenders
+          AI Assistant
         </Link>
       )}
 

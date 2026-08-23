@@ -10,7 +10,7 @@ import type {
   ChecklistFilter,
   UpdateChecklistItemRequest,
 } from "@tender/contracts";
-import type { Prisma, PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 import {
   canTransitionChecklistItem,
   CHECKLIST_DATE_POLICY_VERSION,
@@ -144,49 +144,81 @@ export class ChecklistsService {
         }),
       )
       .digest("hex");
-    const idempotencyKey = `${organisationId}:${clientKey}:${fingerprint}`;
+    const idempotencyKey =
+      triggerType === "RETRY"
+        ? `${organisationId}:${clientKey}:${fingerprint}`
+        : `${organisationId}:current:${fingerprint}`;
     const existing = await this.database.checklistGenerationRun.findUnique({
       where: { idempotencyKey },
     });
     if (existing !== null) return existing;
-
-    const run = await this.database.$transaction(async (transaction) => {
-      const created = await transaction.checklistGenerationRun.create({
-        data: {
-          assessmentRunId: assessment.id,
-          checklistPolicyVersion: CHECKLIST_POLICY_VERSION,
-          datePolicyVersion: CHECKLIST_DATE_POLICY_VERSION,
-          deduplicationPolicyVersion: CHECKLIST_DEDUPLICATION_POLICY_VERSION,
-          evidenceSnapshotId: assessment.snapshotId,
-          extractionRunId: extraction.id,
-          idempotencyKey,
+    const existingFingerprintRun =
+      await this.database.checklistGenerationRun.findFirst({
+        orderBy: { createdAt: "desc" },
+        where: {
+          invalidatedAt: null,
           organisationId,
-          priorityPolicyVersion: CHECKLIST_PRIORITY_POLICY_VERSION,
-          pursuitDecisionId: decision.id,
-          requestedByUserId: userId,
-          riskAnalysisRunId: risk.id,
           sourceFingerprint: fingerprint,
+          status: { in: [...activeStatuses, "COMPLETE"] },
           tenderId,
           tenderVersionId: versionId,
-          triggerType,
         },
       });
-      await transaction.auditEvent.create({
-        data: {
-          actorUserId: userId,
-          eventType:
-            triggerType === "RETRY"
-              ? "CHECKLIST_GENERATION_RETRIED"
-              : "CHECKLIST_GENERATION_STARTED",
-          organisationId,
-          outcome: "SUCCESS",
-          requestId,
-          subjectId: created.id,
-          subjectType: "checklist_generation_run",
-        },
+    if (existingFingerprintRun !== null) return existingFingerprintRun;
+
+    let run;
+    try {
+      run = await this.database.$transaction(async (transaction) => {
+        const created = await transaction.checklistGenerationRun.create({
+          data: {
+            assessmentRunId: assessment.id,
+            checklistPolicyVersion: CHECKLIST_POLICY_VERSION,
+            datePolicyVersion: CHECKLIST_DATE_POLICY_VERSION,
+            deduplicationPolicyVersion: CHECKLIST_DEDUPLICATION_POLICY_VERSION,
+            evidenceSnapshotId: assessment.snapshotId,
+            extractionRunId: extraction.id,
+            idempotencyKey,
+            organisationId,
+            priorityPolicyVersion: CHECKLIST_PRIORITY_POLICY_VERSION,
+            pursuitDecisionId: decision.id,
+            requestedByUserId: userId,
+            riskAnalysisRunId: risk.id,
+            sourceFingerprint: fingerprint,
+            tenderId,
+            tenderVersionId: versionId,
+            triggerType,
+          },
+        });
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: userId,
+            eventType:
+              triggerType === "RETRY"
+                ? "CHECKLIST_GENERATION_RETRIED"
+                : "CHECKLIST_GENERATION_STARTED",
+            organisationId,
+            outcome: "SUCCESS",
+            requestId,
+            subjectId: created.id,
+            subjectType: "checklist_generation_run",
+          },
+        });
+        return created;
       });
-      return created;
-    });
+    } catch (error) {
+      if (
+        triggerType !== "RETRY" &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const concurrentRun =
+          await this.database.checklistGenerationRun.findUnique({
+            where: { idempotencyKey },
+          });
+        if (concurrentRun !== null) return concurrentRun;
+      }
+      throw error;
+    }
     await this.jobs.add(
       "generate-missing-action-checklist",
       { checklistRunId: run.id, organisationId, requestId },

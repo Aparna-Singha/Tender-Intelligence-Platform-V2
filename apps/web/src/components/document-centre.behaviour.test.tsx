@@ -1,19 +1,41 @@
-import { render, screen, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { DocumentCentre } from "./document-centre";
 
-const { apiRequest } = vi.hoisted(() => ({ apiRequest: vi.fn() }));
+const { apiRequest, uploadFileToSignedStorageUrl } = vi.hoisted(() => ({
+  apiRequest: vi.fn(),
+  uploadFileToSignedStorageUrl: vi.fn(),
+}));
 
 vi.mock("../lib/api", () => ({
+  PublicApiError: class PublicApiError extends Error {},
   apiRequest,
   formatApiError: (_error: unknown, fallback: string) => fallback,
+}));
+vi.mock("../lib/direct-upload", () => ({
+  uploadFileToSignedStorageUrl,
 }));
 
 describe("company docs workspace", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     apiRequest.mockReset();
+    uploadFileToSignedStorageUrl.mockReset();
     vi.restoreAllMocks();
+    vi.stubGlobal("File", window.File);
+    vi.stubGlobal("FormData", window.FormData);
+    vi.stubGlobal("crypto", {
+      subtle: {
+        digest: vi.fn(() => Promise.resolve(new Uint8Array(32).buffer)),
+      },
+    });
     apiRequest.mockImplementation((path: string) => {
       if (path === "/organisations/org-1/documents") {
         return Promise.resolve([
@@ -132,5 +154,122 @@ describe("company docs workspace", () => {
       ".pdf,.jpg,.jpeg,.png,.docx,.xlsx",
     );
     expect(within(dialog).getByRole("combobox")).toHaveValue("UDYAM");
+  });
+
+  it("abandons a failed direct upload before completion and allows a clean retry", async () => {
+    const user = userEvent.setup();
+    let createCount = 0;
+    let documents: readonly unknown[] = [];
+
+    apiRequest.mockImplementation((path: string, init?: RequestInit) => {
+      if (path === "/organisations/org-1/documents") {
+        return Promise.resolve(documents);
+      }
+      if (
+        path === "/organisations/org-1/documents/upload-sessions" &&
+        init?.method === "POST"
+      ) {
+        createCount += 1;
+        return Promise.resolve({
+          document_id: `doc-${createCount}`,
+          upload_session_id: `session-${createCount}`,
+          upload_url: `http://storage.local/upload-${createCount}`,
+        });
+      }
+      if (
+        path === "/organisations/org-1/documents/upload-sessions/session-1" &&
+        init?.method === "DELETE"
+      ) {
+        return Promise.resolve({ removed: true });
+      }
+      if (
+        path ===
+          "/organisations/org-1/documents/upload-sessions/session-2/complete" &&
+        init?.method === "POST"
+      ) {
+        documents = [
+          {
+            category: "UDYAM",
+            displayName: "udyam.pdf",
+            expiryDate: null,
+            id: "doc-2",
+            status: "READY",
+            updatedAt: "2026-08-22T09:00:00.000Z",
+            verificationStatus: "UNVERIFIED",
+          },
+        ];
+        return Promise.resolve({ document_id: "doc-2", status: "UPLOADED" });
+      }
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+
+    uploadFileToSignedStorageUrl.mockRejectedValueOnce(
+      new Error("storage down"),
+    );
+    uploadFileToSignedStorageUrl.mockResolvedValueOnce(undefined);
+
+    render(<DocumentCentre organisationId="org-1" />);
+    await screen.findByRole("heading", { name: "Company documents" });
+    await user.click(
+      screen.getAllByRole("button", { name: "Upload document" })[0]!,
+    );
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Upload company document",
+    });
+    const file = new File(["evidence"], "udyam.pdf", {
+      type: "application/pdf",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: () => Promise.resolve(new TextEncoder().encode("evidence").buffer),
+    });
+    const NativeFormData = window.FormData;
+    class MockFormData extends NativeFormData {
+      public override get(name: string): FormDataEntryValue | null {
+        if (name === "file") return file;
+        return super.get(name);
+      }
+    }
+    vi.stubGlobal("FormData", MockFormData);
+    Object.defineProperty(window, "FormData", {
+      configurable: true,
+      value: MockFormData,
+    });
+    const fileInput = dialog.querySelector('input[type="file"]');
+    const form = dialog.querySelector("form");
+    expect(fileInput).toBeInstanceOf(HTMLInputElement);
+    expect(form).not.toBeNull();
+    if (!(fileInput instanceof HTMLInputElement) || form === null) {
+      throw new Error("Expected company document upload form");
+    }
+
+    await user.upload(fileInput, file);
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/documents/upload-sessions/session-1",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    expect(
+      await within(dialog).findByText(
+        "Upload to secure storage failed. Please try again.",
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/documents/upload-sessions/session-2/complete",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Upload company document" }),
+      ).not.toBeInTheDocument(),
+    );
   });
 });

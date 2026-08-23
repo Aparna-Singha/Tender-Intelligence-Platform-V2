@@ -199,8 +199,8 @@ describe("dashboard home parity behavior", () => {
       }),
     ).toBeInTheDocument();
 
-    expect(screen.getAllByText("7 days left")).toHaveLength(2);
-    expect(screen.getAllByText("2 days overdue")).toHaveLength(2);
+    expect(screen.getAllByText("6 days left")).toHaveLength(2);
+    expect(screen.getAllByText("3 days overdue")).toHaveLength(2);
 
     expect(
       screen.queryByText(
@@ -242,5 +242,12 @@ describe("dashboard home parity behavior", () => {
     expect(
       screen.queryByText("No background processing is currently running."),
     ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "AI Assistant" })).toHaveAttribute(
+      "href",
+      "/assistant/org-1",
+    );
+    expect(
+      screen.getByRole("link", { name: "AI Assistant" }).getAttribute("href"),
+    ).not.toContain("?stage=ask");
   });
 });

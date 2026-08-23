@@ -178,11 +178,13 @@ describe("early risk-analysis tenant and source boundary", () => {
       "request-a",
     );
 
-    expect(schedule).toHaveBeenCalledWith(
-      "organisation-a",
-      "tender-a",
-      "user-a",
-      "request-a",
-    );
+    expect(schedule).toHaveBeenCalledWith({
+      organisationId: "organisation-a",
+      requestId: "request-a",
+      tenderId: "tender-a",
+      triggerId: "decision-a",
+      triggerType: "CONTINUE_DECISION",
+      userId: "user-a",
+    });
   });
 });

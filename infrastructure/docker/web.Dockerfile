@@ -5,7 +5,9 @@ RUN corepack enable
 COPY . .
 ENV DATABASE_URL=postgresql://build:build@localhost:5432/build
 ARG NEXT_PUBLIC_API_URL=http://localhost:4000
+ARG NEXT_PUBLIC_STORAGE_ORIGIN=http://localhost:9000
 ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ENV NEXT_PUBLIC_STORAGE_ORIGIN=${NEXT_PUBLIC_STORAGE_ORIGIN}
 RUN pnpm install --frozen-lockfile
 RUN pnpm turbo run build --filter=@tender/web...
 

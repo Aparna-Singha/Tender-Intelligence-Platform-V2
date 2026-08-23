@@ -18,6 +18,7 @@ import {
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 
 type SettingsSection =
   "organisation" | "people-access" | "security" | "preferences";
@@ -698,17 +699,15 @@ export function SettingsWorkspace({
         </div>
       </div>
 
-      <button
+      <Link
         className="workspace-floating-ai"
-        disabled
-        title="A workspace-wide assistant isn't available yet. Open a tender's AI Chat for grounded, tender-scoped answers."
-        type="button"
+        href={assistantHref(organisationId)}
       >
         <span>
           <Sparkles aria-hidden="true" size={16} />
         </span>
-        Ask about settings
-      </button>
+        AI Assistant
+      </Link>
     </div>
   );
 }

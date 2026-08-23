@@ -90,8 +90,13 @@ export type {
 } from "./tenders.js";
 export {
   TENDER_WORKFLOW_PROGRESS_JOB,
+  tenderWorkflowProgressDeduplicationId,
+  tenderWorkflowProgressJobId,
+  tenderWorkflowProgressQueuePolicy,
   tenderWorkflowProgressQueueName,
   type TenderWorkflowProgressJob,
+  type TenderWorkflowProgressQueueSettings,
+  type TenderWorkflowProgressTriggerType,
 } from "./tender-workflow.js";
 export type {
   CompleteUploadRequest,

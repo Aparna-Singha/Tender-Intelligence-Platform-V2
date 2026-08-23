@@ -13,10 +13,11 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Drawer, IconButton, Select, humanizeEnum } from "@tender/ui";
 import { apiRequest } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 import {
   describeTender,
   formatDeadlineCountdown,
@@ -103,18 +104,23 @@ function SidebarSection({
 }
 
 function QuickAccessLink({
+  active = false,
   href,
   meta,
   title,
 }: {
+  readonly active?: boolean;
   readonly href: string;
-  readonly meta: string;
+  readonly meta?: string;
   readonly title: string;
 }): JSX.Element {
   return (
-    <Link className="workspace-sidebar__quick-link" href={href}>
+    <Link
+      className={`workspace-sidebar__quick-link ${active ? "workspace-sidebar__quick-link--active" : ""}`}
+      href={href}
+    >
       <span>{title}</span>
-      <small>{meta}</small>
+      {meta === undefined ? null : <small>{meta}</small>}
     </Link>
   );
 }
@@ -125,6 +131,7 @@ function SidebarContents({
   onSwitchOrganisation,
   organisationId,
   pathname,
+  searchStage,
   session,
   tenders,
 }: {
@@ -133,6 +140,7 @@ function SidebarContents({
   readonly onSwitchOrganisation: (id: string) => void;
   readonly organisationId: string | null;
   readonly pathname: string;
+  readonly searchStage: string | null;
   readonly session: Session | null;
   readonly tenders: readonly TenderSummary[];
 }): JSX.Element {
@@ -178,6 +186,8 @@ function SidebarContents({
       return true;
     })
     .slice(0, 3);
+  const assistantRoute =
+    organisationId === null ? null : assistantHref(organisationId);
   const rawInitials = session?.user.display_name
     .split(/\s+/)
     .filter(Boolean)
@@ -258,12 +268,11 @@ function SidebarContents({
             </p>
           ) : (
             recentDrafts.map((tender) => {
-              const presentation = describeTender(tender);
               return (
                 <QuickAccessLink
+                  active={pathTenderId === tender.id && searchStage === "draft"}
                   href={`/tenders/${organisationId ?? ""}/${tender.id}?stage=draft`}
                   key={tender.id}
-                  meta={presentation.supportingLabel}
                   title={tender.title}
                 />
               );
@@ -272,16 +281,31 @@ function SidebarContents({
         </SidebarSection>
 
         <SidebarSection title="Chats">
-          {chatShortcuts.length === 0 ? (
+          {assistantRoute === null && chatShortcuts.length === 0 ? (
             <p className="workspace-sidebar__empty">
               Tender chat stays tender-scoped and appears once a workspace
               exists.
             </p>
           ) : (
             <>
+              {assistantRoute === null ? null : (
+                <Link
+                  className={`workspace-sidebar__chat-link ${pathname === assistantRoute ? "workspace-sidebar__chat-link--active" : ""}`}
+                  href={assistantRoute}
+                  {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
+                >
+                  <span className="workspace-sidebar__chat-indicator workspace-sidebar__chat-indicator--pinned">
+                    <MessageSquare aria-hidden="true" size={12} />
+                  </span>
+                  <span>
+                    AI Assistant
+                    <small>Workspace guidance only</small>
+                  </span>
+                </Link>
+              )}
               {chatShortcuts.map((tender, index) => (
                 <Link
-                  className="workspace-sidebar__chat-link"
+                  className={`workspace-sidebar__chat-link ${pathTenderId === tender.id && searchStage === "ask" ? "workspace-sidebar__chat-link--active" : ""}`}
                   href={`/tenders/${organisationId ?? ""}/${tender.id}?stage=ask`}
                   key={tender.id}
                   {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
@@ -292,7 +316,7 @@ function SidebarContents({
                     <MessageSquare aria-hidden="true" size={12} />
                   </span>
                   <span>
-                    {index === 0 ? "Ask tender" : "Tender chat"}
+                    Tender chat
                     <small>{tender.title}</small>
                   </span>
                 </Link>
@@ -367,13 +391,14 @@ export function AppShell({
 }): JSX.Element {
   const pathname = usePathname();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
 
   const pathOrganisationId =
-    /^\/(?:onboarding|documents|settings|tenders)\/([^/]+)/.exec(
+    /^\/(?:assistant|onboarding|documents|settings|tenders)\/([^/]+)/.exec(
       pathname,
     )?.[1] ?? null;
   const organisationId =
@@ -418,6 +443,7 @@ export function AppShell({
   }, [pathOrganisationId, router]);
 
   const mobileTitle = useMemo(() => {
+    if (pathname.startsWith("/assistant/")) return "AI Assistant";
     if (pathname.startsWith("/tenders/")) return "Tenders";
     if (pathname.startsWith("/documents/")) return "Company Docs";
     if (pathname.startsWith("/settings/")) return "Settings";
@@ -441,6 +467,7 @@ export function AppShell({
       onSwitchOrganisation={(id) => void switchOrganisation(id)}
       organisationId={organisationId}
       pathname={pathname}
+      searchStage={searchParams.get("stage")}
       session={session}
       tenders={tenders}
     />

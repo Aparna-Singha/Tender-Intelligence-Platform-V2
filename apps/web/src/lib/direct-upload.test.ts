@@ -7,14 +7,16 @@ describe("direct signed upload", () => {
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue({ ok: true, status: 200 } as Response);
+    const uploadUrl =
+      "http://minio.local/upload?X-Amz-SignedHeaders=content-length%3Bhost&x-amz-meta-sha256=expected-checksum";
 
     const file = new File(["%PDF-1.4 test"], "document.pdf", {
       type: "application/pdf",
     });
 
-    await uploadFileToSignedStorageUrl("http://minio.local/upload", file);
+    await uploadFileToSignedStorageUrl(uploadUrl, file);
 
-    expect(fetchMock).toHaveBeenCalledWith("http://minio.local/upload", {
+    expect(fetchMock).toHaveBeenCalledWith(uploadUrl, {
       body: file,
       headers: {
         "content-type": "application/pdf",

@@ -110,6 +110,8 @@ describe("evidence assessment progression safety", () => {
       organisationId: "organisation-a",
       requestId: "request-a",
       tenderId: "tender-a",
+      triggerId: "assessment-a",
+      triggerType: "ELIGIBILITY_COMPLETE",
       userId: "user-a",
     });
   });

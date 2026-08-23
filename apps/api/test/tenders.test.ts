@@ -1,6 +1,27 @@
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { ConflictException, NotFoundException } from "@nestjs/common";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+const { getSignedUrlMock } = vi.hoisted(() => ({
+  getSignedUrlMock: vi
+    .fn()
+    .mockResolvedValue(
+      "https://signed.example/upload?X-Amz-SignedHeaders=content-length%3Bhost&x-amz-meta-sha256=expected-checksum",
+    ),
+}));
+
+vi.mock("@aws-sdk/s3-request-presigner", () => ({
+  getSignedUrl: getSignedUrlMock,
+}));
+
+import {
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
+import {
+  BadRequestException,
+  ConflictException,
+  GoneException,
+  NotFoundException,
+} from "@nestjs/common";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TendersService } from "../src/tenders/tenders.service.js";
 
 const environment = {
@@ -8,9 +29,19 @@ const environment = {
   DOCUMENT_UPLOAD_TTL_SECONDS: 300,
   S3_BUCKET: "private-test",
 } as never;
+const fixedTestTime = new Date("2026-08-22T12:00:00.000Z");
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(fixedTestTime);
   vi.clearAllMocks();
+  getSignedUrlMock.mockResolvedValue(
+    "https://signed.example/upload?X-Amz-SignedHeaders=content-length%3Bhost&x-amz-meta-sha256=expected-checksum",
+  );
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("tender workspace tenant isolation", () => {
@@ -206,7 +237,11 @@ describe("tender workspace tenant isolation", () => {
       data: {
         actorUserId: "user-a",
         eventType: "TENDER_UPLOAD_ABANDONED",
-        metadata: { document_id: "document-a", role: "PRIMARY" },
+        metadata: {
+          document_id: "document-a",
+          pre_completion_cleanup: false,
+          role: "PRIMARY",
+        },
         organisationId: "organisation-a",
         outcome: "SUCCESS",
         requestId: "request-a",
@@ -216,6 +251,66 @@ describe("tender workspace tenant isolation", () => {
     });
     expect(storage.send).toHaveBeenCalledWith(expect.any(DeleteObjectCommand));
     expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("allows the uploader to abandon a current in-progress upload before expiry", async () => {
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const storage = { send: vi.fn().mockResolvedValue(undefined) };
+    const database = {
+      $transaction: vi.fn(async (operations: readonly Promise<unknown>[]) =>
+        Promise.all(operations),
+      ),
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      tenderDocument: {
+        delete: vi.fn().mockResolvedValue(undefined),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "document-a",
+          quarantineObjectKey: "quarantine/object-key",
+          role: "PRIMARY",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          status: "UPLOADING",
+          uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+          uploadedByUserId: "user-a",
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    await expect(
+      service.abandonUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual({ removed: true });
+
+    expect(database.tenderDocument.delete).toHaveBeenCalledWith({
+      where: { id: "document-a" },
+    });
+    expect(database.auditEvent.create).toHaveBeenCalledWith({
+      data: {
+        actorUserId: "user-a",
+        eventType: "TENDER_UPLOAD_ABANDONED",
+        metadata: {
+          document_id: "document-a",
+          pre_completion_cleanup: true,
+          role: "PRIMARY",
+        },
+        organisationId: "organisation-a",
+        outcome: "SUCCESS",
+        requestId: "request-a",
+        subjectId: "tender-a",
+        subjectType: "tender",
+      },
+    });
   });
 
   it("treats a missing quarantine object as idempotent abandoned-upload cleanup success", async () => {
@@ -347,6 +442,41 @@ describe("tender workspace tenant isolation", () => {
         "tender-a",
         "document-a",
         "user-a",
+        "request-a",
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+
+    expect(database.tenderDocument.delete).not.toHaveBeenCalled();
+  });
+
+  it("does not allow another user to abandon someone else's active upload before expiry", async () => {
+    const database = {
+      tenderDocument: {
+        delete: vi.fn(),
+        findFirst: vi.fn().mockResolvedValue({
+          id: "document-a",
+          role: "PRIMARY",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          status: "UPLOADING",
+          uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+          uploadedByUserId: "user-a",
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    await expect(
+      service.abandonUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-b",
         "request-a",
       ),
     ).rejects.toBeInstanceOf(ConflictException);
@@ -1266,5 +1396,217 @@ describe("tender workspace tenant isolation", () => {
       code: "AWAITING_EARLY_DECISION",
       statusLabel: "Review tender",
     });
+  });
+});
+
+describe("tender direct upload contract", () => {
+  it("presigns tender uploads with sha256 metadata in the URL-backed contract", async () => {
+    const database = {
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      tenderDocument: {
+        create: vi.fn().mockResolvedValue({ id: "document-a" }),
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      tenderVersion: {
+        findFirst: vi.fn().mockResolvedValue({ id: "version-a" }),
+      },
+    };
+    const storage = { send: vi.fn() };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.createUpload(
+      "organisation-a",
+      "tender-a",
+      "version-a",
+      "user-a",
+      {
+        checksum_sha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        filename: "Synthetic_GeM_Tender_Test.pdf",
+        mime_type: "application/pdf",
+        role: "PRIMARY",
+        size_bytes: 1024,
+      },
+      "request-a",
+    )) as { readonly upload_url: string };
+
+    expect(result.upload_url).toContain("x-amz-meta-sha256=expected-checksum");
+    expect(getSignedUrlMock).toHaveBeenCalledTimes(1);
+    const command = getSignedUrlMock.mock.calls[0]?.[1];
+    expect(command).toBeInstanceOf(PutObjectCommand);
+    expect((command as PutObjectCommand).input).toMatchObject({
+      Bucket: "private-test",
+      ContentLength: 1024,
+      ContentType: "application/pdf",
+      Key: expect.stringContaining("tender-quarantine/organisation-a/"),
+      Metadata: {
+        sha256:
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      },
+    });
+  });
+
+  it("completes tender uploads only when HeadObject returns the expected sha256 metadata", async () => {
+    const storage = {
+      send: vi.fn().mockResolvedValue({
+        ContentLength: 1024,
+        ContentType: "application/pdf",
+        Metadata: {
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        },
+      }),
+    };
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const transaction = {
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      processingJob: {
+        create: vi.fn().mockResolvedValue({ id: "job-a", state: "QUEUED" }),
+      },
+      tender: { update: vi.fn().mockResolvedValue(undefined) },
+      tenderDocument: { update: vi.fn().mockResolvedValue(undefined) },
+      tenderWorkspace: { update: vi.fn().mockResolvedValue(undefined) },
+    };
+    const database = {
+      $transaction: vi.fn(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+      processingJob: { findUnique: vi.fn().mockResolvedValue(null) },
+      tenderDocument: {
+        findFirst: vi.fn().mockResolvedValue({
+          declaredMimeType: "application/pdf",
+          id: "document-a",
+          organisationId: "organisation-a",
+          quarantineObjectKey: "tender-quarantine/organisation-a/document-a",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          sizeBytes: BigInt(1024),
+          tenderId: "tender-a",
+          tenderVersionId: "version-a",
+          uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    const result = (await service.completeUpload(
+      "organisation-a",
+      "tender-a",
+      "document-a",
+      "user-a",
+      "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "request-a",
+    )) as { readonly job_id: string; readonly state: string };
+
+    expect(result).toEqual({ job_id: "job-a", state: "QUEUED" });
+    expect(storage.send).toHaveBeenCalledWith(expect.any(HeadObjectCommand));
+    expect(jobs.add).toHaveBeenCalledWith(
+      "process-tender-document",
+      {
+        documentId: "document-a",
+        jobId: "job-a",
+        organisationId: "organisation-a",
+        requestId: "request-a",
+      },
+      { attempts: 3, jobId: "job-a", removeOnComplete: 100 },
+    );
+  });
+
+  it("rejects tender upload completion when the stored object metadata sha256 does not match", async () => {
+    const storage = {
+      send: vi.fn().mockResolvedValue({
+        ContentLength: 1024,
+        ContentType: "application/pdf",
+        Metadata: {
+          sha256:
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        },
+      }),
+    };
+    const jobs = { add: vi.fn() };
+    const database = {
+      processingJob: { findUnique: vi.fn().mockResolvedValue(null) },
+      tenderDocument: {
+        findFirst: vi.fn().mockResolvedValue({
+          declaredMimeType: "application/pdf",
+          id: "document-a",
+          quarantineObjectKey: "tender-quarantine/organisation-a/document-a",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          sizeBytes: BigInt(1024),
+          tenderVersionId: "version-a",
+          uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    await expect(
+      service.completeUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-a",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request-a",
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("rejects tender upload completion when the upload session has expired", async () => {
+    const storage = { send: vi.fn() };
+    const jobs = { add: vi.fn() };
+    const database = {
+      processingJob: { findUnique: vi.fn().mockResolvedValue(null) },
+      tenderDocument: {
+        findFirst: vi.fn().mockResolvedValue({
+          declaredMimeType: "application/pdf",
+          id: "document-a",
+          organisationId: "organisation-a",
+          quarantineObjectKey: "tender-quarantine/organisation-a/document-a",
+          sha256:
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          sizeBytes: BigInt(1024),
+          tenderVersionId: "version-a",
+          uploadSessionExpiresAt: new Date("2026-08-20T09:35:00.000Z"),
+        }),
+      },
+    };
+    const service = new TendersService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+
+    await expect(
+      service.completeUpload(
+        "organisation-a",
+        "tender-a",
+        "document-a",
+        "user-a",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request-a",
+      ),
+    ).rejects.toBeInstanceOf(GoneException);
+    expect(storage.send).not.toHaveBeenCalled();
+    expect(jobs.add).not.toHaveBeenCalled();
   });
 });

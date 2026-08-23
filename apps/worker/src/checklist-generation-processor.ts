@@ -258,7 +258,7 @@ export class ChecklistGenerationProcessor {
           tenderVersionId: run.tenderVersionId,
         },
       });
-      await transaction.checklistGenerationRun.update({
+      const result = await transaction.checklistGenerationRun.updateMany({
         data: {
           activatedAt: new Date(),
           completedAt: new Date(),
@@ -269,8 +269,24 @@ export class ChecklistGenerationProcessor {
             "Checklist generated from the selected Phase 7 assessment snapshot",
           status: "COMPLETE",
         },
-        where: { id: run.id },
+        where: {
+          cancellationRequestedAt: null,
+          id: run.id,
+          invalidatedAt: null,
+          organisationId: run.organisationId,
+          status: {
+            in: [
+              "QUEUED",
+              "LOADING_ASSESSMENTS",
+              "GENERATING",
+              "DEDUPLICATING",
+              "VALIDATING",
+            ],
+          },
+        },
       });
+      if (result.count !== 1)
+        throw new Error("CHECKLIST_CANCELLED_OR_INVALIDATED");
       await transaction.auditEvent.create({
         data: {
           eventType: "CHECKLIST_GENERATION_ACTIVATED",

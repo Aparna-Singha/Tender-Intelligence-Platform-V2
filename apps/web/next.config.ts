@@ -14,13 +14,20 @@ function originFrom(value: string | undefined): string | null {
 }
 
 const apiOrigin = originFrom(process.env.NEXT_PUBLIC_API_URL);
+const storageOrigin = originFrom(process.env.NEXT_PUBLIC_STORAGE_ORIGIN);
 const isDevelopment = process.env.NODE_ENV === "development";
 const scriptSources = [
   "'self'",
   "'unsafe-inline'",
   ...(isDevelopment ? ["'unsafe-eval'"] : []),
 ];
-const connectSources = ["'self'", ...(apiOrigin === null ? [] : [apiOrigin])];
+const connectSources = [
+  "'self'",
+  ...(apiOrigin === null ? [] : [apiOrigin]),
+  ...(storageOrigin === null || storageOrigin === apiOrigin
+    ? []
+    : [storageOrigin]),
+];
 
 export const contentSecurityPolicy = [
   "default-src 'self'",

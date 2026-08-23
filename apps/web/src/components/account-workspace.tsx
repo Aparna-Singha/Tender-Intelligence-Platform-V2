@@ -1,6 +1,7 @@
 "use client";
 
 import { Sparkles } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import {
@@ -14,6 +15,7 @@ import {
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, clearCsrfToken, formatApiError } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 
 interface SessionContext {
   readonly active_organisation_id: string | null;
@@ -101,6 +103,10 @@ export function AccountWorkspace(): JSX.Element {
 
   const activeSessions = sessions.filter((item) => item.revokedAt === null);
   const otherActiveSessions = activeSessions.filter((item) => !item.current);
+  const assistantLink =
+    activeMembership === null
+      ? null
+      : assistantHref(activeMembership.organisation.id);
 
   async function logout(): Promise<void> {
     setBusy("logout");
@@ -378,17 +384,21 @@ export function AccountWorkspace(): JSX.Element {
         </Card>
       </section>
 
-      <button
-        className="workspace-floating-ai"
-        disabled
-        title="A workspace-wide assistant isn't available yet. Open a tender's AI Chat for grounded, tender-scoped answers."
-        type="button"
-      >
-        <span>
-          <Sparkles aria-hidden="true" size={16} />
-        </span>
-        Ask about my account
-      </button>
+      {assistantLink === null ? (
+        <button className="workspace-floating-ai" disabled type="button">
+          <span>
+            <Sparkles aria-hidden="true" size={16} />
+          </span>
+          AI Assistant
+        </button>
+      ) : (
+        <Link className="workspace-floating-ai" href={assistantLink}>
+          <span>
+            <Sparkles aria-hidden="true" size={16} />
+          </span>
+          AI Assistant
+        </Link>
+      )}
     </div>
   );
 }

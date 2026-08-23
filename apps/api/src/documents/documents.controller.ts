@@ -85,6 +85,24 @@ export class DocumentsController {
     );
   }
 
+  @RequireOrganisationPermission("DOCUMENT_UPLOAD")
+  @Delete("upload-sessions/:uploadSessionId")
+  @ApiOperation({
+    summary: "Abandon an incomplete direct upload session safely",
+  })
+  public abandonUpload(
+    @Param("organisationId") organisationId: string,
+    @Param("uploadSessionId") uploadSessionId: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<unknown> {
+    return this.documents.abandonUploadSession(
+      organisationId,
+      uploadSessionId,
+      request.authenticatedUser.userId,
+      request.id,
+    );
+  }
+
   @RequireOrganisationPermission("DOCUMENT_READ")
   @Post(":documentId/download")
   @ApiOperation({ summary: "Authorize and sign a private document download" })

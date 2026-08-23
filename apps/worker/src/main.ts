@@ -3,6 +3,7 @@ import { S3Client } from "@aws-sdk/client-s3";
 import { parseEnvironment, workerEnvironmentSchema } from "@tender/config";
 import {
   TENDER_WORKFLOW_PROGRESS_JOB,
+  tenderWorkflowProgressQueuePolicy,
   tenderWorkflowProgressQueueName,
   type TenderWorkflowProgressJob,
 } from "@tender/contracts";
@@ -22,7 +23,11 @@ import {
 } from "./job-observability.js";
 import { WorkerReadiness } from "./readiness.js";
 import { ClamAvScanner } from "./malware-scanner.js";
-import { DocumentProcessor, type DocumentJob } from "./document-processor.js";
+import {
+  DocumentProcessor,
+  type CompanyUploadCleanupJob,
+  type DocumentJob,
+} from "./document-processor.js";
 import { runWithTimeout } from "./job-timeout.js";
 import {
   TenderProcessor,
@@ -71,6 +76,7 @@ import {
 } from "./controlled-package-processor.js";
 
 type PlatformJob =
+  | CompanyUploadCleanupJob
   | DocumentJob
   | TenderDocumentJob
   | ExtractionJob
@@ -175,14 +181,19 @@ async function bootstrap(): Promise<void> {
       try {
         const result = await dispatchJob(job);
         if (isTenderWorkflowProgressJob(result)) {
+          const policy = tenderWorkflowProgressQueuePolicy(result);
           await workflowProgressQueue.add(
             TENDER_WORKFLOW_PROGRESS_JOB,
             result,
             {
-              attempts: 5,
-              backoff: { delay: 2_000, type: "exponential" },
-              jobId: `${TENDER_WORKFLOW_PROGRESS_JOB}:${result.organisationId}:${result.tenderId}`,
-              removeOnComplete: 100,
+              attempts: policy.attempts,
+              backoff: { delay: policy.backoffDelayMs, type: "exponential" },
+              deduplication: {
+                id: policy.deduplicationId,
+                keepLastIfActive: policy.keepLastIfActive,
+              },
+              jobId: policy.jobId,
+              removeOnComplete: policy.removeOnComplete,
             },
           );
         }
@@ -197,6 +208,14 @@ async function bootstrap(): Promise<void> {
   );
 
   async function dispatchJob(job: Job<PlatformJob>): Promise<unknown> {
+    if (job.name === "cleanup-company-upload-storage") {
+      if (!isCompanyUploadCleanupJob(job.data))
+        throw new Error("Invalid company upload cleanup job");
+      const data = job.data;
+      return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async () =>
+        processor.cleanupUploadObjects(data.keys),
+      );
+    }
     if (job.name === "cleanup-tender-document-storage") {
       if (!isTenderDocumentCleanupJob(job.data))
         throw new Error("Invalid tender document cleanup job");
@@ -448,6 +467,12 @@ function isTenderDocumentJob(value: PlatformJob): value is TenderDocumentJob {
   return "documentId" in value && "jobId" in value && "requestId" in value;
 }
 
+function isCompanyUploadCleanupJob(
+  value: PlatformJob,
+): value is CompanyUploadCleanupJob {
+  return "documentVersionId" in value && "keys" in value;
+}
+
 function isTenderDocumentCleanupJob(
   value: PlatformJob,
 ): value is TenderDocumentCleanupJob {
@@ -475,6 +500,8 @@ function isTenderWorkflowProgressJob(
     typeof item.organisationId === "string" &&
     typeof item.requestId === "string" &&
     typeof item.tenderId === "string" &&
+    typeof item.triggerId === "string" &&
+    typeof item.triggerType === "string" &&
     typeof item.userId === "string"
   );
 }

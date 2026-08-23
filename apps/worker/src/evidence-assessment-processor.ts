@@ -255,6 +255,8 @@ export class EvidenceAssessmentProcessor {
       organisationId: job.organisationId,
       requestId: job.requestId,
       tenderId: run.tenderId,
+      triggerId: run.id,
+      triggerType: "ELIGIBILITY_COMPLETE",
       userId: run.requestedByUserId,
     };
   }

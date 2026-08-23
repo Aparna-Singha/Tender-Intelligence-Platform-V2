@@ -76,6 +76,8 @@ describe("extraction worker progression", () => {
       organisationId: "organisation-a",
       requestId: "request-a",
       tenderId: "tender-a",
+      triggerId: "extract-a",
+      triggerType: "EXTRACTION_COMPLETE",
       userId: "user-a",
     });
   });

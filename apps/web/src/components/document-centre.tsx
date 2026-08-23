@@ -11,6 +11,7 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
 import {
   Alert,
@@ -30,6 +31,7 @@ import {
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError, PublicApiError } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
 
 interface DocumentSummary {
@@ -370,7 +372,16 @@ export function DocumentCentre({
     if (uploading) return;
     const form = event.currentTarget;
     const values = new FormData(form);
-    const file = values.get("file");
+    const fileField = form.elements.namedItem("file");
+    const selectedFile =
+      fileField instanceof HTMLInputElement
+        ? ((fileField.files ?? [])[0] ?? null)
+        : null;
+    const fileEntry = values.get("file");
+    const file =
+      fileEntry instanceof File && fileEntry.size > 0
+        ? fileEntry
+        : selectedFile;
     if (!(file instanceof File) || file.size === 0) return;
     const expiryDate = values.get("expiry_date");
     setUploading(true);
@@ -411,8 +422,17 @@ export function DocumentCentre({
       try {
         await uploadFileToSignedStorageUrl(session.upload_url, file);
       } catch (caught) {
+        try {
+          await apiRequest(
+            `/organisations/${organisationId}/documents/upload-sessions/${session.upload_session_id}`,
+            { method: "DELETE" },
+          );
+        } catch {
+          // Preserve the upload failure as the authoritative user-visible error.
+        }
         throw new CompanyDocumentUploadError("storage", caught);
       }
+      setMessage("Verifying upload and starting security checks...");
       try {
         await apiRequest(
           `/organisations/${organisationId}/documents/upload-sessions/${session.upload_session_id}/complete`,
@@ -799,17 +819,15 @@ export function DocumentCentre({
         </Drawer>
       ) : null}
 
-      <button
+      <Link
         className="workspace-floating-ai"
-        disabled
-        title="A workspace-wide assistant isn't available yet. Open a tender's AI Chat for grounded, tender-scoped answers."
-        type="button"
+        href={assistantHref(organisationId)}
       >
         <span>
           <Sparkles aria-hidden="true" size={16} />
         </span>
-        Ask about company docs
-      </button>
+        AI Assistant
+      </Link>
     </div>
   );
 }

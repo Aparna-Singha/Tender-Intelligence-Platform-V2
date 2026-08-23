@@ -1604,7 +1604,7 @@ async function uploadTenderDocument(
       method: "POST",
     },
   );
-  await putSignedUpload(session.upload_url, bytes, checksum);
+  await putSignedUpload(session.upload_url, bytes);
   await apiRequestFromPage(
     page,
     `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
@@ -1619,19 +1619,37 @@ async function uploadTenderDocument(
 async function putSignedUpload(
   uploadUrl: string,
   bytes: Uint8Array,
-  checksum?: string,
 ): Promise<void> {
+  const parsedUrl = new URL(uploadUrl);
   const headers: Record<string, string> = {
     "content-length": String(bytes.byteLength),
     "content-type": "application/pdf",
   };
-  if (checksum !== undefined) headers["x-amz-meta-sha256"] = checksum;
   const response = await fetch(uploadUrl, {
     body: Buffer.from(bytes),
     headers,
     method: "PUT",
   });
-  expect(response.ok).toBe(true);
+  if (!response.ok) {
+    const responseBody = (await response.text()).replace(/\s+/g, " ").trim();
+    const signedHeaders =
+      parsedUrl.searchParams.get("X-Amz-SignedHeaders") ??
+      parsedUrl.searchParams.get("x-amz-signedheaders");
+    const hasMetadataQuery =
+      parsedUrl.searchParams.has("x-amz-meta-sha256") ||
+      parsedUrl.searchParams.has("X-Amz-Meta-Sha256");
+    throw new Error(
+      [
+        "Signed upload PUT failed",
+        `status=${response.status}`,
+        `statusText=${response.statusText || "UNKNOWN"}`,
+        `signedHeaders=${signedHeaders ?? "MISSING"}`,
+        `hasMetadataQuery=${hasMetadataQuery}`,
+        "sentMetadataHeader=false",
+        `safeBody=${responseBody === "" ? "EMPTY" : responseBody}`,
+      ].join(" | "),
+    );
+  }
 }
 
 async function waitForRecordStatus(
@@ -2064,39 +2082,85 @@ async function assertWorkspaceStages(
   page: Page,
   data: FixtureData,
 ): Promise<void> {
+  const tenderPath = `/tenders/${data.organisationId}/${data.tenderId}`;
+  const primaryNav = page.getByRole("navigation", {
+    name: "Tender workspace primary",
+  });
+  const utilityNav = page.getByRole("navigation", {
+    name: "Tender workspace utilities",
+  });
+  const expectLegacyCompatibilityNote = async (
+    legacyStage: string,
+    surfaceLabel: string,
+  ) => {
+    await expect(
+      page.getByText(
+        new RegExp(
+          `This saved link used the legacy\\s+${legacyStage}\\s+stage\\. It now opens\\s+${surfaceLabel}`,
+          "iu",
+        ),
+      ),
+    ).toBeVisible();
+  };
+
   await expect(
     page.getByRole("heading", {
-      name: /Phase 13 Controlled Package|Release Golden Tender/u,
+      name: "Review & Export",
     }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Extraction" }).click();
+  await expectLegacyCompatibilityNote("Export", "Review & Export");
+
+  await page.goto(`${tenderPath}?stage=extraction`);
   await expect(page).toHaveURL(/stage=extraction/u);
-  await expect(page.getByRole("heading", { name: "Extraction" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Risks" }).click();
-  await expect(page.getByRole("heading", { name: "Risks" })).toBeVisible();
-
-  await page.getByRole("button", { name: "Evidence" }).click();
+  await expectLegacyCompatibilityNote("Extraction", "Overview");
   await expect(
-    page.getByRole("heading", { name: "Evidence matrix" }),
+    page.getByRole("heading", { name: "Assessment summary" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Checklist" }).click();
+  await page.goto(`${tenderPath}?stage=risks`);
+  await expect(page).toHaveURL(/stage=risks/u);
+  await expectLegacyCompatibilityNote("Risks", "Overview");
   await expect(
-    page.getByRole("heading", { name: "Missing documents and actions" }),
+    page.getByRole("heading", { name: "Assessment summary" }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Ask" }).click();
+  await page.goto(`${tenderPath}?stage=evidence`);
+  await expect(page).toHaveURL(/stage=evidence/u);
+  await expectLegacyCompatibilityNote("Evidence", "Eligibility");
   await expect(
-    page.getByRole("heading", { name: "Cited tender chatbot" }),
+    page.getByRole("heading", { name: "Eligibility" }),
   ).toBeVisible();
   await expect(
-    page.getByText(/Answers are limited to authorised tender and evidence/u),
+    page.locator("summary", { hasText: /Evidence & assessment tools/u }),
   ).toBeVisible();
 
-  await page.getByRole("button", { name: "Draft" }).click();
+  await page.goto(`${tenderPath}?stage=checklist`);
+  await expect(page).toHaveURL(/stage=checklist/u);
+  await expectLegacyCompatibilityNote("Checklist", "Eligibility");
   await expect(
-    page.getByRole("heading", { name: "Version 1 · Approved" }),
+    page.getByRole("heading", { name: "Eligibility" }),
+  ).toBeVisible();
+  await expect(
+    page.locator("summary", { hasText: /Missing documents and actions/u }),
+  ).toBeVisible();
+
+  await primaryNav
+    .getByRole("button", { exact: true, name: "AI Chat" })
+    .click();
+  await expect(page).toHaveURL(/stage=ask/u);
+  await expect(page.getByRole("heading", { name: "AI Chat" })).toBeVisible();
+  await expect(
+    page.getByText(
+      /No legal advice or autonomous bid decisions are made here/u,
+    ),
+  ).toBeVisible();
+
+  await primaryNav.getByRole("button", { exact: true, name: "Draft" }).click();
+  await expect(page).toHaveURL(/stage=draft/u);
+  const draftPanel = page.getByRole("region", { name: "Your proposal draft" });
+  await expect(draftPanel).toBeVisible();
+  await expect(
+    draftPanel.locator("p", { hasText: /Version 1\s+·\s+Approved/u }),
   ).toBeVisible();
   await expect(
     page.getByText(
@@ -2104,17 +2168,41 @@ async function assertWorkspaceStages(
     ),
   ).toBeVisible();
 
-  await page.getByRole("button", { exact: true, name: "Readiness" }).click();
+  await primaryNav
+    .getByRole("button", { exact: true, name: "Eligibility" })
+    .click();
+  await expect(page).toHaveURL(/stage=eligibility/u);
   await expect(
-    page.getByRole("heading", { name: "Final readiness review" }),
+    page.getByRole("heading", { name: "Eligibility" }),
+  ).toBeVisible();
+
+  await utilityNav
+    .getByRole("button", { exact: true, name: "Tender Files" })
+    .click();
+  await expect(page).toHaveURL(/stage=files/u);
+  await expect(
+    page.getByRole("heading", { name: "Tender Files" }),
+  ).toBeVisible();
+
+  await utilityNav
+    .getByRole("button", { exact: true, name: "Activity" })
+    .click();
+  await expect(page).toHaveURL(/stage=activity/u);
+  await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+
+  await page.goto(`${tenderPath}?stage=readiness`);
+  await expect(page).toHaveURL(/stage=readiness/u);
+  await expectLegacyCompatibilityNote("Readiness", "Review & Export");
+  await expect(
+    page.getByRole("heading", { name: "Review & Export" }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Proceed to controlled export review" }),
   ).toBeVisible();
 
-  await page.goto(
-    `/tenders/${data.organisationId}/${data.tenderId}?stage=export`,
-  );
+  await page.goto(`${tenderPath}?stage=export`);
+  await expect(page).toHaveURL(/stage=export/u);
+  await expectLegacyCompatibilityNote("Export", "Review & Export");
 }
 
 async function waitForGeneratedRun(tenderId: string, previousCount: number) {
