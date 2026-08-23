@@ -25,6 +25,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_STORAGE_ORIGIN: http://localhost:9000
     steps:
       - name: Configure Git line endings
         run: git config --global core.autocrlf false
