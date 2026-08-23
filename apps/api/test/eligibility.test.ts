@@ -216,4 +216,113 @@ describe("company evidence source boundary", () => {
       }),
     );
   });
+
+  it("invalidates in-flight eligibility and checklist work when company evidence is accepted", async () => {
+    const eligibilityAssessmentRunUpdateMany = vi
+      .fn()
+      .mockResolvedValue({ count: 1 });
+    const eligibilityAssessmentUpdateMany = vi
+      .fn()
+      .mockResolvedValue({ count: 0 });
+    const checklistGenerationRunUpdateMany = vi
+      .fn()
+      .mockResolvedValue({ count: 0 });
+    const checklistItemUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
+    interface MockCompanyEvidenceTransaction {
+      readonly auditEvent: { readonly create: ReturnType<typeof vi.fn> };
+      readonly companyEvidenceCitation: {
+        readonly updateMany: ReturnType<typeof vi.fn>;
+      };
+      readonly companyEvidenceFact: {
+        readonly update: ReturnType<typeof vi.fn>;
+      };
+      readonly companyEvidenceFactVersion: {
+        readonly update: ReturnType<typeof vi.fn>;
+      };
+      readonly companyEvidenceReview: {
+        readonly aggregate: ReturnType<typeof vi.fn>;
+        readonly create: ReturnType<typeof vi.fn>;
+      };
+    }
+    const transaction: MockCompanyEvidenceTransaction = {
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      companyEvidenceCitation: { updateMany: vi.fn().mockResolvedValue({}) },
+      companyEvidenceFact: { update: vi.fn().mockResolvedValue(undefined) },
+      companyEvidenceFactVersion: {
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+      companyEvidenceReview: {
+        aggregate: vi.fn().mockResolvedValue({ _max: { reviewVersion: 1 } }),
+        create: vi.fn().mockResolvedValue({ id: "review-a" }),
+      },
+    };
+    type MockTransactionInput =
+      | ((transaction: MockCompanyEvidenceTransaction) => Promise<unknown>)
+      | readonly Promise<unknown>[];
+    const database = {
+      $transaction: vi.fn((input: MockTransactionInput) => {
+        if (typeof input === "function") {
+          return input(transaction);
+        }
+        return Promise.all(input);
+      }),
+      checklistGenerationRun: { updateMany: checklistGenerationRunUpdateMany },
+      checklistItem: { updateMany: checklistItemUpdateMany },
+      companyEvidenceFact: {
+        findFirst: vi.fn().mockResolvedValue({
+          currentVersion: {
+            citations: [{ id: "citation-a" }],
+            id: "fact-version-a",
+            reviewState: "PENDING",
+          },
+          id: "fact-a",
+        }),
+      },
+      eligibilityAssessment: { updateMany: eligibilityAssessmentUpdateMany },
+      eligibilityAssessmentRun: {
+        updateMany: eligibilityAssessmentRunUpdateMany,
+      },
+    };
+    const service = new EligibilityService(database as never, {} as never);
+
+    await expect(
+      service.reviewFact(
+        "organisation-a",
+        "fact-a",
+        {
+          action: "ACCEPT",
+          rationale: "Accepted company evidence with current citation.",
+        },
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual({ id: "review-a" });
+
+    expect(eligibilityAssessmentRunUpdateMany).toHaveBeenCalledWith({
+      data: {
+        currentStage: "INVALIDATED",
+        invalidatedAt: expect.any(Date),
+        publicMessage: "Authoritative company evidence changed",
+        status: "INVALIDATED",
+      },
+      where: {
+        organisationId: "organisation-a",
+        status: { notIn: ["FAILED", "CANCELLED", "INVALIDATED"] },
+      },
+    });
+    expect(checklistGenerationRunUpdateMany).toHaveBeenCalledWith({
+      data: {
+        activatedAt: null,
+        currentStage: "INVALIDATED",
+        invalidatedAt: expect.any(Date),
+        publicMessage: "Authoritative company evidence changed",
+        status: "INVALIDATED",
+      },
+      where: { invalidatedAt: null, organisationId: "organisation-a" },
+    });
+    expect(checklistItemUpdateMany).toHaveBeenCalledWith({
+      data: { invalidatedAt: expect.any(Date), status: "INVALIDATED" },
+      where: { invalidatedAt: null, organisationId: "organisation-a" },
+    });
+  });
 });

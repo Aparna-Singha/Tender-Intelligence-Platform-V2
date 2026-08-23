@@ -1,5 +1,11 @@
 import type { PrismaClient } from "@tender/database";
-import { CHECKLIST_POLICY_VERSION, proposeChecklistItem } from "@tender/domain";
+import {
+  CHECKLIST_DATE_POLICY_VERSION,
+  CHECKLIST_DEDUPLICATION_POLICY_VERSION,
+  CHECKLIST_POLICY_VERSION,
+  CHECKLIST_PRIORITY_POLICY_VERSION,
+  proposeChecklistItem,
+} from "@tender/domain";
 import { createHash } from "node:crypto";
 
 export interface ChecklistGenerationJob {
@@ -81,6 +87,7 @@ export class ChecklistGenerationProcessor {
             evidenceFactVersion: true,
           },
         },
+        reviews: { select: { id: true } },
         structuredRequirement: true,
         tenderCitation: true,
       },
@@ -171,7 +178,7 @@ export class ChecklistGenerationProcessor {
     await this.checkpoint(run.id, signal, "DEDUPLICATING", 70);
     await this.checkpoint(run.id, signal, "VALIDATING", 85);
 
-    await this.database.$transaction(async (transaction) => {
+    const outcome = await this.database.$transaction(async (transaction) => {
       const fresh = await transaction.checklistGenerationRun.findFirst({
         where: {
           cancellationRequestedAt: null,
@@ -181,6 +188,61 @@ export class ChecklistGenerationProcessor {
         },
       });
       if (fresh === null) throw new Error("CHECKLIST_CANCELLED_OR_INVALIDATED");
+      const authority = await transaction.tenderVersion.findFirst({
+        include: {
+          activeEligibilityAssessmentRun: {
+            include: {
+              assessments: {
+                include: {
+                  evidenceLinks: { select: { id: true } },
+                  reviews: { select: { id: true } },
+                },
+                orderBy: { id: "asc" },
+              },
+            },
+          },
+        },
+        where: {
+          id: run.tenderVersionId,
+          tender: {
+            currentVersionId: run.tenderVersionId,
+            id: run.tenderId,
+            organisationId: run.organisationId,
+          },
+        },
+      });
+      const authoritativeAssessmentRun =
+        authority?.activeEligibilityAssessmentRun;
+      const authoritativeFingerprint =
+        authoritativeAssessmentRun?.status === "COMPLETE" &&
+        authoritativeAssessmentRun.invalidatedAt === null
+          ? createChecklistSourceFingerprint({
+              assessmentRunId: authoritativeAssessmentRun.id,
+              assessmentSourceFingerprint:
+                authoritativeAssessmentRun.sourceFingerprint,
+              assessments: authoritativeAssessmentRun.assessments.map(
+                (assessment) => ({
+                  currentState: assessment.currentState,
+                  evidenceLinkIds: assessment.evidenceLinks.map(
+                    (link) => link.id,
+                  ),
+                  id: assessment.id,
+                  reviewIds: assessment.reviews.map((review) => review.id),
+                  reviewState: assessment.reviewState,
+                  updatedAt: assessment.updatedAt,
+                }),
+              ),
+              evidenceSnapshotId: authoritativeAssessmentRun.snapshotId,
+            })
+          : null;
+      if (
+        authoritativeAssessmentRun?.id !== run.assessmentRunId ||
+        authoritativeAssessmentRun.snapshotId !== run.evidenceSnapshotId ||
+        authoritativeFingerprint !== run.sourceFingerprint
+      ) {
+        await invalidateStaleRun(transaction, run.id, run.organisationId);
+        return "INVALIDATED";
+      }
       await transaction.checklistItem.deleteMany({
         where: { generationRunId: run.id },
       });
@@ -297,7 +359,9 @@ export class ChecklistGenerationProcessor {
           subjectType: "checklist_generation_run",
         },
       });
+      return "COMPLETE";
     });
+    if (outcome === "INVALIDATED") return;
   }
 
   public async fail(runId: string, category: string): Promise<void> {
@@ -383,6 +447,80 @@ export class ChecklistGenerationProcessor {
       where: { id: runId, invalidatedAt: null },
     });
   }
+}
+
+async function invalidateStaleRun(
+  transaction: Pick<PrismaClient, "checklistGenerationRun" | "checklistItem">,
+  runId: string,
+  organisationId: string,
+): Promise<void> {
+  const invalidatedAt = new Date();
+  await transaction.checklistGenerationRun.updateMany({
+    data: {
+      activatedAt: null,
+      currentStage: "INVALIDATED",
+      invalidatedAt,
+      publicMessage: "Authoritative Phase 7 inputs changed",
+      status: "INVALIDATED",
+    },
+    where: {
+      id: runId,
+      invalidatedAt: null,
+      organisationId,
+      status: {
+        in: [
+          "QUEUED",
+          "LOADING_ASSESSMENTS",
+          "GENERATING",
+          "DEDUPLICATING",
+          "VALIDATING",
+          "COMPLETE",
+        ],
+      },
+    },
+  });
+  await transaction.checklistItem.updateMany({
+    data: { invalidatedAt, status: "INVALIDATED" },
+    where: { generationRunId: runId, invalidatedAt: null },
+  });
+}
+
+function createChecklistSourceFingerprint(input: {
+  readonly assessmentRunId: string;
+  readonly assessmentSourceFingerprint: string;
+  readonly assessments: readonly {
+    readonly currentState: string;
+    readonly evidenceLinkIds: readonly string[];
+    readonly id: string;
+    readonly reviewIds: readonly string[];
+    readonly reviewState: string;
+    readonly updatedAt: Date;
+  }[];
+  readonly evidenceSnapshotId: string;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        assessmentRunId: input.assessmentRunId,
+        assessmentSourceFingerprint: input.assessmentSourceFingerprint,
+        assessments: input.assessments.map((assessment) => [
+          assessment.id,
+          assessment.currentState,
+          assessment.reviewState,
+          assessment.updatedAt.toISOString(),
+          [...assessment.evidenceLinkIds].sort(),
+          [...assessment.reviewIds].sort(),
+        ]),
+        evidenceSnapshotId: input.evidenceSnapshotId,
+        policies: [
+          CHECKLIST_POLICY_VERSION,
+          CHECKLIST_PRIORITY_POLICY_VERSION,
+          CHECKLIST_DATE_POLICY_VERSION,
+          CHECKLIST_DEDUPLICATION_POLICY_VERSION,
+        ],
+      }),
+    )
+    .digest("hex");
 }
 
 function sourcePairs(assessment: {

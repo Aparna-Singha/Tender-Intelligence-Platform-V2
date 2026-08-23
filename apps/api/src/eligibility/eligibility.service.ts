@@ -1057,7 +1057,10 @@ export class EligibilityService {
           publicMessage: "Authoritative company evidence changed",
           status: "INVALIDATED",
         },
-        where: { organisationId, status: "COMPLETE" },
+        where: {
+          organisationId,
+          status: { notIn: ["FAILED", "CANCELLED", "INVALIDATED"] },
+        },
       }),
       this.database.eligibilityAssessment.updateMany({
         data: { invalidatedAt: now },

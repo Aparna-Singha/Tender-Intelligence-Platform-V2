@@ -121,29 +121,19 @@ export class ChecklistsService {
         "A current completed Phase 7 assessment and evidence snapshot are required",
       );
 
-    const fingerprint = createHash("sha256")
-      .update(
-        JSON.stringify({
-          assessmentRunId: assessment.id,
-          evidenceSnapshotId: assessment.snapshotId,
-          assessmentSourceFingerprint: assessment.sourceFingerprint,
-          assessments: assessment.assessments.map((item) => [
-            item.id,
-            item.currentState,
-            item.reviewState,
-            item.updatedAt.toISOString(),
-            item.evidenceLinks.map((link) => link.id).sort(),
-            item.reviews.map((review) => review.id).sort(),
-          ]),
-          policies: [
-            CHECKLIST_POLICY_VERSION,
-            CHECKLIST_PRIORITY_POLICY_VERSION,
-            CHECKLIST_DATE_POLICY_VERSION,
-            CHECKLIST_DEDUPLICATION_POLICY_VERSION,
-          ],
-        }),
-      )
-      .digest("hex");
+    const fingerprint = createChecklistSourceFingerprint({
+      assessmentRunId: assessment.id,
+      assessmentSourceFingerprint: assessment.sourceFingerprint,
+      assessments: assessment.assessments.map((item) => ({
+        currentState: item.currentState,
+        evidenceLinkIds: item.evidenceLinks.map((link) => link.id),
+        id: item.id,
+        reviewIds: item.reviews.map((review) => review.id),
+        reviewState: item.reviewState,
+        updatedAt: item.updatedAt,
+      })),
+      evidenceSnapshotId: assessment.snapshotId,
+    });
     const idempotencyKey =
       triggerType === "RETRY"
         ? `${organisationId}:${clientKey}:${fingerprint}`
@@ -649,6 +639,44 @@ export class ChecklistsService {
     }
     return { status: "CONNECTION_CLOSED" };
   }
+}
+
+function createChecklistSourceFingerprint(input: {
+  readonly assessmentRunId: string;
+  readonly assessmentSourceFingerprint: string;
+  readonly assessments: readonly {
+    readonly currentState: string;
+    readonly evidenceLinkIds: readonly string[];
+    readonly id: string;
+    readonly reviewIds: readonly string[];
+    readonly reviewState: string;
+    readonly updatedAt: Date;
+  }[];
+  readonly evidenceSnapshotId: string;
+}): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        assessmentRunId: input.assessmentRunId,
+        assessmentSourceFingerprint: input.assessmentSourceFingerprint,
+        assessments: input.assessments.map((assessment) => [
+          assessment.id,
+          assessment.currentState,
+          assessment.reviewState,
+          assessment.updatedAt.toISOString(),
+          [...assessment.evidenceLinkIds].sort(),
+          [...assessment.reviewIds].sort(),
+        ]),
+        evidenceSnapshotId: input.evidenceSnapshotId,
+        policies: [
+          CHECKLIST_POLICY_VERSION,
+          CHECKLIST_PRIORITY_POLICY_VERSION,
+          CHECKLIST_DATE_POLICY_VERSION,
+          CHECKLIST_DEDUPLICATION_POLICY_VERSION,
+        ],
+      }),
+    )
+    .digest("hex");
 }
 
 function historyAction(

@@ -2032,16 +2032,48 @@ async function assertGoldenWorkflowState(data: FixtureData): Promise<void> {
     )
     .toBeGreaterThan(0);
   await expect
-    .poll(async () =>
-      prisma.checklistGenerationRun.count({
+    .poll(async () => {
+      const currentVersion = await prisma.tenderVersion.findUnique({
+        select: { activeEligibilityAssessmentRunId: true },
+        where: { id: tender.currentVersionId ?? "" },
+      });
+      const runs = await prisma.checklistGenerationRun.findMany({
+        orderBy: { createdAt: "asc" },
+        select: {
+          activatedAt: true,
+          assessmentRunId: true,
+          id: true,
+          invalidatedAt: true,
+          status: true,
+        },
         where: {
           organisationId: data.organisationId,
-          status: "COMPLETE",
           tenderId: data.tenderId,
         },
-      }),
-    )
-    .toBe(1);
+      });
+      const authoritative = runs.filter(
+        (run) =>
+          run.status === "COMPLETE" &&
+          run.invalidatedAt === null &&
+          run.activatedAt !== null,
+      );
+      const staleAuthoritative = authoritative.filter(
+        (run) =>
+          run.assessmentRunId !==
+          currentVersion?.activeEligibilityAssessmentRunId,
+      );
+      return {
+        authoritativeAssessmentRunId: authoritative[0]?.assessmentRunId ?? null,
+        authoritativeCount: authoritative.length,
+        staleAuthoritativeCount: staleAuthoritative.length,
+      };
+    })
+    .toMatchObject({
+      authoritativeAssessmentRunId:
+        tender.currentVersion?.activeEligibilityAssessmentRunId ?? null,
+      authoritativeCount: 1,
+      staleAuthoritativeCount: 0,
+    });
   await expect
     .poll(async () =>
       prisma.ragIndexRun.count({

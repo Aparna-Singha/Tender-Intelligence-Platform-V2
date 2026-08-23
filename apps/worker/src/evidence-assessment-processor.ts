@@ -166,6 +166,7 @@ export class EvidenceAssessmentProcessor {
       "Validating evidence links and citations",
     );
     await this.database.$transaction(async (transaction) => {
+      const downstreamInvalidatedAt = new Date();
       await transaction.eligibilityAssessment.deleteMany({
         where: { assessmentRunId: run.id },
       });
@@ -239,6 +240,37 @@ export class EvidenceAssessmentProcessor {
       await transaction.tenderVersion.update({
         data: { activeEligibilityAssessmentRunId: run.id },
         where: { id: run.tenderVersionId },
+      });
+      await transaction.checklistGenerationRun.updateMany({
+        data: {
+          activatedAt: null,
+          currentStage: "INVALIDATED",
+          invalidatedAt: downstreamInvalidatedAt,
+          publicMessage: "A newer Phase 7 assessment became current",
+          status: "INVALIDATED",
+        },
+        where: {
+          assessmentRunId: { not: run.id },
+          invalidatedAt: null,
+          organisationId: run.organisationId,
+          tenderId: run.tenderId,
+          tenderVersionId: run.tenderVersionId,
+        },
+      });
+      await transaction.checklistItem.updateMany({
+        data: {
+          invalidatedAt: downstreamInvalidatedAt,
+          status: "INVALIDATED",
+        },
+        where: {
+          generationRun: {
+            assessmentRunId: { not: run.id },
+            organisationId: run.organisationId,
+            tenderId: run.tenderId,
+            tenderVersionId: run.tenderVersionId,
+          },
+          invalidatedAt: null,
+        },
       });
       await transaction.auditEvent.create({
         data: {
