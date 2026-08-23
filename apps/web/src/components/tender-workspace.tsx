@@ -25,6 +25,7 @@ import {
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
+import { assistantHref } from "../lib/assistant";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
 import { ActionChecklist } from "./action-checklist";
 import { ControlledReviewPackageWorkspace } from "./controlled-review-package-workspace";
@@ -700,6 +701,7 @@ function bestAssessmentLabel(matrix: MatrixResult | null): {
 function deriveAssessmentLabel(input: {
   readonly assessmentRun: AssessmentRun | null;
   readonly currentDecision: EarlyDecision | null;
+  readonly hasExtractedContent: boolean;
   readonly extractionRun: ExtractionRun | null;
   readonly hasReadySource: boolean;
   readonly matrix: MatrixResult | null;
@@ -719,15 +721,18 @@ function deriveAssessmentLabel(input: {
       tone: "neutral",
     };
   }
-  if (input.extractionRun === null) {
+  if (input.extractionRun === null && !input.hasExtractedContent) {
     return {
       detail:
-        "The current tender source is ready, but extraction has not started yet. Automatic progression will retry from the authoritative source state.",
+        "The current tender source is ready, but extraction has not started yet for the current version.",
       label: "Extraction not started",
       tone: "warning",
     };
   }
-  if (input.extractionRun?.status !== "COMPLETE") {
+  if (
+    input.extractionRun !== null &&
+    input.extractionRun.status !== "COMPLETE"
+  ) {
     return {
       detail:
         "The platform is extracting tender requirements and key fields from the current authorised source set.",
@@ -747,7 +752,7 @@ function deriveAssessmentLabel(input: {
   if (input.riskRun === null) {
     return {
       detail:
-        "Tender extraction is complete, but early risk analysis has not started yet. Automatic progression will retry from the authoritative current version.",
+        "Tender extraction is complete, but early risk analysis has not started yet for the current tender version.",
       label: "Risk analysis not started",
       tone: "warning",
     };
@@ -787,7 +792,7 @@ function deriveAssessmentLabel(input: {
   ) {
     return {
       detail:
-        "A current authorised CONTINUE decision exists, but eligibility comparison has not started yet. Automatic progression will retry from the authoritative current version.",
+        "A current authorised CONTINUE decision exists, but eligibility comparison has not started yet for the current tender version.",
       label: "Eligibility not started",
       tone: "warning",
     };
@@ -798,6 +803,29 @@ function deriveAssessmentLabel(input: {
     label: "Awaiting pursue decision",
     tone: "warning",
   };
+}
+
+function hasCurrentExtractedContent(
+  support: Pick<
+    SupportData,
+    | "assessmentRun"
+    | "extractionFields"
+    | "extractionIssues"
+    | "extractionRequirements"
+    | "extractionRun"
+    | "matrix"
+    | "riskRun"
+  >,
+): boolean {
+  return (
+    support.extractionRun?.status === "COMPLETE" ||
+    support.extractionFields.length > 0 ||
+    support.extractionIssues.length > 0 ||
+    support.extractionRequirements.length > 0 ||
+    support.riskRun !== null ||
+    support.assessmentRun !== null ||
+    support.matrix !== null
+  );
 }
 
 function preferredReadableText(value: string): string {
@@ -907,11 +935,11 @@ function toExtractedRequirement(
     phase === "ASSESSING"
       ? "Wait for evidence comparison to finish. The detail panel will update automatically."
       : phase === "ASSESSMENT_NOT_STARTED"
-        ? "Automatic progression has not started eligibility comparison yet. The current CONTINUE decision remains authoritative."
+        ? "An authorised CONTINUE decision exists, but eligibility comparison has not started yet for the current tender version."
         : phase === "RISK_FAILED"
           ? "Retry the failed early risk analysis before eligibility comparison can continue."
           : phase === "RISK_NOT_STARTED"
-            ? "Automatic progression has not started early risk analysis yet for the current extraction."
+            ? "The current extraction is complete, but early risk analysis has not started yet for this tender version."
             : phase === "AWAITING_DECISION"
               ? "Review the extracted tender requirements and record an authorised CONTINUE decision to start eligibility comparison."
               : phase === "RISK"
@@ -1386,11 +1414,17 @@ export function TenderWorkspace({
     if (workspace === null) return;
     const form = event.currentTarget;
     const values = new FormData(form);
-    const files = values
+    const submittedFiles = values
       .getAll("file")
       .filter(
         (value): value is File => value instanceof File && value.size > 0,
       );
+    const fileField = form.elements.namedItem("file");
+    const selectedFiles =
+      fileField instanceof HTMLInputElement
+        ? Array.from(fileField.files ?? []).filter((file) => file.size > 0)
+        : [];
+    const files = submittedFiles.length > 0 ? submittedFiles : selectedFiles;
     const role = values.get("role");
     const version = workspace.versions[0];
     if (files.length === 0 || version === undefined || typeof role !== "string")
@@ -1405,7 +1439,9 @@ export function TenderWorkspace({
     setMessage("Preparing secure direct upload...");
     try {
       for (const [index, file] of files.entries()) {
-        setMessage(`Uploading source ${index + 1} of ${files.length}...`);
+        setMessage(
+          `Calculating checksum for source ${index + 1} of ${files.length}...`,
+        );
         const checksum = await sha256(file);
         let targetVersionId = version.id;
         if (role === "CORRIGENDUM") {
@@ -1450,13 +1486,27 @@ export function TenderWorkspace({
         // "headers present which were not signed" (400) because the
         // duplicate header is outside SignedHeaders.
         try {
+          setMessage(
+            `Uploading source ${index + 1} of ${files.length} to private storage...`,
+          );
           await uploadFileToSignedStorageUrl(session.upload_url, file);
         } catch {
+          try {
+            await apiRequest(
+              `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}`,
+              { method: "DELETE" },
+            );
+          } catch {
+            // Preserve the original direct-upload failure.
+          }
           throw new Error(
             `The direct upload of "${file.name}" was rejected before it reached secure storage.`,
           );
         }
         try {
+          setMessage(
+            `Verifying source ${index + 1} of ${files.length} and starting security processing...`,
+          );
           await apiRequest(
             `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
             {
@@ -1607,9 +1657,11 @@ export function TenderWorkspace({
   const hasReadySource =
     currentVersion?.documents.some((document) => document.status === "READY") ??
     false;
+  const extractedContentAvailable = hasCurrentExtractedContent(support);
   const assessmentSummary = deriveAssessmentLabel({
     assessmentRun: support.assessmentRun,
     currentDecision: support.currentDecision,
+    hasExtractedContent: extractedContentAvailable,
     extractionRun: support.extractionRun,
     hasReadySource,
     matrix: support.matrix,
@@ -1631,15 +1683,17 @@ export function TenderWorkspace({
         ? "ASSESSING"
         : support.riskRun?.status === "FAILED"
           ? "RISK_FAILED"
-          : support.riskRun === null
+          : support.riskRun === null && extractedContentAvailable
             ? "RISK_NOT_STARTED"
-            : support.riskRun.status !== "COMPLETE"
-              ? "RISK"
-              : support.currentDecision?.decision !== "CONTINUE"
-                ? "AWAITING_DECISION"
-                : support.assessmentRun === null
-                  ? "ASSESSMENT_NOT_STARTED"
-                  : "ASSESSING";
+            : support.riskRun === null
+              ? "EXTRACTING"
+              : support.riskRun.status !== "COMPLETE"
+                ? "RISK"
+                : support.currentDecision?.decision !== "CONTINUE"
+                  ? "AWAITING_DECISION"
+                  : support.assessmentRun === null
+                    ? "ASSESSMENT_NOT_STARTED"
+                    : "ASSESSING";
     return support.extractionRequirements.map((item) =>
       toExtractedRequirement(item, phase),
     );
@@ -1756,9 +1810,9 @@ export function TenderWorkspace({
           "Add the primary tender source before downstream review can continue.",
         surface: "files" as TenderSurface,
       };
-    if (support.extractionRun?.status !== "COMPLETE")
+    if (!extractedContentAvailable)
       return {
-        cta: "View tender analysis",
+        cta: "View source processing",
         description:
           "The platform is still extracting the current tender source and will keep progressing automatically.",
         surface: "overview" as TenderSurface,
@@ -1773,10 +1827,12 @@ export function TenderWorkspace({
       };
     if (support.riskRun?.status !== "COMPLETE")
       return {
-        cta: "View tender analysis",
+        cta: "View extracted requirements",
         description:
-          "Extraction is complete and early risk analysis is still running for the current tender version.",
-        surface: "overview" as TenderSurface,
+          support.riskRun === null
+            ? "Extraction is complete. Review the extracted requirements while early risk analysis waits to start."
+            : "Extraction is complete and early risk analysis is still running for the current tender version.",
+        surface: "eligibility" as TenderSurface,
       };
     if (support.currentDecision?.decision !== "CONTINUE")
       return {
@@ -1787,9 +1843,9 @@ export function TenderWorkspace({
       };
     if (support.assessmentRun === null)
       return {
-        cta: "Review tender analysis",
+        cta: "View extracted requirements",
         description:
-          "Real tender requirements are ready. Eligibility comparison will start automatically after an authorised CONTINUE decision.",
+          "Real tender requirements are ready. Eligibility comparison has not started yet for the current CONTINUE decision.",
         surface: "eligibility" as TenderSurface,
       };
     if (
@@ -1840,17 +1896,35 @@ export function TenderWorkspace({
     currentVersion?.documents.filter((document) =>
       filesFilter === "ALL" ? true : document.role === "CORRIGENDUM",
     ) ?? [];
-  const workflowSummary = workspace?.workflowState ?? {
-    actionLabel: "Open",
-    detail: assessmentSummary.detail,
-    isCompleted: false,
-    isDraft: false,
-    isInProgress: false,
-    needsAttention: false,
-    onHold: false,
-    statusLabel: assessmentSummary.label,
-    tone: assessmentSummary.tone,
-  };
+  const workflowSummary =
+    extractedContentAvailable ||
+    support.riskRun !== null ||
+    support.assessmentRun !== null ||
+    support.matrix !== null
+      ? {
+          actionLabel: "Open",
+          code: "ANALYSIS_READY" as const,
+          detail: assessmentSummary.detail,
+          isCompleted: false,
+          isDraft: false,
+          isInProgress: false,
+          needsAttention: false,
+          onHold: false,
+          statusLabel: assessmentSummary.label,
+          tone: assessmentSummary.tone,
+        }
+      : (workspace?.workflowState ?? {
+          actionLabel: "Open",
+          code: "ANALYSIS_READY" as const,
+          detail: assessmentSummary.detail,
+          isCompleted: false,
+          isDraft: false,
+          isInProgress: false,
+          needsAttention: false,
+          onHold: false,
+          statusLabel: assessmentSummary.label,
+          tone: assessmentSummary.tone,
+        });
   const draftBlockedReason = !hasReadySource
     ? "Upload a current primary tender source before drafting can start."
     : support.extractionRun?.status !== "COMPLETE"
@@ -1866,20 +1940,7 @@ export function TenderWorkspace({
               ? "Drafting is blocked until eligibility comparison finishes for the current tender version."
               : null;
 
-  const contextualAiLabel =
-    activeSurface === "eligibility"
-      ? "Ask about this requirement"
-      : activeSurface === "draft"
-        ? "Ask about this section"
-        : activeSurface === "files"
-          ? "Ask about tender files"
-          : activeSurface === "activity"
-            ? "Ask what changed"
-            : activeSurface === "review"
-              ? "Ask about readiness"
-              : "Ask about this tender";
-
-  const askHref = `/tenders/${organisationId}/${tenderId}?stage=ask`;
+  const askHref = assistantHref(organisationId);
 
   if (workspace === null) {
     return (
@@ -2124,7 +2185,9 @@ export function TenderWorkspace({
                   <div className="tender-stat">
                     <strong>
                       {support.extractionRun === null
-                        ? "Queued automatically"
+                        ? extractedContentAvailable
+                          ? "Complete"
+                          : "Queued automatically"
                         : humanizeEnum(support.extractionRun.status)}
                     </strong>
                     <span>Extraction</span>
@@ -2132,7 +2195,9 @@ export function TenderWorkspace({
                   <div className="tender-stat">
                     <strong>
                       {support.riskRun === null
-                        ? "Waiting on extraction"
+                        ? extractedContentAvailable
+                          ? "Not started"
+                          : "Waiting on extraction"
                         : humanizeEnum(support.riskRun.status)}
                     </strong>
                     <span>Early risk</span>
@@ -3277,7 +3342,7 @@ export function TenderWorkspace({
 
       <Link className="workspace-floating-ai" href={askHref}>
         <span aria-hidden="true">AI</span>
-        {contextualAiLabel}
+        AI Assistant
       </Link>
     </div>
   );

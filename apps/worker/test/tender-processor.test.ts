@@ -121,6 +121,8 @@ describe("tender worker authority guard", () => {
       organisationId: "organisation-a",
       requestId: "request-a",
       tenderId: "tender-a",
+      triggerId: "version-current",
+      triggerType: "SOURCE_READY",
       userId: "user-a",
     });
     expect(database.tender.update).toHaveBeenCalledWith({

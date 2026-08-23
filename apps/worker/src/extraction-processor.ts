@@ -143,6 +143,8 @@ export class ExtractionProcessor {
         organisationId: data.organisationId,
         requestId: data.requestId,
         tenderId: run.tenderId,
+        triggerId: run.id,
+        triggerType: "EXTRACTION_COMPLETE",
         userId: run.requestedByUserId,
       };
     } catch (error: unknown) {

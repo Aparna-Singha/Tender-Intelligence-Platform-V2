@@ -82,6 +82,94 @@ describe("Phase 8 prerequisite and tenant boundary", () => {
     },
   );
 
+  it("reuses an existing current checklist run when the authoritative fingerprint matches across different client keys", async () => {
+    const existingRun = {
+      id: "checklist-run-existing",
+      idempotencyKey:
+        "organisation-a:current:9a9e9d2abf4c1f1bbf711a1d7df36658b2a24766fd7a8cd1e6487c0fb46f8f43",
+      sourceFingerprint:
+        "9a9e9d2abf4c1f1bbf711a1d7df36658b2a24766fd7a8cd1e6487c0fb46f8f43",
+      status: "COMPLETE",
+    };
+    const database = {
+      checklistGenerationRun: {
+        findFirst: vi.fn().mockResolvedValue(existingRun),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      earlyPursuitDecision: {
+        findFirst: vi.fn().mockResolvedValue({
+          decision: "CONTINUE",
+          id: "decision-a",
+        }),
+      },
+      tenderVersion: {
+        findFirst: vi.fn().mockResolvedValue({
+          activeEarlyRiskRun: {
+            extractionRunId: "extraction",
+            id: "risk",
+            invalidatedAt: null,
+            status: "COMPLETE",
+          },
+          activeEligibilityAssessmentRun: {
+            assessments: [
+              {
+                currentState: "VERIFIED",
+                evidenceLinks: [{ id: "link-a" }],
+                id: "assessment-a",
+                reviewState: "FINALISED",
+                reviews: [{ id: "review-a" }],
+                updatedAt: new Date("2026-08-22T12:00:00.000Z"),
+              },
+            ],
+            extractionRunId: "extraction",
+            id: "eligibility-a",
+            invalidatedAt: null,
+            pursuitDecisionId: "decision-a",
+            riskAnalysisRunId: "risk",
+            snapshot: {
+              fingerprint: "assessment-fingerprint-a",
+            },
+            snapshotId: "snapshot-a",
+            sourceFingerprint: "assessment-fingerprint-a",
+            status: "COMPLETE",
+          },
+          activeExtractionRun: {
+            id: "extraction",
+            invalidatedAt: null,
+            status: "COMPLETE",
+          },
+        }),
+      },
+      $transaction: vi.fn(),
+    };
+    const jobs = { add: vi.fn() };
+    const service = new ChecklistsService(database as never, jobs as never);
+
+    await expect(
+      service.start(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "user-a",
+        "manual-checklist-run",
+        "request-a",
+      ),
+    ).resolves.toBe(existingRun);
+
+    expect(database.checklistGenerationRun.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          invalidatedAt: null,
+          organisationId: "organisation-a",
+          tenderId: "tender-a",
+          tenderVersionId: "version-a",
+        }),
+      }),
+    );
+    expect(jobs.add).not.toHaveBeenCalled();
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
+
   it("rejects assignment to a user outside the organisation", async () => {
     const database = {
       checklistItem: {

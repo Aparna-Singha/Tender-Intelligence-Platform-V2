@@ -16,6 +16,13 @@ export interface DocumentJob {
   readonly requestId: string;
 }
 
+export interface CompanyUploadCleanupJob {
+  readonly documentVersionId: string;
+  readonly keys: readonly string[];
+  readonly organisationId: string;
+  readonly requestId: string;
+}
+
 export class DocumentProcessor {
   public constructor(
     private readonly database: PrismaClient,
@@ -173,6 +180,21 @@ export class DocumentProcessor {
     }
   }
 
+  public async cleanupUploadObjects(keys: readonly string[]): Promise<void> {
+    for (const key of keys) {
+      try {
+        await this.storage.send(
+          new DeleteObjectCommand({
+            Bucket: this.bucket,
+            Key: key,
+          }),
+        );
+      } catch (error: unknown) {
+        if (!isMissingObjectError(error)) throw error;
+      }
+    }
+  }
+
   private async reject(
     documentId: string,
     versionId: string,
@@ -287,4 +309,23 @@ export class DocumentProcessor {
       }),
     ]);
   }
+}
+
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as {
+    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
+    readonly code?: string;
+    readonly name?: string;
+  };
+  return (
+    candidate.name === "NoSuchKey" ||
+    candidate.name === "NotFound" ||
+    candidate.code === "NoSuchKey" ||
+    candidate.code === "NotFound" ||
+    candidate.Code === "NoSuchKey" ||
+    candidate.Code === "NotFound" ||
+    candidate.$metadata?.httpStatusCode === 404
+  );
 }

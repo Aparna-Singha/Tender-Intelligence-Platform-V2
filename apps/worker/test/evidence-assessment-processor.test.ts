@@ -25,6 +25,10 @@ describe("evidence assessment queue boundary", () => {
 
 describe("evidence assessment progression safety", () => {
   it("returns a progression trigger when the current eligibility assessment completes", async () => {
+    const checklistGenerationRunUpdateMany = vi.fn().mockResolvedValue({
+      count: 0,
+    });
+    const checklistItemUpdateMany = vi.fn().mockResolvedValue({ count: 0 });
     const database = {
       $transaction: vi.fn(
         (
@@ -32,6 +36,10 @@ describe("evidence assessment progression safety", () => {
         ) =>
           callback({
             auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+            checklistGenerationRun: {
+              updateMany: checklistGenerationRunUpdateMany,
+            },
+            checklistItem: { updateMany: checklistItemUpdateMany },
             eligibilityAssessment: {
               createMany: vi.fn().mockResolvedValue(undefined),
               deleteMany: vi.fn().mockResolvedValue(undefined),
@@ -110,7 +118,40 @@ describe("evidence assessment progression safety", () => {
       organisationId: "organisation-a",
       requestId: "request-a",
       tenderId: "tender-a",
+      triggerId: "assessment-a",
+      triggerType: "ELIGIBILITY_COMPLETE",
       userId: "user-a",
+    });
+    expect(checklistGenerationRunUpdateMany).toHaveBeenCalledWith({
+      data: {
+        activatedAt: null,
+        currentStage: "INVALIDATED",
+        invalidatedAt: expect.any(Date),
+        publicMessage: "A newer Phase 7 assessment became current",
+        status: "INVALIDATED",
+      },
+      where: {
+        assessmentRunId: { not: "assessment-a" },
+        invalidatedAt: null,
+        organisationId: "organisation-a",
+        tenderId: "tender-a",
+        tenderVersionId: "version-a",
+      },
+    });
+    expect(checklistItemUpdateMany).toHaveBeenCalledWith({
+      data: {
+        invalidatedAt: expect.any(Date),
+        status: "INVALIDATED",
+      },
+      where: {
+        generationRun: {
+          assessmentRunId: { not: "assessment-a" },
+          organisationId: "organisation-a",
+          tenderId: "tender-a",
+          tenderVersionId: "version-a",
+        },
+        invalidatedAt: null,
+      },
     });
   });
 

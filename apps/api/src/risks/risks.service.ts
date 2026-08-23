@@ -432,12 +432,14 @@ export class RisksService {
       return decision;
     });
     if (decision.decision === "CONTINUE") {
-      await this.workflowProgression.schedule(
+      await this.workflowProgression.schedule({
         organisationId,
-        tenderId,
-        userId,
         requestId,
-      );
+        tenderId,
+        triggerId: decision.id,
+        triggerType: "CONTINUE_DECISION",
+        userId,
+      });
     }
     return decision;
   }

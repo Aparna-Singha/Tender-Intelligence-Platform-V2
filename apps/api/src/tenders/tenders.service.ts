@@ -780,7 +780,8 @@ export class TendersService {
     if (resolvedDocument === null) throw new NotFoundException();
     if (
       resolvedDocument.status === "UPLOADING" &&
-      resolvedDocument.uploadSessionExpiresAt <= new Date()
+      (resolvedDocument.uploadSessionExpiresAt <= new Date() ||
+        resolvedDocument.uploadedByUserId === userId)
     ) {
       await this.database.$transaction([
         this.database.tenderDocument.delete({ where: { id: documentId } }),
@@ -795,6 +796,8 @@ export class TendersService {
             subjectType: "tender",
             metadata: {
               document_id: resolvedDocument.id,
+              pre_completion_cleanup:
+                resolvedDocument.uploadSessionExpiresAt > new Date(),
               role: resolvedDocument.role,
             },
           },

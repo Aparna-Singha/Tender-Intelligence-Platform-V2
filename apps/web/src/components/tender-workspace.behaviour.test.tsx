@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TenderWorkspace } from "./tender-workspace";
@@ -102,7 +102,7 @@ const failedUploadWorkspace = {
   ],
 };
 
-const { apiRequest, push } = vi.hoisted(() => ({
+const { apiRequest, push, uploadFileToSignedStorageUrl } = vi.hoisted(() => ({
   apiRequest: vi.fn((path: string): unknown => {
     if (path.includes("/final-readiness?")) {
       return { items: [], next_cursor: null };
@@ -123,6 +123,7 @@ const { apiRequest, push } = vi.hoisted(() => ({
     return baseWorkspace;
   }),
   push: vi.fn(),
+  uploadFileToSignedStorageUrl: vi.fn(),
 }));
 let search = new URLSearchParams();
 
@@ -134,6 +135,9 @@ vi.mock("next/navigation", () => ({
 vi.mock("../lib/api", () => ({
   apiRequest,
   formatApiError: (_error: unknown, fallback: string) => fallback,
+}));
+vi.mock("../lib/direct-upload", () => ({
+  uploadFileToSignedStorageUrl,
 }));
 vi.mock("./extraction-workspace", () => ({
   ExtractionWorkspace: () => <div>Extraction module mounted</div>,
@@ -163,8 +167,16 @@ vi.mock("./controlled-review-package-workspace", () => ({
 beforeEach(() => {
   push.mockReset();
   apiRequest.mockClear();
+  uploadFileToSignedStorageUrl.mockReset();
   search = new URLSearchParams();
   vi.unstubAllGlobals();
+  vi.stubGlobal("File", window.File);
+  vi.stubGlobal("FormData", window.FormData);
+  vi.stubGlobal("crypto", {
+    subtle: {
+      digest: vi.fn(() => Promise.resolve(new Uint8Array(32).buffer)),
+    },
+  });
 });
 
 describe("tender workspace stages", () => {
@@ -618,5 +630,249 @@ describe("tender workspace stages", () => {
         "Tender file removed. You can upload the same file again.",
       ),
     ).toBeInTheDocument();
+  });
+
+  it("abandons a failed direct upload before completion and allows a clean retry", async () => {
+    const user = userEvent.setup();
+    let uploadSessionCount = 0;
+
+    apiRequest.mockImplementation(
+      (path: string, init?: RequestInit): unknown => {
+        if (path === "/organisations/org-1/tenders/tender-1") {
+          return baseWorkspace;
+        }
+        if (path.includes("/final-readiness?")) {
+          return { items: [], next_cursor: null };
+        }
+        if (path.includes("/controlled-review-packages")) {
+          return { items: [], next_cursor: null };
+        }
+        if (
+          path.includes("/extractions") ||
+          path.includes("/risk-analyses") ||
+          path.includes("/eligibility-assessments") ||
+          path.includes("/checklists") ||
+          path.endsWith("/draft-generation-runs") ||
+          path.endsWith("/drafts")
+        ) {
+          return [];
+        }
+        if (
+          path ===
+            "/organisations/org-1/tenders/tender-1/versions/version-1/upload-sessions" &&
+          init?.method === "POST"
+        ) {
+          uploadSessionCount += 1;
+          return {
+            document_id: `upload-document-${uploadSessionCount}`,
+            upload_url: `http://storage.local/upload-${uploadSessionCount}`,
+          };
+        }
+        if (
+          path ===
+            "/organisations/org-1/tenders/tender-1/documents/upload-document-1" &&
+          init?.method === "DELETE"
+        ) {
+          return { removed: true };
+        }
+        if (
+          path ===
+            "/organisations/org-1/tenders/tender-1/documents/upload-document-2/complete" &&
+          init?.method === "POST"
+        ) {
+          return { job_id: "job-2", state: "QUEUED" };
+        }
+        return baseWorkspace;
+      },
+    );
+
+    uploadFileToSignedStorageUrl.mockRejectedValueOnce(new Error("blocked"));
+    uploadFileToSignedStorageUrl.mockResolvedValueOnce(undefined);
+
+    search = new URLSearchParams("stage=files");
+    render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    await screen.findByRole("heading", { name: "Tender Files" });
+    await user.click(screen.getByRole("button", { name: "Upload files" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Upload tender files" });
+    const file = new File(["%PDF-1.4"], "tender.pdf", {
+      type: "application/pdf",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: () => Promise.resolve(new TextEncoder().encode("%PDF-1.4").buffer),
+    });
+    const NativeFormData = window.FormData;
+    class MockFormData extends NativeFormData {
+      public override getAll(name: string): FormDataEntryValue[] {
+        if (name === "file") return [file];
+        return super.getAll(name);
+      }
+    }
+    vi.stubGlobal("FormData", MockFormData);
+    Object.defineProperty(window, "FormData", {
+      configurable: true,
+      value: MockFormData,
+    });
+    const fileInput = dialog.querySelector('input[type="file"]');
+    const form = dialog.querySelector("form");
+    expect(fileInput).toBeInstanceOf(HTMLInputElement);
+    expect(form).not.toBeNull();
+    if (!(fileInput instanceof HTMLInputElement) || form === null) {
+      throw new Error("Expected tender upload file input");
+    }
+
+    await user.upload(fileInput, file);
+    expect(fileInput.files).toHaveLength(1);
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/tenders/tender-1/versions/version-1/upload-sessions",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/tenders/tender-1/documents/upload-document-1",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+    expect(
+      await screen.findByText(
+        'The direct upload of "tender.pdf" was rejected before it reached secure storage.',
+      ),
+    ).toBeInTheDocument();
+
+    fireEvent.submit(form);
+
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/tenders/tender-1/documents/upload-document-2/complete",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Upload tender files" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("prefers current extracted support data over a stale workflow summary and uses truthful extraction wording", async () => {
+    apiRequest.mockImplementation((path: string): unknown => {
+      if (path === "/organisations/org-1/tenders/tender-1") {
+        return {
+          ...baseWorkspace,
+          versions: [
+            {
+              documents: [
+                {
+                  createdAt: "2026-08-22T09:30:00.000Z",
+                  displayFilename: "Synthetic_GeM_Tender_Test.pdf",
+                  id: "ready-document",
+                  role: "PRIMARY",
+                  sha256:
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  sizeBytes: "4096",
+                  status: "READY",
+                  uploadSessionExpiresAt: "2026-08-22T10:00:00.000Z",
+                },
+              ],
+              id: "version-1",
+              reason: "Original tender source",
+              versionNumber: 1,
+            },
+          ],
+          workflowState: {
+            actionLabel: "Open",
+            code: "EXTRACTING",
+            detail: "Reading the current tender source.",
+            isCompleted: false,
+            isDraft: false,
+            isInProgress: false,
+            needsAttention: false,
+            onHold: false,
+            statusLabel: "Reading tender...",
+            tone: "info",
+          },
+        };
+      }
+      if (path.includes("/final-readiness?")) {
+        return { items: [], next_cursor: null };
+      }
+      if (path.includes("/controlled-review-packages")) {
+        return { items: [], next_cursor: null };
+      }
+      if (path.endsWith("/versions/version-1/extractions")) {
+        return [
+          {
+            current_stage: "COMPLETE",
+            id: "extract-1",
+            parser_policy_version: "parser-v1",
+            progress_percentage: 100,
+            public_message: "Extraction complete",
+            quality_summary: {},
+            source_fingerprint: "fingerprint-a",
+            status: "COMPLETE",
+          },
+        ];
+      }
+      if (path.endsWith("/versions/version-1/risk-analyses")) {
+        return [];
+      }
+      if (
+        path.endsWith("/versions/version-1/eligibility-assessments") ||
+        path.endsWith("/versions/version-1/checklists") ||
+        path.endsWith("/draft-generation-runs") ||
+        path.endsWith("/drafts")
+      ) {
+        return [];
+      }
+      if (path.endsWith("/extractions/extract-1/requirements")) {
+        return [
+          {
+            category: "DELIVERY",
+            citations: [],
+            confidence: "HIGH",
+            findingState: "SUPPORTED",
+            id: "requirement-1",
+            normalizedStatement: "Complete the work within 90 days.",
+            obligation: "MANDATORY",
+            reviewState: "UNREVIEWED",
+            sourceWording: "Complete the work within 90 days.",
+            title: "Delivery timeline",
+          },
+        ];
+      }
+      if (
+        path.endsWith("/extractions/extract-1/fields") ||
+        path.endsWith("/extractions/extract-1/issues")
+      ) {
+        return [];
+      }
+      return [];
+    });
+
+    render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
+    expect(
+      (await screen.findAllByText("Risk analysis not started"))[0],
+    ).toBeVisible();
+    expect(screen.queryByText("Reading tender...")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Automatic progression will retry/i),
+    ).not.toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", {
+        name: "View extracted requirements",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("1")).toBeInTheDocument();
+    expect(screen.getByText("Complete")).toBeInTheDocument();
+    expect(screen.getByText("Not started")).toBeInTheDocument();
   });
 });

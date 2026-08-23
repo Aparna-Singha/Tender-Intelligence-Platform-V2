@@ -4,6 +4,7 @@ import {
   apiEnvironmentSchema,
   EnvironmentValidationError,
   parseEnvironment,
+  webEnvironmentSchema,
   workerEnvironmentSchema,
 } from "../src/index.js";
 
@@ -185,5 +186,13 @@ describe("parseEnvironment", () => {
         S3_SECRET_ACCESS_KEY: "production-secret-key",
       }),
     ).toThrow("provider egress is enabled");
+  });
+
+  it("requires an explicit browser-visible storage origin for the web app", () => {
+    expect(() =>
+      parseEnvironment("web", webEnvironmentSchema, {
+        NEXT_PUBLIC_API_URL: "http://localhost:4000",
+      }),
+    ).toThrow(EnvironmentValidationError);
   });
 });

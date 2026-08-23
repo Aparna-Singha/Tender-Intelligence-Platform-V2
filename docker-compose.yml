@@ -61,6 +61,7 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set a local MinIO password}
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set a local MinIO user}
       S3_BUCKET: ${S3_BUCKET:?Set a local bucket name}
+      WEB_ORIGIN: ${WEB_ORIGIN:?Set a trusted web origin}
     entrypoint:
       - /bin/sh
       - -eu
@@ -69,6 +70,20 @@ services:
         mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"
         mc mb --ignore-existing "local/$${S3_BUCKET}"
         mc anonymous set none "local/$${S3_BUCKET}"
+        cat <<EOF >/tmp/minio-cors.xml
+        <CORSConfiguration>
+          <CORSRule>
+            <AllowedOrigin>$${WEB_ORIGIN}</AllowedOrigin>
+            <AllowedMethod>GET</AllowedMethod>
+            <AllowedMethod>HEAD</AllowedMethod>
+            <AllowedMethod>PUT</AllowedMethod>
+            <AllowedHeader>content-type</AllowedHeader>
+            <ExposeHeader>ETag</ExposeHeader>
+            <MaxAgeSeconds>300</MaxAgeSeconds>
+          </CORSRule>
+        </CORSConfiguration>
+        EOF
+        mc cors set "local/$${S3_BUCKET}" /tmp/minio-cors.xml
     restart: "no"
 
   clamav:

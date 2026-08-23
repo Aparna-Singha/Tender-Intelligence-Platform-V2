@@ -3,9 +3,11 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from "@nestjs/common";
 import {
+  DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -36,6 +38,8 @@ import {
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+
   public constructor(
     @Inject(PRISMA_CLIENT) private readonly database: PrismaClient,
     @Inject(S3_CLIENT) private readonly storage: S3Client,
@@ -293,6 +297,76 @@ export class DocumentsService {
     };
   }
 
+  public async abandonUploadSession(
+    organisationId: string,
+    uploadSessionId: string,
+    userId: string,
+    requestId: string,
+  ): Promise<unknown> {
+    const session = await this.database.uploadSession.findFirst({
+      include: {
+        documentVersion: {
+          include: {
+            document: {
+              select: {
+                currentVersionId: true,
+                id: true,
+              },
+            },
+          },
+        },
+      },
+      where: { id: uploadSessionId, organisationId },
+    });
+    if (session === null) throw new NotFoundException();
+    if (session.status !== "PENDING" || session.completedAt !== null)
+      throw new ConflictException(
+        "Only an incomplete upload session can be abandoned safely.",
+      );
+
+    const versionCount = await this.database.documentVersion.count({
+      where: { documentId: session.documentVersion.documentId },
+    });
+
+    await this.database.$transaction(async (tx) => {
+      await tx.uploadSession.delete({ where: { id: session.id } });
+      await tx.documentVersion.delete({
+        where: { id: session.documentVersionId },
+      });
+      if (
+        versionCount === 1 &&
+        session.documentVersion.document.currentVersionId === null
+      ) {
+        await tx.document.delete({
+          where: { id: session.documentVersion.documentId },
+        });
+      }
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          eventType: "DOCUMENT_UPLOAD_ABANDONED",
+          organisationId,
+          outcome: "SUCCESS",
+          requestId,
+          subjectId: session.documentVersion.documentId,
+          subjectType: "document",
+          metadata: {
+            document_version_id: session.documentVersionId,
+            upload_session_id: session.id,
+          },
+        },
+      });
+    });
+
+    await this.cleanupAbandonedUploadObject({
+      documentVersionId: session.documentVersionId,
+      key: session.documentVersion.quarantineObjectKey,
+      organisationId,
+      requestId,
+    });
+    return { removed: true };
+  }
+
   public async download(
     organisationId: string,
     documentId: string,
@@ -418,4 +492,85 @@ export class DocumentsService {
     });
     return { status: "DELETION_REQUESTED" };
   }
+
+  private async cleanupAbandonedUploadObject(input: {
+    readonly documentVersionId: string;
+    readonly key: string;
+    readonly organisationId: string;
+    readonly requestId: string;
+  }): Promise<void> {
+    try {
+      await this.deleteDocumentObjectsNow([input.key]);
+      return;
+    } catch (error: unknown) {
+      try {
+        await this.jobs.add(
+          "cleanup-company-upload-storage",
+          {
+            documentVersionId: input.documentVersionId,
+            keys: [input.key],
+            organisationId: input.organisationId,
+            requestId: input.requestId,
+          },
+          {
+            attempts: 10,
+            backoff: { delay: 1_000, type: "exponential" },
+            jobId: `cleanup-company-upload-${input.documentVersionId}`,
+            removeOnComplete: 100,
+          },
+        );
+      } catch (queueError: unknown) {
+        this.logger.error(
+          {
+            documentVersionId: input.documentVersionId,
+            key: input.key,
+            organisationId: input.organisationId,
+            queueError:
+              queueError instanceof Error
+                ? queueError.message
+                : String(queueError),
+            storageError:
+              error instanceof Error ? error.message : String(error),
+          },
+          "Company upload cleanup could not be queued after an immediate cleanup failure",
+        );
+      }
+    }
+  }
+
+  private async deleteDocumentObjectsNow(
+    keys: readonly string[],
+  ): Promise<void> {
+    for (const key of keys) {
+      try {
+        await this.storage.send(
+          new DeleteObjectCommand({
+            Bucket: this.environment.S3_BUCKET,
+            Key: key,
+          }),
+        );
+      } catch (error: unknown) {
+        if (!isMissingObjectError(error)) throw error;
+      }
+    }
+  }
+}
+
+function isMissingObjectError(error: unknown): boolean {
+  if (typeof error !== "object" || error === null) return false;
+  const candidate = error as {
+    readonly $metadata?: { readonly httpStatusCode?: number };
+    readonly Code?: string;
+    readonly code?: string;
+    readonly name?: string;
+  };
+  return (
+    candidate.name === "NoSuchKey" ||
+    candidate.name === "NotFound" ||
+    candidate.code === "NoSuchKey" ||
+    candidate.code === "NotFound" ||
+    candidate.Code === "NoSuchKey" ||
+    candidate.Code === "NotFound" ||
+    candidate.$metadata?.httpStatusCode === 404
+  );
 }

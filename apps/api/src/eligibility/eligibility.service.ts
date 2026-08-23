@@ -15,7 +15,7 @@ import type {
   EvidenceFactReviewRequest,
   LinkAssessmentEvidenceRequest,
 } from "@tender/contracts";
-import type { Prisma, PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 import {
   canHumanFinaliseVerified,
   EVIDENCE_COMPARISON_POLICY_VERSION,
@@ -143,155 +143,195 @@ export class EligibilityService {
         }),
       )
       .digest("hex");
-    const idempotencyKey = `${organisationId}:${clientKey}:${fingerprint}`;
+    const idempotencyKey =
+      triggerType === "RETRY"
+        ? `${organisationId}:${clientKey}:${fingerprint}`
+        : `${organisationId}:current:${fingerprint}`;
     const existing = await this.database.eligibilityAssessmentRun.findUnique({
       where: { idempotencyKey },
     });
     if (existing !== null) return existing;
-
-    const run = await this.database.$transaction(async (transaction) => {
-      const snapshot = await transaction.eligibilityInputSnapshot.create({
-        data: {
-          extractionRunId: extraction.id,
-          fingerprint,
+    const existingFingerprintRun =
+      await this.database.eligibilityAssessmentRun.findFirst({
+        orderBy: { createdAt: "desc" },
+        where: {
+          invalidatedAt: null,
           organisationId,
-          pursuitDecisionId: decision.id,
-          riskAnalysisRunId: risk.id,
-          tenderVersionId: versionId,
-          profileValues: {
-            create: profileValues.map((item) => ({
-              booleanValue: item.booleanValue,
-              dateValue: item.dateValue,
-              evidenceDocumentId: item.evidenceDocumentId,
-              fieldKey: item.fieldKey,
-              numberValue: item.numberValue,
-              source: item.source,
-              sourceProfileValueId: item.id,
-              sourceUpdatedAt: item.updatedAt,
-              textListValue: item.textListValue,
-              textValue: item.textValue,
-              valueType: item.valueType,
-              verificationStatus: item.verificationStatus,
-            })),
-          },
-          turnoverRecords: {
-            create: turnover.map((item) => ({
-              amountInr: item.amountInr,
-              evidenceDocumentId: item.evidenceDocumentId,
-              financialYear: item.financialYear,
-              source: item.source,
-              sourceTurnoverId: item.id,
-              sourceUpdatedAt: item.updatedAt,
-              verificationStatus: item.verificationStatus,
-            })),
-          },
-          documentReadiness: {
-            create: readiness.map((item) => ({
-              documentType: item.documentType,
-              evidenceDocumentId: item.evidenceDocumentId,
-              expectedExpiry: item.expectedExpiry,
-              readinessStatus: item.readinessStatus,
-              source: item.source,
-              sourceReadinessId: item.id,
-              sourceUpdatedAt: item.updatedAt,
-              verificationStatus: item.verificationStatus,
-            })),
-          },
-          documents: {
-            create: documents.flatMap((item) =>
-              item.currentVersion === null
-                ? []
-                : [
-                    {
-                      category: item.category,
-                      checksum: item.currentVersion.sha256,
-                      documentId: item.id,
-                      documentVersionId: item.currentVersion.id,
-                      expiryDate: item.expiryDate,
-                      verificationStatus: item.verificationStatus,
-                    },
-                  ],
-            ),
-          },
-          evidenceFacts: {
-            create: facts.flatMap((item) =>
-              item.currentVersion === null
-                ? []
-                : [
-                    {
-                      evidenceFactVersionId: item.currentVersion.id,
-                      reviewState: item.currentVersion.reviewState,
-                    },
-                  ],
-            ),
-          },
-          evidenceCitations: {
-            create: facts.flatMap(
-              (item) =>
-                item.currentVersion?.citations
-                  .filter((citation) => citation.invalidatedAt === null)
-                  .map((citation) => ({
-                    boundedExcerpt: citation.boundedExcerpt,
-                    cellRange: citation.cellRange,
-                    documentChecksum: citation.documentChecksum,
-                    documentVersionId: citation.documentVersionId,
-                    evidenceFactVersionId: citation.evidenceFactVersionId,
-                    locatorType: citation.locatorType,
-                    pageNumber: citation.pageNumber,
-                    sectionLabel: citation.sectionLabel,
-                    sheetName: citation.sheetName,
-                    sourceCreatedAt: citation.createdAt,
-                    sourceEvidenceCitationId: citation.id,
-                    validationStatus: citation.validationStatus,
-                  })) ?? [],
-            ),
-          },
-        },
-      });
-      const created = await transaction.eligibilityAssessmentRun.create({
-        data: {
-          comparisonPolicyVersion: EVIDENCE_COMPARISON_POLICY_VERSION,
-          extractionRunId: extraction.id,
-          idempotencyKey,
-          normalisationPolicyVersion: EVIDENCE_NORMALISATION_POLICY_VERSION,
-          organisationId,
-          pursuitDecisionId: decision.id,
-          requestedByUserId: userId,
-          riskAnalysisRunId: risk.id,
-          snapshotId: snapshot.id,
           sourceFingerprint: fingerprint,
+          status: {
+            in: [
+              "QUEUED",
+              "SNAPSHOTTING",
+              "MATCHING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
           tenderId,
           tenderVersionId: versionId,
-          triggerType,
         },
       });
-      await transaction.auditEvent.createMany({
-        data: [
-          {
-            actorUserId: userId,
-            eventType:
-              triggerType === "RETRY"
-                ? "ELIGIBILITY_ASSESSMENT_RETRIED"
-                : "ELIGIBILITY_ASSESSMENT_STARTED",
+    if (existingFingerprintRun !== null) return existingFingerprintRun;
+
+    let run;
+    try {
+      run = await this.database.$transaction(async (transaction) => {
+        const snapshot = await transaction.eligibilityInputSnapshot.create({
+          data: {
+            extractionRunId: extraction.id,
+            fingerprint,
             organisationId,
-            outcome: "SUCCESS",
-            requestId,
-            subjectId: created.id,
-            subjectType: "eligibility_assessment_run",
+            pursuitDecisionId: decision.id,
+            riskAnalysisRunId: risk.id,
+            tenderVersionId: versionId,
+            profileValues: {
+              create: profileValues.map((item) => ({
+                booleanValue: item.booleanValue,
+                dateValue: item.dateValue,
+                evidenceDocumentId: item.evidenceDocumentId,
+                fieldKey: item.fieldKey,
+                numberValue: item.numberValue,
+                source: item.source,
+                sourceProfileValueId: item.id,
+                sourceUpdatedAt: item.updatedAt,
+                textListValue: item.textListValue,
+                textValue: item.textValue,
+                valueType: item.valueType,
+                verificationStatus: item.verificationStatus,
+              })),
+            },
+            turnoverRecords: {
+              create: turnover.map((item) => ({
+                amountInr: item.amountInr,
+                evidenceDocumentId: item.evidenceDocumentId,
+                financialYear: item.financialYear,
+                source: item.source,
+                sourceTurnoverId: item.id,
+                sourceUpdatedAt: item.updatedAt,
+                verificationStatus: item.verificationStatus,
+              })),
+            },
+            documentReadiness: {
+              create: readiness.map((item) => ({
+                documentType: item.documentType,
+                evidenceDocumentId: item.evidenceDocumentId,
+                expectedExpiry: item.expectedExpiry,
+                readinessStatus: item.readinessStatus,
+                source: item.source,
+                sourceReadinessId: item.id,
+                sourceUpdatedAt: item.updatedAt,
+                verificationStatus: item.verificationStatus,
+              })),
+            },
+            documents: {
+              create: documents.flatMap((item) =>
+                item.currentVersion === null
+                  ? []
+                  : [
+                      {
+                        category: item.category,
+                        checksum: item.currentVersion.sha256,
+                        documentId: item.id,
+                        documentVersionId: item.currentVersion.id,
+                        expiryDate: item.expiryDate,
+                        verificationStatus: item.verificationStatus,
+                      },
+                    ],
+              ),
+            },
+            evidenceFacts: {
+              create: facts.flatMap((item) =>
+                item.currentVersion === null
+                  ? []
+                  : [
+                      {
+                        evidenceFactVersionId: item.currentVersion.id,
+                        reviewState: item.currentVersion.reviewState,
+                      },
+                    ],
+              ),
+            },
+            evidenceCitations: {
+              create: facts.flatMap(
+                (item) =>
+                  item.currentVersion?.citations
+                    .filter((citation) => citation.invalidatedAt === null)
+                    .map((citation) => ({
+                      boundedExcerpt: citation.boundedExcerpt,
+                      cellRange: citation.cellRange,
+                      documentChecksum: citation.documentChecksum,
+                      documentVersionId: citation.documentVersionId,
+                      evidenceFactVersionId: citation.evidenceFactVersionId,
+                      locatorType: citation.locatorType,
+                      pageNumber: citation.pageNumber,
+                      sectionLabel: citation.sectionLabel,
+                      sheetName: citation.sheetName,
+                      sourceCreatedAt: citation.createdAt,
+                      sourceEvidenceCitationId: citation.id,
+                      validationStatus: citation.validationStatus,
+                    })) ?? [],
+              ),
+            },
           },
-          {
-            actorUserId: userId,
-            eventType: "ELIGIBILITY_SNAPSHOT_CREATED",
+        });
+        const created = await transaction.eligibilityAssessmentRun.create({
+          data: {
+            comparisonPolicyVersion: EVIDENCE_COMPARISON_POLICY_VERSION,
+            extractionRunId: extraction.id,
+            idempotencyKey,
+            normalisationPolicyVersion: EVIDENCE_NORMALISATION_POLICY_VERSION,
             organisationId,
-            outcome: "SUCCESS",
-            requestId,
-            subjectId: snapshot.id,
-            subjectType: "eligibility_input_snapshot",
+            pursuitDecisionId: decision.id,
+            requestedByUserId: userId,
+            riskAnalysisRunId: risk.id,
+            snapshotId: snapshot.id,
+            sourceFingerprint: fingerprint,
+            tenderId,
+            tenderVersionId: versionId,
+            triggerType,
           },
-        ],
+        });
+        await transaction.auditEvent.createMany({
+          data: [
+            {
+              actorUserId: userId,
+              eventType:
+                triggerType === "RETRY"
+                  ? "ELIGIBILITY_ASSESSMENT_RETRIED"
+                  : "ELIGIBILITY_ASSESSMENT_STARTED",
+              organisationId,
+              outcome: "SUCCESS",
+              requestId,
+              subjectId: created.id,
+              subjectType: "eligibility_assessment_run",
+            },
+            {
+              actorUserId: userId,
+              eventType: "ELIGIBILITY_SNAPSHOT_CREATED",
+              organisationId,
+              outcome: "SUCCESS",
+              requestId,
+              subjectId: snapshot.id,
+              subjectType: "eligibility_input_snapshot",
+            },
+          ],
+        });
+        return created;
       });
-      return created;
-    });
+    } catch (error) {
+      if (
+        triggerType !== "RETRY" &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const concurrentRun =
+          await this.database.eligibilityAssessmentRun.findUnique({
+            where: { idempotencyKey },
+          });
+        if (concurrentRun !== null) return concurrentRun;
+      }
+      throw error;
+    }
     await this.jobs.add(
       "compare-company-evidence",
       { assessmentRunId: run.id, organisationId, requestId },
@@ -1017,7 +1057,10 @@ export class EligibilityService {
           publicMessage: "Authoritative company evidence changed",
           status: "INVALIDATED",
         },
-        where: { organisationId, status: "COMPLETE" },
+        where: {
+          organisationId,
+          status: { notIn: ["FAILED", "CANCELLED", "INVALIDATED"] },
+        },
       }),
       this.database.eligibilityAssessment.updateMany({
         data: { invalidatedAt: now },

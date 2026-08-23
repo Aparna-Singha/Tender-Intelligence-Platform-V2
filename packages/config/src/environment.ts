@@ -319,6 +319,7 @@ export const workerEnvironmentSchema = serviceBaseSchema
 export const webEnvironmentSchema = z.object({
   NODE_ENV: nodeEnvironmentSchema.default("development"),
   NEXT_PUBLIC_API_URL: urlSchema,
+  NEXT_PUBLIC_STORAGE_ORIGIN: urlSchema,
   WEB_PORT: portSchema.default(3000),
 });
 
