@@ -73,3 +73,42 @@ jobs:
 
       - name: Build production artifacts
         run: pnpm build
+
+  redis-integration:
+    name: Redis workflow progression integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      redis:
+        image: redis:7.4.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      REDIS_URL: redis://127.0.0.1:6379
+      RUN_REDIS_INTEGRATION_TESTS: "true"
+    steps:
+      - name: Configure Git line endings
+        run: git config --global core.autocrlf false
+
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run real Redis/BullMQ workflow progression integration
+        run: pnpm --filter @tender/worker exec vitest run test/tender-workflow-progression-queue.test.ts
