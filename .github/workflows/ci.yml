@@ -110,5 +110,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Build worker test workspace contract exports
+        run: pnpm --filter @tender/contracts build
+
       - name: Run real Redis/BullMQ workflow progression integration
         run: pnpm --filter @tender/worker exec vitest run test/tender-workflow-progression-queue.test.ts
