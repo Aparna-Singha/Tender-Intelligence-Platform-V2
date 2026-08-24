@@ -2,10 +2,125 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from "@nestjs/common";
+import { Prisma } from "@tender/database";
 import { describe, expect, it, vi } from "vitest";
 import { RisksService } from "../src/risks/risks.service.js";
 
 describe("early risk-analysis tenant and source boundary", () => {
+  it("uses the same current-lineage idempotency key for auto and explicit starts", async () => {
+    const extraction = {
+      id: "extract-a",
+      invalidatedAt: null,
+      sourceFingerprint: "source-a",
+      status: "COMPLETE",
+    };
+    const existing = { id: "risk-a" };
+    const database = {
+      riskAnalysisRun: {
+        findFirst: vi.fn(),
+        findUnique: vi.fn().mockResolvedValue(existing),
+      },
+      tenderVersion: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ activeExtractionRun: extraction }),
+      },
+    };
+    const service = new RisksService(
+      database as never,
+      { add: vi.fn() } as never,
+      {} as never,
+    );
+
+    await expect(
+      service.start(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "user-a",
+        "system-auto-risk",
+        "request-a",
+      ),
+    ).resolves.toBe(existing);
+    await expect(
+      service.start(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "user-a",
+        "release-risk-a",
+        "request-b",
+      ),
+    ).resolves.toBe(existing);
+
+    const keys = database.riskAnalysisRun.findUnique.mock.calls.map(
+      (call) =>
+        (call[0] as { where: { idempotencyKey: string } }).where.idempotencyKey,
+    );
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+    expect(keys[0]).toMatch(/^organisation-a:current:/u);
+  });
+
+  it("returns the concurrently created current-lineage run on P2002", async () => {
+    const extraction = {
+      id: "extract-a",
+      invalidatedAt: null,
+      sourceFingerprint: "source-a",
+      status: "COMPLETE",
+    };
+    const concurrentRun = { id: "risk-concurrent" };
+    const findUnique = vi
+      .fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(concurrentRun);
+    const database = {
+      $transaction: vi.fn().mockRejectedValue(
+        new Prisma.PrismaClientKnownRequestError("Unique constraint failed", {
+          clientVersion: "test",
+          code: "P2002",
+        }),
+      ),
+      riskAnalysisRun: {
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique,
+      },
+      tenderVersion: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ activeExtractionRun: extraction }),
+      },
+    };
+    const jobs = { add: vi.fn() };
+    const service = new RisksService(
+      database as never,
+      jobs as never,
+      {} as never,
+    );
+
+    await expect(
+      service.start(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "user-a",
+        "system-auto-risk",
+        "request-a",
+      ),
+    ).resolves.toBe(concurrentRun);
+    expect(jobs.add).not.toHaveBeenCalled();
+    expect(findUnique).toHaveBeenNthCalledWith(1, {
+      where: {
+        idempotencyKey: expect.stringMatching(/^organisation-a:current:/u),
+      },
+    });
+    expect(findUnique).toHaveBeenNthCalledWith(2, {
+      where: {
+        idempotencyKey: expect.stringMatching(/^organisation-a:current:/u),
+      },
+    });
+  });
+
   it("does not reveal a cross-tenant risk run", async () => {
     const database = {
       riskAnalysisRun: { findFirst: vi.fn().mockResolvedValue(null) },
