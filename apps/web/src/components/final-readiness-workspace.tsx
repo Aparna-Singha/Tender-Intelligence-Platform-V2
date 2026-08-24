@@ -11,6 +11,7 @@ import {
   humanizeEnum,
 } from "@tender/ui";
 import { PublicApiError, apiRequest } from "../lib/api";
+import { RationaleDialog } from "./rationale-dialog";
 
 type Treatment =
   "BLOCKER" | "HUMAN_DISPOSITION_REQUIRED" | "WARNING" | "INFORMATIONAL";
@@ -112,7 +113,7 @@ const treatments: readonly Treatment[] = [
   "INFORMATIONAL",
 ];
 const dispositionLabels: Record<Disposition, string> = {
-  PROCEED_TO_CONTROLLED_EXPORT_REVIEW: "Proceed to controlled export review",
+  PROCEED_TO_CONTROLLED_EXPORT_REVIEW: "Proceed to review package",
   HOLD_FOR_REMEDIATION: "Hold for remediation",
   STOP_PURSUIT: "Stop pursuit",
 };
@@ -142,22 +143,22 @@ const prerequisiteStages: Partial<Record<string, Stage>> = {
 };
 const safeErrors: Record<string, string> = {
   FINAL_READINESS_PREREQUISITES_NOT_CURRENT:
-    "Current authoritative prerequisites do not permit starting this audit.",
-  FINAL_READINESS_ALREADY_ACTIVE: "A final-readiness audit is already active.",
+    "The latest tender, draft, and evidence records do not yet allow this review to start.",
+  FINAL_READINESS_ALREADY_ACTIVE: "A final review is already in progress.",
   FINAL_READINESS_RUN_STALE:
-    "Authoritative inputs changed. This run is historical and cannot be changed.",
+    "This review is out of date because the underlying records changed.",
   FINAL_READINESS_RUN_INVALIDATED:
-    "This run was invalidated and cannot be changed.",
+    "This review is no longer current and cannot be changed.",
   FINAL_READINESS_RUN_NOT_COMPLETE:
     "The run is not in a state that permits this action.",
   FINAL_READINESS_FINAL_RISK_NOT_COMPLETE:
-    "The linked final-risk analysis is not complete.",
+    "The linked risk review is not complete yet.",
   FINAL_READINESS_DECISION_BLOCKED:
     "The decision is blocked by unresolved findings, acknowledgements, provenance, or concurrent changes.",
   FINAL_READINESS_SEPARATION_OF_DUTIES_REQUIRED:
     "An eligible independent reviewer is required. The requester or draft creator cannot decide.",
   FINAL_READINESS_SOURCE_INVALID:
-    "Authoritative provenance is unavailable or invalid.",
+    "The evidence trail for this review is unavailable or needs attention.",
   FINAL_READINESS_RUN_NOT_RETRYABLE:
     "This run cannot be retried in its current state.",
   FINAL_READINESS_IDEMPOTENCY_CONFLICT:
@@ -185,6 +186,64 @@ function formText(values: FormData, name: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function readinessBlockerCopy(denial: {
+  readonly code: string;
+  readonly prerequisite: string;
+}): {
+  readonly detail: string;
+  readonly label: string;
+} {
+  switch (denial.prerequisite) {
+    case "SOURCE_SET":
+      return {
+        detail:
+          "Upload or refresh the current tender source files before final review can start.",
+        label: "Tender source files need attention",
+      };
+    case "EXTRACTION":
+      return {
+        detail:
+          "Tender processing must finish successfully before final review can start.",
+        label: "Tender processing is not complete",
+      };
+    case "EARLY_RISK":
+      return {
+        detail: "Complete the linked risk review before starting final review.",
+        label: "Risk review needs attention",
+      };
+    case "CONTINUE_DECISION":
+      return {
+        detail:
+          "Record a current authorised Continue decision before starting final review.",
+        label: "A current Continue decision is required",
+      };
+    case "ELIGIBILITY_ASSESSMENT":
+    case "EVIDENCE_SNAPSHOT":
+      return {
+        detail:
+          "Refresh the latest eligibility review so final review uses current evidence.",
+        label: "Eligibility review needs to be current",
+      };
+    case "CHECKLIST_GENERATION":
+      return {
+        detail:
+          "Refresh missing items from the latest eligibility review and resolve the remaining work.",
+        label: "Missing items still need attention",
+      };
+    case "CONSOLIDATED_DRAFT":
+      return {
+        detail:
+          "Approve one current proposal draft version before final review can start.",
+        label: "Proposal draft needs approval",
+      };
+    default:
+      return {
+        detail: humanizeEnum(denial.code),
+        label: humanizeEnum(denial.prerequisite),
+      };
+  }
+}
+
 export function FinalReadinessWorkspace({
   organisationId,
   tenderId,
@@ -210,6 +269,7 @@ export function FinalReadinessWorkspace({
   const [reviewFinding, setReviewFinding] = useState<Finding | null>(null);
   const [reviews, setReviews] = useState<readonly Review[]>([]);
   const [confirming, setConfirming] = useState<Disposition | null>(null);
+  const [cancelRequested, setCancelRequested] = useState(false);
   const reviewTrigger = useRef<HTMLButtonElement | null>(null);
   const decisionTrigger = useRef<HTMLButtonElement | null>(null);
   const selectedRun = runs.find(({ id }) => id === selectedRunId) ?? null;
@@ -346,22 +406,14 @@ export function FinalReadinessWorkspace({
       setMessage(safeMessage(error, "The audit could not be started."));
     }
   }
-  async function cancel(): Promise<void> {
+  async function cancel(rationale: string): Promise<void> {
     if (selectedRun === null) return;
-    const rationale = window.prompt(
-      "Why should this run be cancelled? Enter at least 20 characters.",
-    );
-    if (rationale === null || rationale.trim().length < 20) {
-      setMessage(
-        "Cancellation requires a rationale of at least 20 characters.",
-      );
-      return;
-    }
     try {
       await apiRequest(`${base}/final-readiness/${selectedRun.id}`, {
         body: JSON.stringify({ rationale, run_id: selectedRun.id }),
         method: "DELETE",
       });
+      setCancelRequested(false);
       setMessage("Cancellation requested.");
       await loadOverview();
     } catch (error) {
@@ -518,7 +570,7 @@ export function FinalReadinessWorkspace({
         Final readiness
       </h2>
       <p style={{ margin: 0, fontSize: "0.78rem" }}>
-        A final human check — this aid does not guarantee eligibility,
+        A final human check. This aid does not guarantee eligibility,
         compliance, or bid success.
       </p>
       <p aria-live="polite" role="status">
@@ -526,13 +578,13 @@ export function FinalReadinessWorkspace({
       </p>
 
       <details className="disclosure">
-        <summary>Start preflight</summary>
+        <summary>Check readiness to start review</summary>
         <div className="disclosure__body">
           <Alert tone="warning">
             <p>
               Independent platform, not affiliated with GeM, CPPP or another
-              government portal. Proceed permits only future controlled Phase 12
-              export review; it is not approval to submit.
+              government portal. Proceed only moves this tender into review
+              package controls; it is not approval to submit.
             </p>
           </Alert>
           {preflight === null ? (
@@ -546,69 +598,94 @@ export function FinalReadinessWorkspace({
                     : "Hard prerequisites need attention"}
                 </strong>
               </p>
-              <dl className="detail-list">
-                <div>
-                  <dt>Current tender version</dt>
-                  <dd>{preflight.tender_version_id}</dd>
+              <p>
+                {preflight.prerequisite_denials.length === 0 &&
+                preflight.eligible_independent_decision_actor_exists
+                  ? "The latest tender, eligibility, missing-item, and draft records are ready for final review."
+                  : `${preflight.prerequisite_denials.length + (preflight.eligible_independent_decision_actor_exists ? 0 : 1)} thing${preflight.prerequisite_denials.length + (preflight.eligible_independent_decision_actor_exists ? 0 : 1) === 1 ? "" : "s"} need attention before final review can start.`}
+              </p>
+              {!preflight.eligible_independent_decision_actor_exists && (
+                <div className="warning">
+                  <strong>Independent reviewer is required</strong>
+                  <p>
+                    Invite or assign an eligible reviewer before recording the
+                    final decision.
+                  </p>
                 </div>
-                <div>
-                  <dt>Qualifying consolidated draft</dt>
-                  <dd>
-                    {preflight.qualifying_consolidated_draft_version_id ??
-                      "None"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Independent decision actor</dt>
-                  <dd>
-                    {preflight.eligible_independent_decision_actor_exists
-                      ? "Available"
-                      : "Not currently available—invite or assign an eligible reviewer"}
-                  </dd>
-                </div>
-                <div>
-                  <dt>Policy</dt>
-                  <dd>{preflight.policy_version}</dd>
-                </div>
-                <div>
-                  <dt>Evaluated</dt>
-                  <dd>{when(preflight.evaluated_at)}</dd>
-                </div>
-              </dl>
-              {preflight.prerequisite_denials.map((denial) => (
-                <div
-                  key={`${denial.prerequisite}:${denial.code}`}
-                  className="warning"
-                >
-                  <strong>{humanizeEnum(denial.prerequisite)}</strong>:{" "}
-                  {humanizeEnum(denial.code)}{" "}
-                  {prerequisiteStages[denial.prerequisite] !== undefined && (
-                    <Button
-                      variant="quiet"
-                      onClick={() =>
-                        onNavigateStage(
-                          prerequisiteStages[denial.prerequisite]!,
-                        )
-                      }
-                    >
-                      Open{" "}
-                      {humanizeEnum(prerequisiteStages[denial.prerequisite]!)}
-                    </Button>
-                  )}
-                </div>
-              ))}
+              )}
+              {preflight.prerequisite_denials.map((denial) => {
+                const copy = readinessBlockerCopy(denial);
+                return (
+                  <div
+                    key={`${denial.prerequisite}:${denial.code}`}
+                    className="warning"
+                  >
+                    <strong>{copy.label}</strong>
+                    <p>{copy.detail}</p>
+                    {prerequisiteStages[denial.prerequisite] !== undefined && (
+                      <Button
+                        variant="quiet"
+                        onClick={() =>
+                          onNavigateStage(
+                            prerequisiteStages[denial.prerequisite]!,
+                          )
+                        }
+                      >
+                        Open{" "}
+                        {humanizeEnum(prerequisiteStages[denial.prerequisite]!)}
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
               <p className="disclaimer">
-                Informational and race-prone: starting repeats every
-                prerequisite check transactionally.
+                The service checks everything again when you start review.
               </p>
               {canOperate && (
                 <Button
                   disabled={!preflight.hard_prerequisites_pass}
                   onClick={() => void start()}
                 >
-                  Start final-readiness audit
+                  Start final review
                 </Button>
               )}
+              <details className="disclosure">
+                <summary>
+                  Advanced readiness details
+                  <small>Version, policy, and audit timing</small>
+                </summary>
+                <div className="disclosure__body">
+                  <dl className="detail-list">
+                    <div>
+                      <dt>Current tender version</dt>
+                      <dd>{preflight.tender_version_id}</dd>
+                    </div>
+                    <div>
+                      <dt>Qualifying consolidated draft</dt>
+                      <dd>
+                        {preflight.qualifying_consolidated_draft_version_id ??
+                          "None"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Independent decision actor</dt>
+                      <dd>
+                        {preflight.eligible_independent_decision_actor_exists
+                          ? "Available"
+                          : "Not currently available—invite or assign an eligible reviewer"}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Policy</dt>
+                      <dd>{preflight.policy_version}</dd>
+                    </div>
+                    <div>
+                      <dt>Evaluated</dt>
+                      <dd>{when(preflight.evaluated_at)}</dd>
+                    </div>
+                  </dl>
+                </div>
+              </details>
             </>
           )}
         </div>
@@ -616,30 +693,30 @@ export function FinalReadinessWorkspace({
 
       <details className="disclosure">
         <summary>
-          Run history &amp; linked risk analysis
+          Advanced details and history
           <small>
-            Preflight runs, policy versions, and the linked final-risk analysis
+            Previous reviews, linked risk findings, and audit details
           </small>
         </summary>
         <div className="disclosure__body">
           <Card>
-            <h3>Run history</h3>
+            <h3>Review history</h3>
             {runs.length === 0 ? (
               <EmptyState
-                title="No final-readiness run"
-                description="Run preflight and start an audit after authoritative prerequisite records are current."
+                title="No final review yet"
+                description="Check readiness above, then start a final review when the latest records are ready."
               />
             ) : (
               <>
                 <label>
-                  Selected current or historical run
+                  Selected review
                   <select
                     value={selectedRunId}
                     onChange={(event) => setSelectedRunId(event.target.value)}
                   >
                     {runs.map((run) => (
                       <option key={run.id} value={run.id}>
-                        {run.is_current ? "Current" : "Historical"} ·{" "}
+                        {run.is_current ? "Latest" : "Previous"} ·{" "}
                         {humanizeEnum(run.status)} · {when(run.created_at)}
                       </option>
                     ))}
@@ -654,7 +731,7 @@ export function FinalReadinessWorkspace({
                   <>
                     <div className="tender-header-meta">
                       <Badge>
-                        {selectedRun.is_current ? "Current" : "Historical"}
+                        {selectedRun.is_current ? "Latest" : "Previous"}
                       </Badge>
                       <Badge
                         tone={
@@ -664,9 +741,9 @@ export function FinalReadinessWorkspace({
                         }
                       >
                         {selectedRun.invalidated
-                          ? "Invalidated"
+                          ? "Superseded"
                           : selectedRun.stale
-                            ? "Stale"
+                            ? "Out of date"
                             : humanizeEnum(selectedRun.status)}
                       </Badge>
                     </div>
@@ -698,7 +775,7 @@ export function FinalReadinessWorkspace({
                         <dd>{when(selectedRun.updated_at)}</dd>
                       </div>
                       <div>
-                        <dt>Safe failure/invalidation</dt>
+                        <dt>Why this run stopped or went out of date</dt>
                         <dd>
                           {selectedRun.failure_code === null
                             ? "None"
@@ -732,7 +809,7 @@ export function FinalReadinessWorkspace({
                       </Card>
                     </div>
                     <p>
-                      Current human disposition:{" "}
+                      Recorded human decision:{" "}
                       {selectedRun.current_disposition === null
                         ? "None recorded"
                         : dispositionLabels[
@@ -762,7 +839,10 @@ export function FinalReadinessWorkspace({
                     )}
                     {canOperate &&
                       ["QUEUED", "PROCESSING"].includes(selectedRun.status) && (
-                        <Button onClick={() => void cancel()} variant="quiet">
+                        <Button
+                          onClick={() => setCancelRequested(true)}
+                          variant="quiet"
+                        >
                           Cancel run
                         </Button>
                       )}
@@ -780,7 +860,7 @@ export function FinalReadinessWorkspace({
 
           {selectedRun !== null && (
             <Card>
-              <h3>Linked FINAL_READINESS risk analysis</h3>
+              <h3>Linked risk review</h3>
               <p>
                 Status:{" "}
                 <strong>{humanizeEnum(selectedRun.final_risk_status)}</strong>
@@ -801,7 +881,7 @@ export function FinalReadinessWorkspace({
 
       {selectedRun !== null && (
         <Card>
-          <h3>Readiness findings</h3>
+          <h3>Issues requiring attention</h3>
           <div
             className="filter-bar"
             role="group"
@@ -825,7 +905,7 @@ export function FinalReadinessWorkspace({
                 <h4>{finding.title}</h4>
                 <p>
                   <strong>Treatment: {humanizeEnum(finding.treatment)}</strong>{" "}
-                  · Lifecycle: {humanizeEnum(finding.lifecycle_state)} · Review:{" "}
+                  · Status: {humanizeEnum(finding.lifecycle_state)} · Review:{" "}
                   {humanizeEnum(finding.review_state)}
                 </p>
                 <p>{finding.explanation}</p>
@@ -834,7 +914,9 @@ export function FinalReadinessWorkspace({
                   {finding.materiality === null
                     ? "Not applicable"
                     : humanizeEnum(finding.materiality)}
-                  {finding.provenance_valid ? "" : " · Provenance needs review"}
+                  {finding.provenance_valid
+                    ? ""
+                    : " · Evidence trail needs review"}
                   {" · "}
                   Created: {when(finding.created_at)}
                 </p>
@@ -884,9 +966,9 @@ export function FinalReadinessWorkspace({
           <Card>
             <h3>Final human disposition</h3>
             <p>
-              No option is preselected. Server validation of permission,
-              independence, currentness, provenance, blockers and
-              acknowledgements remains authoritative.
+              No option is preselected. The service still verifies permission,
+              independence, current records, evidence trail, blockers, and
+              acknowledgements.
             </p>
             <div className="stack">
               {(Object.keys(dispositionLabels) as Disposition[]).map(
@@ -895,7 +977,7 @@ export function FinalReadinessWorkspace({
                     <strong>{dispositionLabels[value]}</strong>
                     <p>
                       {value === "PROCEED_TO_CONTROLLED_EXPORT_REVIEW"
-                        ? "Permits only future controlled Phase 12 export review; not approval to submit. Requires no unresolved blockers or human-disposition findings and requires valid provenance and acknowledgements."
+                        ? "Moves this tender into review package controls. It is not approval to submit and still requires valid provenance, acknowledgements, and no unresolved blockers."
                         : value === "HOLD_FOR_REMEDIATION"
                           ? "Records that remediation is required and may be available while blockers exist."
                           : "Records a human decision to stop pursuit and may be available while blockers exist."}
@@ -1030,6 +1112,17 @@ export function FinalReadinessWorkspace({
             </form>
           </div>
         </div>
+      )}
+      {cancelRequested && selectedRun !== null && (
+        <RationaleDialog
+          confirmLabel="Cancel run"
+          description="Record why this final review run should be cancelled."
+          helperText="Enter at least 20 characters."
+          minLength={20}
+          onClose={() => setCancelRequested(false)}
+          onConfirm={cancel}
+          title="Cancel final review run"
+        />
       )}
     </section>
   );

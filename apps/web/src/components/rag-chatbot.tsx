@@ -82,6 +82,65 @@ interface ConversationDetail extends Conversation {
   readonly messages: readonly Message[];
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizeIndexes(value: unknown): readonly RagIndex[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is RagIndex =>
+      isRecord(item) &&
+      typeof item.id === "string" &&
+      typeof item.progressPercentage === "number" &&
+      typeof item.sourceMode === "string" &&
+      typeof item.status === "string",
+  );
+}
+
+function normalizeConversations(value: unknown): readonly Conversation[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (item): item is Conversation =>
+      isRecord(item) &&
+      typeof item.id === "string" &&
+      typeof item.sourceMode === "string" &&
+      typeof item.title === "string",
+  );
+}
+
+function normalizeConversationDetail(
+  value: ConversationDetail,
+): ConversationDetail {
+  const answerRuns = Array.isArray(value.answerRuns)
+    ? value.answerRuns
+        .filter(
+          (run): run is AnswerRun =>
+            isRecord(run) &&
+            typeof run.id === "string" &&
+            typeof run.status === "string",
+        )
+        .map((run) => ({
+          ...run,
+          citations: Array.isArray(run.citations) ? run.citations : [],
+        }))
+    : [];
+  const messages = Array.isArray(value.messages)
+    ? value.messages.filter(
+        (message): message is Message =>
+          isRecord(message) &&
+          typeof message.content === "string" &&
+          typeof message.id === "string" &&
+          (message.role === "ASSISTANT" || message.role === "USER"),
+      )
+    : [];
+  return {
+    ...value,
+    answerRuns,
+    messages,
+  };
+}
+
 function buildConversationTitle(question: string): string {
   const trimmed = question.trim();
   if (trimmed === "") return "New tender conversation";
@@ -169,16 +228,18 @@ export function RagChatbot({
           `${base}/rag-conversations?limit=50`,
         ),
       ]);
-      setIndexes(loadedIndexes);
-      setConversations(loadedConversations);
+      const safeIndexes = normalizeIndexes(loadedIndexes);
+      const safeConversations = normalizeConversations(loadedConversations);
+      setIndexes(safeIndexes);
+      setConversations(safeConversations);
       setSelectedConversation((current) => {
         if (
           current !== "" &&
-          loadedConversations.some((item) => item.id === current)
+          safeConversations.some((item) => item.id === current)
         ) {
           return current;
         }
-        const firstActive = loadedConversations.find(
+        const firstActive = safeConversations.find(
           (item) => item.status === undefined || item.status === "ACTIVE",
         );
         return firstActive?.id ?? "";
@@ -196,8 +257,10 @@ export function RagChatbot({
     }
     try {
       setDetail(
-        await apiRequest<ConversationDetail>(
-          `${base}/rag-conversations/${selectedConversation}`,
+        normalizeConversationDetail(
+          await apiRequest<ConversationDetail>(
+            `${base}/rag-conversations/${selectedConversation}`,
+          ),
         ),
       );
     } catch (caught) {
@@ -452,7 +515,7 @@ export function RagChatbot({
             href={`/documents/${organisationId}`}
           >
             <FileText aria-hidden="true" size={16} />
-            <span>Company Docs</span>
+            <span>Company documents</span>
           </Link>
         </nav>
 

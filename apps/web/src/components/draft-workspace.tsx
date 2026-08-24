@@ -3,13 +3,15 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
   type JSX,
 } from "react";
 import { Badge, Button } from "@tender/ui";
-import { apiRequest } from "../lib/api";
+import { apiRequest, formatApiError } from "../lib/api";
 import { humanizeEnum } from "@tender/ui";
+import { RationaleDialog } from "./rationale-dialog";
 
 type SourceMode =
   | "FULL_AUTHORISED_TENDER_CONTEXT"
@@ -106,6 +108,44 @@ function isSectionReady(section: Section): boolean {
   );
 }
 
+function describeDraftReviewState(reviewState: string | null): {
+  readonly detail: string;
+  readonly label: string;
+} {
+  switch (reviewState) {
+    case "IN_REVIEW":
+      return {
+        detail:
+          "This draft is with a reviewer now. Changes and approval stay recorded on the draft itself.",
+        label: "Review requested",
+      };
+    case "CHANGES_REQUESTED":
+      return {
+        detail:
+          "Reviewer feedback is still outstanding before the draft can move forward.",
+        label: "Changes requested",
+      };
+    case "APPROVED":
+      return {
+        detail:
+          "This draft version is approved for final review readiness checks.",
+        label: "Approved for final review",
+      };
+    case "REJECTED":
+      return {
+        detail:
+          "This draft version was rejected and needs a new reviewed version.",
+        label: "Rejected",
+      };
+    default:
+      return {
+        detail:
+          "Create the draft, then request review when the content is ready.",
+        label: "Not yet requested",
+      };
+  }
+}
+
 export function DraftWorkspace({
   onOpenReview,
   organisationId,
@@ -126,6 +166,11 @@ export function DraftWorkspace({
   >([]);
   const [selectedSectionId, setSelectedSectionId] = useState("");
   const [mode, setMode] = useState<SourceMode>("TENDER_ONLY");
+  const [reviewAction, setReviewAction] = useState<
+    "APPROVE_VERSION" | "REQUEST_CHANGES" | "START_REVIEW" | null
+  >(null);
+  const draftSetupDetails = useRef<HTMLDetailsElement>(null);
+  const [draftSetupOpen, setDraftSetupOpen] = useState(false);
   const [status, setStatus] = useState("Loading drafting workspace…");
 
   const load = useCallback(async (): Promise<void> => {
@@ -286,24 +331,22 @@ export function DraftWorkspace({
         "Draft generation queued. Human approval will still be required.",
       );
       await load();
-    } catch {
+    } catch (error) {
       setStatus(
-        "Generation could not start. Current extraction, assessment, checklist, evidence permission, template, and provider authority are required.",
+        formatApiError(
+          error,
+          "Generation could not start. Current extraction, assessment, checklist, evidence permission, template, and provider authority are required.",
+        ),
       );
     }
   }
 
   async function review(
-    action: "APPROVE_VERSION" | "REQUEST_CHANGES",
+    action: "APPROVE_VERSION" | "REQUEST_CHANGES" | "START_REVIEW",
+    rationale: string,
   ): Promise<void> {
     const draft = drafts.find(({ id }) => id === selectedDraft);
     if (draft === undefined || version === null) return;
-    const rationale = window.prompt(
-      action === "APPROVE_VERSION"
-        ? "Approval rationale (minimum 10 characters)"
-        : "Requested changes and rationale",
-    );
-    if (rationale === null) return;
     try {
       await apiRequest(
         `${base}/drafts/${draft.id}/versions/${version.id}/reviews`,
@@ -312,12 +355,26 @@ export function DraftWorkspace({
           method: "POST",
         },
       );
+      setReviewAction(null);
       await loadVersion();
-    } catch {
+    } catch (error) {
       setStatus(
-        "Review action was blocked by permissions, separation of duties, unsupported claims, placeholders, conflicts, or stale sources.",
+        formatApiError(
+          error,
+          "Review action was blocked by permissions, separation of duties, unsupported claims, placeholders, conflicts, or stale sources.",
+        ),
       );
     }
+  }
+
+  function focusDraftSetup(): void {
+    if (draftSetupDetails.current !== null) {
+      draftSetupDetails.current.open = true;
+    }
+    setDraftSetupOpen(true);
+    window.setTimeout(() => {
+      document.getElementById("draft-title-input")?.focus();
+    }, 0);
   }
 
   const selectedSection =
@@ -335,6 +392,51 @@ export function DraftWorkspace({
     selectedSection?.placeholders.filter(
       (placeholder) => placeholder.approvalBlocking,
     ) ?? [];
+  const reviewSummary = describeDraftReviewState(version?.reviewState ?? null);
+  const showPrimaryDraftSetup =
+    version === null && drafts.length === 0 && draftSetupOpen;
+  const draftSetupForm = (
+    <>
+      <h4>Start a new AI-assisted draft</h4>
+      <p>This is an AI-assisted first draft, not a final bid package.</p>
+      <p>Human review is mandatory.</p>
+      <p>
+        The platform does not determine legal compliance, provide legal advice,
+        or guarantee bid success.
+      </p>
+      <form onSubmit={(event) => void startGeneration(event)}>
+        <label>
+          Draft title
+          <input id="draft-title-input" maxLength={200} name="title" required />
+        </label>
+        <label>
+          Evidence scope
+          <select
+            value={mode}
+            onChange={(event) => setMode(event.target.value as SourceMode)}
+          >
+            <option value="TENDER_ONLY">Tender only</option>
+            <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
+              Tender and approved company evidence
+            </option>
+            <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
+              Tender and derived workflow warnings
+            </option>
+            <option value="FULL_AUTHORISED_TENDER_CONTEXT">
+              Full authorised context
+            </option>
+          </select>
+        </label>
+        <label>
+          Writing preference only (not factual evidence)
+          <textarea maxLength={2000} name="instructions" />
+        </label>
+        <button disabled={templates.length === 0} type="submit">
+          Generate controlled first draft
+        </button>
+      </form>
+    </>
+  );
 
   return (
     <section aria-labelledby="draft-heading" className="draft-columns">
@@ -368,7 +470,7 @@ export function DraftWorkspace({
         </h2>
         {version?.invalidatedAt != null && (
           <p className="warning">
-            This version is invalidated and not current.
+            This version is out of date and needs refresh.
           </p>
         )}
         {selectedSection === null ? (
@@ -384,11 +486,25 @@ export function DraftWorkspace({
         ) : null}
         {selectedSection === null ? (
           <div className="workspace-empty-row">
-            <p>
-              {drafts.length === 0
-                ? "No draft has been generated yet. Use Draft &amp; generation on the right to start one."
-                : "Select a section to review its content."}
-            </p>
+            {showPrimaryDraftSetup ? (
+              <div style={{ display: "grid", gap: 16, width: "100%" }}>
+                <div>
+                  <h3>Start a new proposal draft</h3>
+                  <p>
+                    Create the first draft from current tender sources and
+                    approved evidence. Unsupported inputs remain visible for
+                    human review.
+                  </p>
+                </div>
+                {draftSetupForm}
+              </div>
+            ) : (
+              <p>
+                {drafts.length === 0
+                  ? "No draft has been created yet. Use Draft setup on the right to start one."
+                  : "Select a section to review its content."}
+              </p>
+            )}
           </div>
         ) : (
           <>
@@ -408,7 +524,13 @@ export function DraftWorkspace({
             </div>
             <div className="draft-content">{selectedSection.content}</div>
             {blockingPlaceholders.length > 0 && (
-              <div className="workspace-card" style={{ padding: 14 }}>
+              <div
+                style={{
+                  borderTop: "1px solid var(--border-subtle)",
+                  marginTop: 16,
+                  paddingTop: 14,
+                }}
+              >
                 <h4>Placeholders</h4>
                 {blockingPlaceholders.map((placeholder) => (
                   <p className="warning" key={placeholder.id}>
@@ -453,39 +575,99 @@ export function DraftWorkspace({
 
       <div className="workspace-card draft-rail">
         <div className="draft-rail__readiness">
-          <strong>{readiness === null ? "—" : `${readiness}%`}</strong>
-          <span>Overall draft readiness</span>
+          <strong>
+            {version === null
+              ? "—"
+              : readiness === null
+                ? "0%"
+                : `${readiness}%`}
+          </strong>
+          <span>
+            {version === null
+              ? "No proposal draft yet"
+              : "Sections ready for review"}
+          </span>
         </div>
-        {version !== null && (
+        {version !== null ? (
           <p style={{ fontSize: "0.76rem", margin: 0 }}>
             Version {version.versionNumber} ·{" "}
             {humanizeEnum(version.reviewState)}
           </p>
+        ) : (
+          <p style={{ fontSize: "0.76rem", margin: 0 }}>
+            Set up the first draft to start writing and review.
+          </p>
         )}
-        <div className="draft-rail__actions">
-          <Button
-            onClick={() => void review("REQUEST_CHANGES")}
-            variant="secondary"
+        <div style={{ display: "grid", gap: 8 }}>
+          <strong>{reviewSummary.label}</strong>
+          <p
+            style={{
+              color: "var(--text-secondary)",
+              fontSize: "0.82rem",
+              margin: 0,
+            }}
           >
-            Request changes
-          </Button>
-          <Button onClick={() => void review("APPROVE_VERSION")}>
-            Approve for final readiness review
-          </Button>
-          {onOpenReview !== undefined && (
-            <Button onClick={onOpenReview} variant="secondary">
-              Open Review &amp; Export
-            </Button>
-          )}
+            {reviewSummary.detail}
+          </p>
         </div>
+        {version === null ? (
+          <div className="draft-rail__actions">
+            <Button onClick={focusDraftSetup} type="button">
+              Set up draft
+            </Button>
+          </div>
+        ) : (
+          <div className="draft-rail__actions">
+            <Button
+              onClick={() => setReviewAction("START_REVIEW")}
+              type="button"
+              variant="secondary"
+            >
+              Request review
+            </Button>
+            <Button
+              onClick={() => setReviewAction("REQUEST_CHANGES")}
+              type="button"
+              variant="secondary"
+            >
+              Request changes
+            </Button>
+            <Button
+              onClick={() => setReviewAction("APPROVE_VERSION")}
+              type="button"
+            >
+              Approve for final readiness review
+            </Button>
+            {onOpenReview !== undefined && (
+              <Button onClick={onOpenReview} variant="secondary">
+                Open review package
+              </Button>
+            )}
+          </div>
+        )}
+        {onOpenReview !== undefined && version === null ? (
+          <div className="draft-rail__actions">
+            <Button onClick={onOpenReview} variant="secondary">
+              Open review package
+            </Button>
+          </div>
+        ) : null}
         <p aria-live="polite" style={{ fontSize: "0.76rem" }}>
           {status}
         </p>
 
-        <details className="disclosure">
+        <details
+          className="disclosure"
+          onToggle={(event) =>
+            setDraftSetupOpen((event.currentTarget as HTMLDetailsElement).open)
+          }
+          ref={draftSetupDetails}
+        >
           <summary>
-            Draft &amp; generation
-            <small>Select drafts, start generation, review history</small>
+            Draft setup and history
+            <small>
+              Select drafts, review older versions, or start a new draft
+            </small>
           </summary>
           <div className="disclosure__body tender-tools-panel">
             {drafts.length > 0 && (
@@ -498,7 +680,7 @@ export function DraftWorkspace({
                   <option value="">Select a draft</option>
                   {drafts.map((draft) => (
                     <option key={draft.id} value={draft.id}>
-                      {draft.title} · {draft.lifecycle}
+                      {draft.title}
                     </option>
                   ))}
                 </select>
@@ -512,7 +694,7 @@ export function DraftWorkspace({
                     <li key={item.id}>
                       Version {item.versionNumber} ·{" "}
                       {humanizeEnum(item.reviewState)}
-                      {item.invalidatedAt === null ? "" : " · invalidated"}
+                      {item.invalidatedAt === null ? "" : " · out of date"}
                     </li>
                   ))}
                 </ol>
@@ -520,17 +702,14 @@ export function DraftWorkspace({
             )}
             {runs.length > 0 && (
               <>
-                <h4>Generation history</h4>
+                <h4>Draft history</h4>
                 {runs.map((run) => (
                   <p key={run.id}>
-                    {humanizeEnum(run.currentStage)} ·{" "}
                     {humanizeEnum(run.status)} · {run.progressPercentage}% ·{" "}
-                    {run.validatedClaimCount} validated claims ·{" "}
+                    {run.validatedClaimCount} supported claims ·{" "}
                     {run.citationCount} citations · {run.placeholderCount}{" "}
                     placeholders
-                    {run.safeFailureCode === null
-                      ? ""
-                      : ` · ${run.safeFailureCode}`}
+                    {run.safeFailureCode === null ? "" : " · needs attention"}
                   </p>
                 ))}
               </>
@@ -543,49 +722,45 @@ export function DraftWorkspace({
                 Create controlled draft template
               </button>
             )}
-            <h4>Start a new generation</h4>
-            <p>This is an AI-assisted first draft, not a final bid package.</p>
-            <p>Human review is mandatory.</p>
-            <p>
-              The platform does not determine legal compliance, provide legal
-              advice, or guarantee bid success.
-            </p>
-            <form onSubmit={(event) => void startGeneration(event)}>
-              <label>
-                Draft title
-                <input maxLength={200} name="title" required />
-              </label>
-              <label>
-                Authorised source mode
-                <select
-                  value={mode}
-                  onChange={(event) =>
-                    setMode(event.target.value as SourceMode)
-                  }
-                >
-                  <option value="TENDER_ONLY">Tender only</option>
-                  <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
-                    Tender and approved company evidence
-                  </option>
-                  <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
-                    Tender and derived workflow warnings
-                  </option>
-                  <option value="FULL_AUTHORISED_TENDER_CONTEXT">
-                    Full authorised context
-                  </option>
-                </select>
-              </label>
-              <label>
-                Writing preference only (not factual evidence)
-                <textarea maxLength={2000} name="instructions" />
-              </label>
-              <button disabled={templates.length === 0} type="submit">
-                Generate controlled first draft
-              </button>
-            </form>
+            {showPrimaryDraftSetup ? (
+              <p>
+                Draft setup is open in the main workspace so you have more room
+                to title the draft, choose evidence scope, and start generation.
+              </p>
+            ) : (
+              draftSetupForm
+            )}
           </div>
         </details>
       </div>
+      {reviewAction !== null && (
+        <RationaleDialog
+          confirmLabel={
+            reviewAction === "APPROVE_VERSION"
+              ? "Approve draft"
+              : reviewAction === "START_REVIEW"
+                ? "Request review"
+                : "Request changes"
+          }
+          description={
+            reviewAction === "APPROVE_VERSION"
+              ? "Approval stays recorded on the draft and unlocks downstream final-review checks."
+              : reviewAction === "START_REVIEW"
+                ? "Tell the reviewer what to focus on before the draft moves forward."
+                : "Record the changes needed before this draft can move forward."
+          }
+          helperText="Enter at least 10 characters."
+          onClose={() => setReviewAction(null)}
+          onConfirm={(rationale) => review(reviewAction, rationale)}
+          title={
+            reviewAction === "APPROVE_VERSION"
+              ? "Approve draft"
+              : reviewAction === "START_REVIEW"
+                ? "Request draft review"
+                : "Request draft changes"
+          }
+        />
+      )}
     </section>
   );
 }

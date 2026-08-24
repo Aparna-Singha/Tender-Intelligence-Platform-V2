@@ -77,7 +77,7 @@ test("validates the release golden business workflow and downloaded artifact", a
   await assertWorkspaceStages(ownerPage, golden);
 
   await expect(
-    ownerPage.getByRole("heading", { name: "Controlled review package" }),
+    ownerPage.getByRole("heading", { name: "Controlled download" }),
   ).toBeVisible();
   await expect(
     ownerPage.getByText(/do not approve or perform external/i),
@@ -92,24 +92,18 @@ test("validates the release golden business workflow and downloaded artifact", a
     where: { tenderId: golden.tenderId },
   });
 
-  await ownerPage.once("dialog", (dialog) => dialog.accept());
-  await ownerPage
-    .getByRole("button", { name: "Generate review package" })
-    .click();
+  await confirmControlledReviewPackageCreation(ownerPage);
 
   const firstRun = await waitForGeneratedRun(golden.tenderId, existingRunCount);
   await expect
     .poll(() => latestRunReviewStatus(firstRun.id))
     .not.toBe("APPROVED");
 
-  await ownerPage.once("dialog", (dialog) =>
-    dialog.accept(
-      "Requester self-approval must remain blocked for controlled downloads.",
-    ),
+  await submitControlledReviewPackageRationale(
+    ownerPage,
+    "Approve for controlled download",
+    "Requester self-approval must remain blocked for controlled downloads.",
   );
-  await ownerPage
-    .getByRole("button", { name: "Approve for controlled download" })
-    .click();
   await expect
     .poll(async () =>
       prisma.packageApproval.count({
@@ -149,19 +143,26 @@ test("validates the release golden business workflow and downloaded artifact", a
       reviews: [{ id: expect.any(String) }],
     });
   await reviewer.page.reload();
-  await reviewer.page.once("dialog", (dialog) =>
-    dialog.accept("Independent reviewer approval for controlled download."),
+  await submitControlledReviewPackageRationale(
+    reviewer.page,
+    "Approve for controlled download",
+    "Independent reviewer approval for controlled download.",
   );
-  await reviewer.page
-    .getByRole("button", { name: "Approve for controlled download" })
-    .click();
 
   await expect
     .poll(async () => latestRunReviewStatus(firstRun.id), {
       timeout: REQUEST_TIMEOUT_MS,
     })
     .toBe("APPROVED");
-  await expect(reviewer.page.getByText(/Approval history/i)).toBeVisible();
+  const advancedAuditDetails = reviewer.page.locator("details").filter({
+    has: reviewer.page.getByText(/Advanced readiness and audit details/i),
+  });
+  if ((await advancedAuditDetails.getAttribute("open")) === null) {
+    await advancedAuditDetails.locator("summary").click();
+  }
+  await expect(
+    advancedAuditDetails.getByText(/Approval history/i),
+  ).toBeVisible();
   expect(reviewerTelemetry.errors).toEqual([]);
   expect(reviewerTelemetry.failedRequests).toEqual([]);
 
@@ -174,10 +175,7 @@ test("validates the release golden business workflow and downloaded artifact", a
   const secondExistingRunCount = await prisma.controlledReviewPackageRun.count({
     where: { tenderId: golden.tenderId },
   });
-  await ownerPage.once("dialog", (dialog) => dialog.accept());
-  await ownerPage
-    .getByRole("button", { name: "Generate review package" })
-    .click();
+  await confirmControlledReviewPackageCreation(ownerPage);
 
   const secondRun = await waitForGeneratedRun(
     golden.tenderId,
@@ -209,14 +207,11 @@ test("validates the release golden business workflow and downloaded artifact", a
       reviews: [{ id: expect.any(String) }],
     });
   await reviewer.page.reload();
-  await reviewer.page.once("dialog", (dialog) =>
-    dialog.accept(
-      "Second independent reviewer approval for controlled download.",
-    ),
+  await submitControlledReviewPackageRationale(
+    reviewer.page,
+    "Approve for controlled download",
+    "Second independent reviewer approval for controlled download.",
   );
-  await reviewer.page
-    .getByRole("button", { name: "Approve for controlled download" })
-    .click();
 
   await expect
     .poll(async () => latestRunReviewStatus(secondRun.id), {
@@ -243,12 +238,11 @@ test("validates the release golden business workflow and downloaded artifact", a
   });
   const adminTelemetry = captureBrowserQuality(admin.page);
   await navigateToExport(admin.page, golden);
-  await admin.page.once("dialog", (dialog) =>
-    dialog.accept("Administrative withdrawal of current controlled download."),
+  await submitControlledReviewPackageRationale(
+    admin.page,
+    "Revoke controlled download",
+    "Administrative withdrawal of current controlled download.",
   );
-  await admin.page
-    .getByRole("button", { name: "Revoke controlled download" })
-    .click();
 
   await expect
     .poll(async () => latestRunReviewStatus(secondRun.id), {
@@ -286,7 +280,7 @@ test("validates responsive rendering and forbidden access paths", async ({
   });
   await navigateToExport(consultant.page, fixture);
   await expect(
-    consultant.page.getByRole("heading", { name: "Controlled review package" }),
+    consultant.page.getByRole("heading", { name: "Controlled download" }),
   ).toBeVisible();
 
   const platformAdmin = await loginAs(browser, fixture.users.platformAdmin, {
@@ -297,7 +291,7 @@ test("validates responsive rendering and forbidden access paths", async ({
   await expect(platformAdmin.page.getByRole("combobox")).toHaveValue("");
   await expect(
     platformAdmin.page.getByRole("heading", {
-      name: "Controlled review package",
+      name: "Controlled download",
     }),
   ).toHaveCount(0);
 
@@ -309,7 +303,7 @@ test("validates responsive rendering and forbidden access paths", async ({
   await expect(crossTenant.page.getByRole("combobox")).toHaveValue("");
   await expect(
     crossTenant.page.getByRole("heading", {
-      name: "Controlled review package",
+      name: "Controlled download",
     }),
   ).toHaveCount(0);
 
@@ -1104,7 +1098,7 @@ async function seedPhase13Fixture(
       actorUserId: reviewer.id,
       disposition: "PROCEED_TO_CONTROLLED_EXPORT_REVIEW",
       organisationId: organisation.id,
-      rationale: "Proceed to controlled export review for Phase 13 validation.",
+      rationale: "Proceed to review package for Phase 13 validation.",
       runFingerprint: READINESS_FINGERPRINT,
       runId: finalReadinessRun.id,
       tenderId: tender.id,
@@ -2137,43 +2131,41 @@ async function assertWorkspaceStages(
 
   await expect(
     page.getByRole("heading", {
-      name: "Review & Export",
+      name: /^Review package$/u,
     }),
   ).toBeVisible();
-  await expectLegacyCompatibilityNote("Export", "Review & Export");
+  await expectLegacyCompatibilityNote("Export", "Review package");
 
   await page.goto(`${tenderPath}?stage=extraction`);
   await expect(page).toHaveURL(/stage=extraction/u);
   await expectLegacyCompatibilityNote("Extraction", "Overview");
   await expect(
-    page.getByRole("heading", { name: "Assessment summary" }),
+    page.getByRole("heading", { name: "What matters now" }),
   ).toBeVisible();
 
   await page.goto(`${tenderPath}?stage=risks`);
   await expect(page).toHaveURL(/stage=risks/u);
   await expectLegacyCompatibilityNote("Risks", "Overview");
   await expect(
-    page.getByRole("heading", { name: "Assessment summary" }),
+    page.getByRole("heading", { name: "What matters now" }),
   ).toBeVisible();
 
   await page.goto(`${tenderPath}?stage=evidence`);
   await expect(page).toHaveURL(/stage=evidence/u);
-  await expectLegacyCompatibilityNote("Evidence", "Eligibility");
   await expect(
     page.getByRole("heading", { name: "Eligibility" }),
   ).toBeVisible();
   await expect(
-    page.locator("summary", { hasText: /Evidence & assessment tools/u }),
+    page.locator("summary", { hasText: /Audit & evidence/u }),
   ).toBeVisible();
 
   await page.goto(`${tenderPath}?stage=checklist`);
   await expect(page).toHaveURL(/stage=checklist/u);
-  await expectLegacyCompatibilityNote("Checklist", "Eligibility");
   await expect(
     page.getByRole("heading", { name: "Eligibility" }),
   ).toBeVisible();
   await expect(
-    page.locator("summary", { hasText: /Missing documents and actions/u }),
+    page.locator("summary", { hasText: /Audit & evidence/u }),
   ).toBeVisible();
 
   await primaryNav
@@ -2224,17 +2216,38 @@ async function assertWorkspaceStages(
 
   await page.goto(`${tenderPath}?stage=readiness`);
   await expect(page).toHaveURL(/stage=readiness/u);
-  await expectLegacyCompatibilityNote("Readiness", "Review & Export");
+  await expectLegacyCompatibilityNote("Readiness", "Review package");
   await expect(
-    page.getByRole("heading", { name: "Review & Export" }),
+    page.getByRole("heading", { name: /^Review package$/u }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Proceed to controlled export review" }),
+    page.getByRole("button", { name: "Proceed to review package" }),
   ).toBeVisible();
 
   await page.goto(`${tenderPath}?stage=export`);
   await expect(page).toHaveURL(/stage=export/u);
-  await expectLegacyCompatibilityNote("Export", "Review & Export");
+  await expectLegacyCompatibilityNote("Export", "Review package");
+}
+
+async function confirmControlledReviewPackageCreation(
+  page: Page,
+): Promise<void> {
+  await page.getByRole("button", { name: "Create review package" }).click();
+  const dialog = page.getByRole("dialog", { name: "Create review package" });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("button", { name: "Create review package" }).click();
+}
+
+async function submitControlledReviewPackageRationale(
+  page: Page,
+  actionName: "Approve for controlled download" | "Revoke controlled download",
+  rationale: string,
+): Promise<void> {
+  await page.getByRole("button", { name: actionName }).click();
+  const dialog = page.getByRole("dialog", { name: actionName });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole("textbox", { name: "Rationale" }).fill(rationale);
+  await dialog.getByRole("button", { name: actionName }).click();
 }
 
 async function waitForGeneratedRun(tenderId: string, previousCount: number) {

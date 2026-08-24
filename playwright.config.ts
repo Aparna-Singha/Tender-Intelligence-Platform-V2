@@ -26,17 +26,18 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm --filter @tender/api start",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       url: `${apiBaseUrl}/ready`,
     },
     {
       command: "pnpm --filter @tender/worker start",
-      reuseExistingServer: true,
+      reuseExistingServer: false,
       url: `${workerBaseUrl}/ready`,
     },
     {
-      command: "pnpm --filter @tender/web start",
-      reuseExistingServer: true,
+      command:
+        "pnpm --filter @tender/ui build && pnpm --filter @tender/web build && pnpm --filter @tender/web start",
+      reuseExistingServer: false,
       url: `${webBaseUrl}/login`,
     },
   ],

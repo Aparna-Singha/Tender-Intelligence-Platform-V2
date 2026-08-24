@@ -22,6 +22,10 @@ vi.mock("../lib/api", () => ({
 vi.mock("../lib/direct-upload", () => ({
   uploadFileToSignedStorageUrl,
 }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/documents/org-1",
+  useSearchParams: () => new URLSearchParams(),
+}));
 
 describe("company docs workspace", () => {
   beforeEach(() => {

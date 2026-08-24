@@ -12,7 +12,7 @@ interface AssessmentRun {
   progressPercentage: number;
   publicMessage: string;
   riskAnalysisRunId: string;
-  snapshot: { capturedAt: string };
+  snapshot?: { capturedAt: string } | null;
   status: string;
   tenderVersionId: string;
 }
@@ -71,11 +71,44 @@ interface EvidenceFact {
   invalidatedAt: string | null;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function isAssessmentRunValue(value: unknown): value is AssessmentRun {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.status === "string" &&
+    (value.snapshot === undefined ||
+      value.snapshot === null ||
+      (isRecord(value.snapshot) &&
+        typeof value.snapshot.capturedAt === "string"))
+  );
+}
+
+function isMatrixResultValue(value: unknown): value is MatrixResult {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.counts) &&
+    Array.isArray(value.items) &&
+    typeof value.total === "number"
+  );
+}
+
 export function EvidenceMatrix({
+  currentAssessmentRunId = null,
+  focusRequest = null,
   organisationId,
   tenderId,
   versionId,
 }: {
+  readonly currentAssessmentRunId?: string | null;
+  readonly focusRequest?: {
+    readonly assessmentId?: string;
+    readonly mode: "assessment" | "capture";
+    readonly token: number;
+  } | null;
   readonly organisationId: string;
   readonly tenderId: string;
   readonly versionId: string;
@@ -91,11 +124,28 @@ export function EvidenceMatrix({
 
   async function loadRuns(): Promise<void> {
     try {
-      const result = await apiRequest<readonly AssessmentRun[]>(
+      const result = await apiRequest<unknown>(
         `${base}/versions/${versionId}/eligibility-assessments`,
       );
-      setRuns(result);
-      setRunId((current) => (current === "" ? (result[0]?.id ?? "") : current));
+      const safeRuns = Array.isArray(result)
+        ? result.filter(isAssessmentRunValue)
+        : [];
+      setRuns(safeRuns);
+      const preferredRunId =
+        safeRuns.find(
+          (run) =>
+            run.invalidatedAt == null &&
+            currentAssessmentRunId !== null &&
+            run.id === currentAssessmentRunId,
+        )?.id ??
+        safeRuns.find((run) => run.invalidatedAt == null)?.id ??
+        safeRuns[0]?.id ??
+        "";
+      setRunId((current) =>
+        current === "" || !safeRuns.some((run) => run.id === current)
+          ? preferredRunId
+          : current,
+      );
     } catch {
       setMessage("Unable to load evidence-assessment history.");
     }
@@ -128,11 +178,10 @@ export function EvidenceMatrix({
     if (runId === "") return;
     const query = state === "" ? "" : `?state=${state}`;
     try {
-      setMatrix(
-        await apiRequest<MatrixResult>(
-          `${base}/eligibility-assessments/${runId}/matrix${query}`,
-        ),
+      const result = await apiRequest<unknown>(
+        `${base}/eligibility-assessments/${runId}/matrix${query}`,
       );
+      setMatrix(isMatrixResultValue(result) ? result : null);
     } catch {
       setMatrix(null);
     }
@@ -143,7 +192,7 @@ export function EvidenceMatrix({
     void loadFacts();
     const timer = window.setInterval(() => void loadRuns(), 5000);
     return () => window.clearInterval(timer);
-  }, [organisationId, tenderId, versionId]);
+  }, [currentAssessmentRunId, organisationId, tenderId, versionId]);
   useEffect(() => {
     void loadMatrix();
   }, [runId, state]);
@@ -297,9 +346,44 @@ export function EvidenceMatrix({
     }
   }
 
+  const currentRun =
+    currentAssessmentRunId === null
+      ? null
+      : (runs.find(
+          (run) =>
+            run.invalidatedAt == null && run.id === currentAssessmentRunId,
+        ) ?? null);
   const active = runs.find((run) => run.id === runId);
+
+  useEffect(() => {
+    if (focusRequest === null) return;
+    if (focusRequest.mode === "assessment" && currentRun?.id !== undefined) {
+      if (runId !== currentRun.id) {
+        setRunId(currentRun.id);
+        return;
+      }
+      const target = document.getElementById(
+        focusRequest.assessmentId === undefined
+          ? "evidence-matrix-panel"
+          : `assessment-review-${focusRequest.assessmentId}`,
+      );
+      if (target instanceof HTMLElement) {
+        target.scrollIntoView({ block: "start" });
+        target.focus();
+      }
+      return;
+    }
+    if (focusRequest.mode === "capture") {
+      const target = document.getElementById("evidence-fact-type-input");
+      if (target instanceof HTMLElement) {
+        target.scrollIntoView({ block: "start" });
+        target.focus();
+      }
+    }
+  }, [currentRun?.id, focusRequest, matrix, runId]);
+
   return (
-    <section>
+    <section id="evidence-matrix-panel">
       <p className="warning">
         Assessment results do not guarantee eligibility or bid success. Verified
         and not-applicable states still require authorised human action.
@@ -332,6 +416,7 @@ export function EvidenceMatrix({
         <label>
           Fact type
           <input
+            id="evidence-fact-type-input"
             name="fact_type"
             pattern="[A-Z][A-Z0-9_]{1,79}"
             placeholder="OEM_AUTHORISATION_SCOPE"
@@ -410,10 +495,14 @@ export function EvidenceMatrix({
             value={runId}
             onChange={(event) => setRunId(event.target.value)}
           >
-            {runs.map((run, index) => (
+            {runs.map((run) => (
               <option key={run.id} value={run.id}>
-                {index === 0 ? "Latest" : "Historical"} —{" "}
-                {humanizeEnum(run.status)}
+                {run.id === currentRun?.id
+                  ? "Current"
+                  : run.invalidatedAt == null
+                    ? "Previous"
+                    : "Historical"}{" "}
+                - {humanizeEnum(run.status)}
               </option>
             ))}
           </select>
@@ -430,7 +519,10 @@ export function EvidenceMatrix({
           <p>Extraction run: {active.extractionRunId}</p>
           <p>EARLY risk run: {active.riskAnalysisRunId}</p>
           <p>
-            Snapshot: {new Date(active.snapshot.capturedAt).toLocaleString()}
+            Snapshot:{" "}
+            {active.snapshot?.capturedAt === undefined
+              ? "Unavailable for this run."
+              : new Date(active.snapshot.capturedAt).toLocaleString()}
           </p>
           {active.invalidatedAt !== null && (
             <p className="warning">
@@ -469,7 +561,7 @@ export function EvidenceMatrix({
         <p>No applicable cited requirements were available for comparison.</p>
       )}
       {matrix?.items.map((item) => (
-        <article key={item.id} tabIndex={0}>
+        <article id={`assessment-review-${item.id}`} key={item.id} tabIndex={0}>
           <h3>{item.structuredRequirement.title}</h3>
           <p>{item.structuredRequirement.normalizedStatement}</p>
           <p>

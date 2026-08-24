@@ -3,11 +3,11 @@
 import {
   ChevronRight,
   CircleHelp,
-  FileCheck2,
   Files,
   Home,
   Menu,
   MessageSquare,
+  Sparkles,
   Settings,
   UserRound,
   X,
@@ -158,9 +158,14 @@ function SidebarContents({
       label: "Tenders",
     },
     {
-      href: organisationId === null ? null : `/documents/${organisationId}`,
-      icon: FileCheck2,
-      label: "Company Docs",
+      href: organisationId === null ? null : `/settings/${organisationId}`,
+      icon: Settings,
+      label: "Company",
+    },
+    {
+      href: organisationId === null ? null : assistantHref(organisationId),
+      icon: Sparkles,
+      label: "AI Assistant",
     },
   ];
   const recentTenders = [...tenders]
@@ -186,8 +191,6 @@ function SidebarContents({
       return true;
     })
     .slice(0, 3);
-  const assistantRoute =
-    organisationId === null ? null : assistantHref(organisationId);
   const rawInitials = session?.user.display_name
     .split(/\s+/)
     .filter(Boolean)
@@ -280,29 +283,14 @@ function SidebarContents({
           )}
         </SidebarSection>
 
-        <SidebarSection title="Chats">
-          {assistantRoute === null && chatShortcuts.length === 0 ? (
+        <SidebarSection title="Tender chats">
+          {chatShortcuts.length === 0 ? (
             <p className="workspace-sidebar__empty">
               Tender chat stays tender-scoped and appears once a workspace
               exists.
             </p>
           ) : (
             <>
-              {assistantRoute === null ? null : (
-                <Link
-                  className={`workspace-sidebar__chat-link ${pathname === assistantRoute ? "workspace-sidebar__chat-link--active" : ""}`}
-                  href={assistantRoute}
-                  {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-                >
-                  <span className="workspace-sidebar__chat-indicator workspace-sidebar__chat-indicator--pinned">
-                    <MessageSquare aria-hidden="true" size={12} />
-                  </span>
-                  <span>
-                    AI Assistant
-                    <small>Workspace guidance only</small>
-                  </span>
-                </Link>
-              )}
               {chatShortcuts.map((tender, index) => (
                 <Link
                   className={`workspace-sidebar__chat-link ${pathTenderId === tender.id && searchStage === "ask" ? "workspace-sidebar__chat-link--active" : ""}`}
@@ -336,7 +324,9 @@ function SidebarContents({
         <div className="workspace-sidebar__footer-links">
           <WorkspaceNavItem
             href={
-              organisationId === null ? null : `/settings/${organisationId}`
+              organisationId === null
+                ? null
+                : `/settings/${organisationId}?section=security`
             }
             icon={Settings}
             label="Settings"
@@ -445,12 +435,19 @@ export function AppShell({
   const mobileTitle = useMemo(() => {
     if (pathname.startsWith("/assistant/")) return "AI Assistant";
     if (pathname.startsWith("/tenders/")) return "Tenders";
-    if (pathname.startsWith("/documents/")) return "Company Docs";
-    if (pathname.startsWith("/settings/")) return "Settings";
+    if (
+      pathname.startsWith("/documents/") ||
+      pathname.startsWith("/onboarding/")
+    )
+      return "Company";
+    if (pathname.startsWith("/settings/")) {
+      return searchParams.get("section") === "security"
+        ? "Settings"
+        : "Company";
+    }
     if (pathname.startsWith("/account")) return "Account";
-    if (pathname.startsWith("/onboarding/")) return "Settings";
     return "Home";
-  }, [pathname]);
+  }, [pathname, searchParams]);
 
   async function switchOrganisation(id: string): Promise<void> {
     await apiRequest(`/organisations/${id}/select`, { method: "POST" });

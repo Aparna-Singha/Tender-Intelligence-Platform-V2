@@ -8,6 +8,7 @@ const { apiRequest, searchParams } = vi.hoisted(() => ({
 }));
 
 vi.mock("next/navigation", () => ({
+  usePathname: () => "/settings/org-1",
   useSearchParams: () => searchParams,
 }));
 
@@ -74,6 +75,7 @@ function mockSettingsLoad(role: string): void {
 describe("settings workspace", () => {
   beforeEach(() => {
     apiRequest.mockReset();
+    searchParams.set("section", "people-access");
   });
 
   it("shows invitation and role controls only when the current membership supports them", async () => {
@@ -97,5 +99,17 @@ describe("settings workspace", () => {
     expect(
       screen.queryByRole("button", { name: "Send invitation" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("keeps preferences navigation URL-addressable from the company profile surface", async () => {
+    searchParams.set("section", "organisation");
+    mockSettingsLoad("OWNER");
+    render(<SettingsWorkspace organisationId="org-1" />);
+    expect(
+      await screen.findByRole("heading", { name: "Company profile" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "View preferences" }),
+    ).toHaveAttribute("href", "/settings/org-1?section=preferences");
   });
 });
