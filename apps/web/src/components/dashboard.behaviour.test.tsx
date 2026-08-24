@@ -129,7 +129,18 @@ describe("dashboard home parity behavior", () => {
             current_step: 1,
             status: "NOT_STARTED",
           },
-          recommendations: [],
+          recommendations: [
+            {
+              action: "Update MSME registration details.",
+              id: "rec-1",
+              priority: "HIGH",
+            },
+            {
+              action: "Add the latest GST certificate.",
+              id: "rec-2",
+              priority: "MEDIUM",
+            },
+          ],
         });
       }
       if (path === "/organisations/org-1/tenders") {
@@ -199,8 +210,8 @@ describe("dashboard home parity behavior", () => {
       }),
     ).toBeInTheDocument();
 
-    expect(screen.getAllByText("6 days left")).toHaveLength(2);
-    expect(screen.getAllByText("3 days overdue")).toHaveLength(2);
+    expect(screen.getAllByText("5 days left")).toHaveLength(2);
+    expect(screen.getAllByText("4 days overdue")).toHaveLength(2);
 
     expect(
       screen.queryByText(
@@ -217,6 +228,25 @@ describe("dashboard home parity behavior", () => {
         "Shown only when the backend exposes real running work.",
       ),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Active work that is still processing."),
+    ).not.toBeInTheDocument();
+
+    const summaryGrid = screen
+      .getByText("Need attention")
+      .closest(".tender-summary-grid");
+    expect(summaryGrid).toBeInstanceOf(HTMLElement);
+    if (!(summaryGrid instanceof HTMLElement)) {
+      throw new Error("Expected summary grid to render");
+    }
+    expect(within(summaryGrid).getByText("4")).toBeInTheDocument();
+
+    const attentionHeading = screen.getByRole("heading", {
+      name: "Needs your attention",
+    });
+    const attentionSection = attentionHeading.closest("section");
+    expect(attentionSection).not.toBeNull();
+    expect(within(attentionSection!).getAllByRole("listitem")).toHaveLength(3);
 
     const tendersHeading = screen.getByRole("heading", {
       name: "Your tenders",

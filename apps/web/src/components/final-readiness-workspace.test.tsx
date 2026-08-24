@@ -222,16 +222,15 @@ describe("final readiness workspace", () => {
     vi.stubGlobal("crypto", { randomUUID: () => "test-test-test-test" });
   });
 
-  it("shows preflight, lifecycle timestamps, treatments, provenance and separate final risk", async () => {
+  it("shows preflight, timestamps, treatments, and linked risk review details", async () => {
     installApi();
     const navigate = vi.fn();
     renderWorkspace(navigate);
     expect(
       await screen.findByText("Hard prerequisites currently pass"),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Linked FINAL_READINESS risk analysis"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Linked risk review")).toBeInTheDocument();
+    expect(screen.getByText("Issues requiring attention")).toBeInTheDocument();
     expect(
       await screen.findByText("Material extraction ambiguity"),
     ).toBeInTheDocument();
@@ -278,7 +277,7 @@ describe("final readiness workspace", () => {
     renderWorkspace();
     await userEvent.click(
       await screen.findByRole("button", {
-        name: "Start final-readiness audit",
+        name: "Start final review",
       }),
     );
     await waitFor(() =>
@@ -313,19 +312,18 @@ describe("final readiness workspace", () => {
       await screen.findByText("Hard prerequisites need attention"),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/invite or assign an eligible reviewer/i),
+      screen.getByText("Independent reviewer is required"),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Prerequisite invalidated/)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Start final-readiness audit" }),
+      screen.getByText("Tender processing is not complete"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Start final review" }),
     ).toBeDisabled();
     expect(screen.queryByText(/final conclusion/i)).not.toBeInTheDocument();
   });
 
   it("uses server lifecycle state for cancellation, retry, stale and invalidated visibility", async () => {
-    const prompt = vi
-      .spyOn(window, "prompt")
-      .mockReturnValue("Cancel because the authoritative inputs are changing.");
     installApi("OWNER", { ...run, completed_at: null, status: "PROCESSING" });
     const view = render(
       <FinalReadinessWorkspace
@@ -337,6 +335,16 @@ describe("final readiness workspace", () => {
     );
     await userEvent.click(
       await screen.findByRole("button", { name: "Cancel run" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Cancel final review run",
+    });
+    await userEvent.type(
+      within(dialog).getByLabelText("Rationale"),
+      "Cancel because the authoritative inputs are changing.",
+    );
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "Cancel run" }),
     );
     expect(
       calls().some(
@@ -356,7 +364,7 @@ describe("final readiness workspace", () => {
       status: "FAILED",
     });
     renderWorkspace();
-    expect(await screen.findByText("Invalidated")).toBeInTheDocument();
+    expect(await screen.findByText("Superseded")).toBeInTheDocument();
     await userEvent.click(
       screen.getByRole("button", { name: "Retry as a new run" }),
     );
@@ -365,7 +373,6 @@ describe("final readiness workspace", () => {
         ([path, init]) => path.endsWith("/retry") && init?.method === "POST",
       ),
     ).toBe(true);
-    prompt.mockRestore();
   });
 
   it("loads append-only history and submits the authoritative current review version", async () => {
@@ -403,7 +410,7 @@ describe("final readiness workspace", () => {
     installApi();
     renderWorkspace();
     const proceed = await screen.findByRole("button", {
-      name: "Proceed to controlled export review",
+      name: "Proceed to review package",
     });
     expect(proceed).toBeDisabled();
     const hold = screen.getByRole("button", { name: "Hold for remediation" });
@@ -466,7 +473,9 @@ describe("final readiness workspace", () => {
     );
     renderWorkspace();
     expect(
-      await screen.findByText(/Current authoritative prerequisites/),
+      await screen.findByText(
+        /latest tender, draft, and evidence records do not yet allow this review to start/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/Request ID: request-safe/)).toBeInTheDocument();
     expect(screen.queryByText(/Prisma|object-key/)).not.toBeInTheDocument();
@@ -491,10 +500,11 @@ describe("final readiness responsive and content safety", () => {
     expect(source).not.toContain("Submit bid");
     expect(source).not.toMatch(/readinessScore|riskScore/i);
     expect(source).not.toMatch(/approved to submit|ready to submit/i);
-    expect(source).toContain("controlled Phase 12 export review");
+    expect(source).toContain("Proceed to review package");
     expect(source).toContain("not approval to submit");
     expect(source).toMatch(
       /not affiliated with GeM, CPPP[\s\S]*government portal/i,
     );
+    expect(source).not.toMatch(/window\.prompt|window\.confirm/);
   });
 });

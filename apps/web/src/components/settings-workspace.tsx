@@ -12,13 +12,13 @@ import {
   Field,
   FormMessage,
   Input,
-  PageHeader,
   Select,
   Table,
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
+import { CompanyWorkspaceHeader } from "./company-workspace-nav";
 
 type SettingsSection =
   "organisation" | "people-access" | "security" | "preferences";
@@ -78,7 +78,7 @@ interface ResumeResponse {
 }
 
 const sectionLabels: Readonly<Record<SettingsSection, string>> = {
-  organisation: "Organisation",
+  organisation: "Profile",
   "people-access": "People & access",
   security: "Security",
   preferences: "Preferences",
@@ -291,21 +291,18 @@ export function SettingsWorkspace({
 
   return (
     <div className="workspace-page settings-page">
-      <PageHeader
-        description="Manage the organisation workspace configuration."
-        title="Settings"
-      />
+      <CompanyWorkspaceHeader organisationId={organisationId} />
 
       <div className="settings-layout">
         <aside className="workspace-card settings-rail">
           <nav aria-label="Settings sections" className="settings-rail__nav">
             {(Object.keys(sectionLabels) as readonly SettingsSection[]).map(
               (section) => (
-                <button
+                <Link
+                  aria-current={activeSection === section ? "page" : undefined}
                   className={`settings-rail__link ${activeSection === section ? "settings-rail__link--active" : ""}`}
+                  href={`/settings/${organisationId}?section=${section}`}
                   key={section}
-                  onClick={() => setActiveSection(section)}
-                  type="button"
                 >
                   <span>{sectionLabels[section]}</span>
                   {section === "people-access" && members.length > 0 ? (
@@ -314,13 +311,12 @@ export function SettingsWorkspace({
                     <small>{activeSessions.length} active session(s)</small>
                   ) : section === "organisation" && profile !== null ? (
                     <small>
-                      {profile.progress.completed_steps.length}/8 profile steps
-                      complete
+                      {profile.progress.completed_steps.length}/8 sections ready
                     </small>
                   ) : section === "preferences" && profile !== null ? (
                     <small>{humanizeEnum(profile.display_mode)}</small>
                   ) : null}
-                </button>
+                </Link>
               ),
             )}
           </nav>
@@ -341,20 +337,19 @@ export function SettingsWorkspace({
               <Card className="settings-panel">
                 <div className="section-header">
                   <div>
-                    <h2>Organisation</h2>
+                    <h2>Company profile</h2>
                     <p>
-                      Existing editable company information and access controls
-                      remain preserved through the current structured profile
-                      flow.
+                      Business details, registrations, experience, and workflow
+                      preferences remain grounded in the current structured
+                      profile flow.
                     </p>
                   </div>
-                  <button
+                  <Link
                     className="button button--secondary"
-                    onClick={() => setActiveSection("people-access")}
-                    type="button"
+                    href={`/settings/${organisationId}?section=preferences`}
                   >
-                    People &amp; access
-                  </button>
+                    View preferences
+                  </Link>
                 </div>
                 <div className="settings-form-grid">
                   <label className="readonly-field">
@@ -395,24 +390,30 @@ export function SettingsWorkspace({
                   </label>
                 </div>
                 <div className="settings-note">
-                  Profile progress:{" "}
+                  Company profile progress:{" "}
                   {profile === null
                     ? "Unavailable"
                     : `${profile.progress.completed_steps.length} of 8 steps complete`}
-                  . Direct field editing is handled in the existing organisation
-                  profile flow.
+                  . Editing still happens in the guided profile flow so the
+                  stored values remain consistent.
                 </div>
                 <div className="inline-actions">
                   <Link
                     className="button button--secondary"
                     href={`/onboarding/${organisationId}`}
                   >
-                    Open organisation profile
+                    Edit company profile
+                  </Link>
+                  <Link
+                    className="button button--quiet"
+                    href={`/documents/${organisationId}`}
+                  >
+                    Open documents
                   </Link>
                 </div>
                 <p className="settings-field-hint">
-                  Organisation created {formatTimestamp(organisation.createdAt)}
-                  . Current role:{" "}
+                  Workspace created {formatTimestamp(organisation.createdAt)}.
+                  Current role:{" "}
                   {currentRole === ""
                     ? "Unavailable"
                     : humanizeEnum(currentRole)}
@@ -429,9 +430,9 @@ export function SettingsWorkspace({
                   <div>
                     <h2>People &amp; access</h2>
                     <p>
-                      Real organisation membership, invitation, and role
-                      controls only. Member removal and custom permissions are
-                      not supported by the current backend.
+                      Real invitation and role controls only. Advanced
+                      permission design stays constrained by the current backend
+                      contract.
                     </p>
                   </div>
                 </div>
@@ -489,8 +490,8 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Current members</h2>
                     <p>
-                      Roles reflect current organisation membership only.
-                      Invitation acceptance is handled through the signed
+                      Roles reflect the current organisation membership.
+                      Invitation acceptance still happens through the signed
                       invitation link.
                     </p>
                   </div>
@@ -615,9 +616,9 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Security controls</h2>
                     <p>
-                      Organisation-wide MFA, SSO, IP allowlists, and password
-                      policy controls are not available in the current product
-                      contract.
+                      Account session visibility is available here. Broader
+                      workspace security controls are not part of the current
+                      product contract.
                     </p>
                   </div>
                   <Link className="button button--secondary" href="/account">
@@ -674,15 +675,15 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Saved preferences</h2>
                     <p>
-                      These values are sourced from the current organisation
-                      profile and workflow preference steps.
+                      These values come from the current company profile and
+                      workflow preference steps.
                     </p>
                   </div>
                   <Link
                     className="button button--secondary"
                     href={`/onboarding/${organisationId}`}
                   >
-                    Edit preferences
+                    Edit company preferences
                   </Link>
                 </div>
                 <dl className="detail-list">

@@ -38,6 +38,18 @@ interface Membership {
 }
 
 interface DashboardGuidance {
+  readonly completeness?: {
+    readonly completed: number;
+    readonly missingFields: readonly string[];
+    readonly percentage: number;
+    readonly total: number;
+  };
+  readonly display_mode?: string;
+  readonly progress?: {
+    readonly completed_steps: readonly number[];
+    readonly current_step: number;
+    readonly status: string;
+  };
   readonly recommendations: readonly {
     readonly action: string;
     readonly id: string;
@@ -177,10 +189,9 @@ export function Dashboard(): JSX.Element {
       })),
     [tenders],
   );
-  const attentionRows = useMemo(() => {
-    const recommendationRows = (guidance?.recommendations ?? [])
-      .slice(0, 3)
-      .map((recommendation) => ({
+  const allAttentionRows = useMemo(() => {
+    const recommendationRows = (guidance?.recommendations ?? []).map(
+      (recommendation) => ({
         actionLabel: "Review",
         deadline: "Organisation profile",
         issue: recommendation.action,
@@ -194,7 +205,8 @@ export function Dashboard(): JSX.Element {
               ? "warning"
               : "info",
         href: selectedId === null ? "/dashboard" : `/settings/${selectedId}`,
-      }));
+      }),
+    );
     const tenderAttention = tenderModels
       .filter(({ presentation }) => presentation.needsAttention)
       .sort((left, right) => compareAttention(left.tender, right.tender))
@@ -207,11 +219,37 @@ export function Dashboard(): JSX.Element {
         tone: deadlineTone(tender.submissionDeadline),
         href: `/tenders/${selectedId ?? ""}/${tender.id}`,
       }));
-    return [...tenderAttention, ...recommendationRows].slice(0, 3);
+    return [...tenderAttention, ...recommendationRows];
   }, [guidance, selectedId, selectedOrganisation, tenderModels]);
+  const attentionRows = allAttentionRows.slice(0, 3);
   const inProgressRows = tenderModels.filter(
     ({ presentation }) => presentation.isInProgress,
   );
+  const upcomingDeadlineCount = tenderModels.filter(({ tender }) => {
+    const days = getDeadlineDays(tender.submissionDeadline);
+    return days !== null && days >= 0 && days <= 7;
+  }).length;
+  const companyProfileProgress = guidance?.progress;
+  const companyCompleteness = guidance?.completeness;
+  const companyReminder =
+    companyProfileProgress === undefined &&
+    companyCompleteness === undefined &&
+    (guidance?.recommendations.length ?? 0) === 0
+      ? null
+      : {
+          detail:
+            guidance?.recommendations[0]?.action ??
+            (companyProfileProgress !== undefined
+              ? `${companyProfileProgress.completed_steps.length} of 8 profile steps are complete.`
+              : companyCompleteness !== undefined
+                ? `${companyCompleteness.completed} of ${companyCompleteness.total} known company fields are complete.`
+                : "Review company readiness before continuing tender work."),
+          href: selectedId === null ? "/dashboard" : `/settings/${selectedId}`,
+          label:
+            companyProfileProgress?.status === "COMPLETED"
+              ? "Company profile ready"
+              : "Company readiness",
+        };
   const counts = {
     ACTIVE: tenderModels.filter(({ presentation }) => !presentation.isCompleted)
       .length,
@@ -290,6 +328,52 @@ export function Dashboard(): JSX.Element {
       ) : (
         <>
           <section className="workspace-section">
+            <div className="tender-summary-grid">
+              <div className="tender-summary-card">
+                <span className="tender-summary-card__label">
+                  Active tenders
+                </span>
+                <strong>{counts.ACTIVE}</strong>
+                <p>Current tender workspaces that still need action.</p>
+              </div>
+              <div className="tender-summary-card">
+                <span className="tender-summary-card__label">
+                  Need attention
+                </span>
+                <strong>{allAttentionRows.length}</strong>
+                <p>Items currently surfacing the next important review.</p>
+              </div>
+              <div className="tender-summary-card">
+                <span className="tender-summary-card__label">
+                  Upcoming deadlines
+                </span>
+                <strong>{upcomingDeadlineCount}</strong>
+                <p>Deadlines inside the next 7 days.</p>
+              </div>
+            </div>
+          </section>
+
+          {companyReminder === null ? null : (
+            <section className="workspace-section">
+              <div className="workspace-card workspace-card--compact">
+                <div className="workspace-row workspace-row--plain">
+                  <div className="workspace-row__title">
+                    <strong>{companyReminder.label}</strong>
+                    <p>{companyReminder.detail}</p>
+                  </div>
+                  <span className="workspace-row__deadline" />
+                  <Link
+                    className="button button--secondary"
+                    href={companyReminder.href}
+                  >
+                    Review company
+                  </Link>
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section className="workspace-section">
             <div className="workspace-section__header">
               <div>
                 <h2>Needs your attention</h2>
@@ -334,6 +418,9 @@ export function Dashboard(): JSX.Element {
             <div className="workspace-section__header workspace-section__header--stacked">
               <div>
                 <h2>Your tenders</h2>
+                <p>
+                  One clear state, one next action, and the nearest deadline.
+                </p>
               </div>
               <div
                 className="workspace-chip-row workspace-chip-row--left dashboard-filter-row"
@@ -402,6 +489,7 @@ export function Dashboard(): JSX.Element {
               <div className="workspace-section__header">
                 <div>
                   <h2>In progress</h2>
+                  <p>Active work that is still processing.</p>
                 </div>
               </div>
               <div className="workspace-progress-grid">

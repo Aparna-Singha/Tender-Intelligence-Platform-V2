@@ -112,25 +112,27 @@ describe("app shell assistant and sidebar semantics", () => {
     });
   });
 
-  it("shows a distinct AI Assistant item under Chats and does not relabel the first tender as Ask tender", async () => {
+  it("shows AI Assistant as a primary destination and keeps tender chat shortcuts tender-scoped", async () => {
     render(
       <AppShell>
         <div>Child content</div>
       </AppShell>,
     );
 
-    const chatsSection = await screen.findByRole("heading", { name: "Chats" });
+    expect(
+      await screen.findByRole("link", { name: "AI Assistant" }),
+    ).toHaveAttribute("href", "/assistant/org-1");
+
+    const chatsSection = await screen.findByRole("heading", {
+      name: "Tender chats",
+    });
     const chats = within(chatsSection.closest("section")!);
 
-    expect(chats.getByRole("link", { name: /AI Assistant/ })).toHaveAttribute(
-      "href",
-      "/assistant/org-1",
-    );
     expect(chats.getAllByText("Tender chat")).toHaveLength(2);
     expect(chats.queryByText("Ask tender")).not.toBeInTheDocument();
     expect(
-      chats.getByRole("link", { name: /AI Assistant/ }).className,
-    ).toContain("workspace-sidebar__chat-link--active");
+      chats.queryByRole("link", { name: /AI Assistant/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("renders Recent Drafts with title-only copy and highlights the active draft route", async () => {

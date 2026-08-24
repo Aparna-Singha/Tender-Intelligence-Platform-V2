@@ -11,7 +11,11 @@ import type {
   RiskFindingFilter,
   RiskReviewRequest,
 } from "@tender/contracts";
-import type { Prisma, PrismaClient, RiskAnalysisRun } from "@tender/database";
+import {
+  Prisma,
+  type PrismaClient,
+  type RiskAnalysisRun,
+} from "@tender/database";
 import { EARLY_RISK_POLICY_VERSION } from "@tender/domain";
 import type { Queue } from "bullmq";
 import { createHash } from "node:crypto";
@@ -67,7 +71,10 @@ export class RisksService {
         }),
       )
       .digest("hex");
-    const idempotencyKey = `${organisationId}:${clientKey}:${sourceFingerprint}`;
+    const idempotencyKey =
+      triggerType === "RETRY"
+        ? `${organisationId}:${clientKey}:${sourceFingerprint}`
+        : `${organisationId}:current:${sourceFingerprint}`;
     const existing = await this.database.riskAnalysisRun.findUnique({
       where: { idempotencyKey },
     });
@@ -87,52 +94,67 @@ export class RisksService {
       });
       if (equivalent !== null) return equivalent;
     }
-    const run = await this.database.$transaction(async (transaction) => {
-      await transaction.riskAnalysisRun.updateMany({
-        data: {
-          currentStage: "INVALIDATED",
-          invalidatedAt: new Date(),
-          publicMessage: "Superseded by a new early risk analysis input",
-          status: "INVALIDATED",
-        },
-        where: {
-          gateType: "EARLY",
-          organisationId,
-          status: "COMPLETE",
-          tenderVersionId: versionId,
-          extractionRunId: { not: extraction.id },
-        },
+    let run;
+    try {
+      run = await this.database.$transaction(async (transaction) => {
+        await transaction.riskAnalysisRun.updateMany({
+          data: {
+            currentStage: "INVALIDATED",
+            invalidatedAt: new Date(),
+            publicMessage: "Superseded by a new early risk analysis input",
+            status: "INVALIDATED",
+          },
+          where: {
+            gateType: "EARLY",
+            organisationId,
+            status: "COMPLETE",
+            tenderVersionId: versionId,
+            extractionRunId: { not: extraction.id },
+          },
+        });
+        const created = await transaction.riskAnalysisRun.create({
+          data: {
+            extractionRunId: extraction.id,
+            gateType: "EARLY",
+            idempotencyKey,
+            organisationId,
+            requestedByUserId: userId,
+            riskPolicyVersion: EARLY_RISK_POLICY_VERSION,
+            sourceFingerprint,
+            tenderId,
+            tenderVersionId: versionId,
+            triggerType,
+          },
+        });
+        await transaction.auditEvent.create({
+          data: {
+            actorUserId: userId,
+            eventType:
+              triggerType === "RETRY"
+                ? "RISK_ANALYSIS_RETRIED"
+                : "RISK_ANALYSIS_STARTED",
+            organisationId,
+            outcome: "SUCCESS",
+            requestId,
+            subjectId: created.id,
+            subjectType: "risk_analysis_run",
+          },
+        });
+        return created;
       });
-      const created = await transaction.riskAnalysisRun.create({
-        data: {
-          extractionRunId: extraction.id,
-          gateType: "EARLY",
-          idempotencyKey,
-          organisationId,
-          requestedByUserId: userId,
-          riskPolicyVersion: EARLY_RISK_POLICY_VERSION,
-          sourceFingerprint,
-          tenderId,
-          tenderVersionId: versionId,
-          triggerType,
-        },
-      });
-      await transaction.auditEvent.create({
-        data: {
-          actorUserId: userId,
-          eventType:
-            triggerType === "RETRY"
-              ? "RISK_ANALYSIS_RETRIED"
-              : "RISK_ANALYSIS_STARTED",
-          organisationId,
-          outcome: "SUCCESS",
-          requestId,
-          subjectId: created.id,
-          subjectType: "risk_analysis_run",
-        },
-      });
-      return created;
-    });
+    } catch (error) {
+      if (
+        triggerType !== "RETRY" &&
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === "P2002"
+      ) {
+        const concurrentRun = await this.database.riskAnalysisRun.findUnique({
+          where: { idempotencyKey },
+        });
+        if (concurrentRun !== null) return concurrentRun;
+      }
+      throw error;
+    }
     await this.jobs.add(
       "analyse-early-tender-risk",
       { organisationId, requestId, riskAnalysisRunId: run.id },

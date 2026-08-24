@@ -45,6 +45,7 @@ export function Button({
 }
 
 export function IconButton({
+  children,
   label,
   className,
   ...props
@@ -57,7 +58,9 @@ export function IconButton({
       className={joinClassNames("icon-button", className)}
       title={label}
       {...props}
-    />
+    >
+      {children}
+    </button>
   );
 }
 
@@ -338,14 +341,21 @@ function Overlay({
   readonly variant: "modal" | "drawer";
 }): React.JSX.Element {
   const panel = useRef<HTMLDivElement>(null);
+  const previousFocus = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+
   useEffect(() => {
-    const previous =
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    previousFocus.current =
       document.activeElement instanceof HTMLElement
         ? document.activeElement
         : null;
     panel.current?.focus();
     const keydown = (event: KeyboardEvent): void => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
       if (event.key !== "Tab" || panel.current === null) return;
       const focusable = [
         ...panel.current.querySelectorAll<HTMLElement>(
@@ -366,9 +376,9 @@ function Overlay({
     document.addEventListener("keydown", keydown);
     return () => {
       document.removeEventListener("keydown", keydown);
-      previous?.focus();
+      previousFocus.current?.focus();
     };
-  }, [onClose]);
+  }, []);
   return (
     <div
       className="overlay"

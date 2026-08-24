@@ -44,8 +44,8 @@ function initialAssistantMessage(organisationId: string): AssistantMessage {
       },
       {
         href: `/documents/${organisationId}`,
-        label: "Open Company Docs",
-        supportingText: "Upload reusable organisation evidence.",
+        label: "Open company documents",
+        supportingText: "Upload reusable company evidence.",
       },
       {
         href: `/tenders/${organisationId}`,
@@ -56,7 +56,7 @@ function initialAssistantMessage(organisationId: string): AssistantMessage {
     ],
     id: "assistant-intro",
     role: "assistant",
-    text: "I can help with workspace navigation and next-step guidance. Tender-grounded questions stay inside each tender's AI Chat, because this assistant does not mix evidence across tenders.",
+    text: "I can help with workspace navigation, company information, and what to do next. For questions about a specific tender, open that tender's AI Chat.",
   };
 }
 
@@ -81,7 +81,7 @@ function buildAssistantReply(
       actions: [
         {
           href: `/documents/${organisationId}`,
-          label: "Company Docs",
+          label: "Company documents",
           supportingText: "Reusable certificates and company evidence.",
         },
         {
@@ -92,7 +92,7 @@ function buildAssistantReply(
       ],
       id: crypto.randomUUID(),
       role: "assistant",
-      text: "Use Company Docs for reusable organisation evidence and Tender Files inside the exact tender for source uploads. Direct uploads stay private and signed, and tender analysis starts only from the tender workspace flow.",
+      text: "Use Company documents for reusable company evidence and Tender Files inside the exact tender for source uploads. Tender analysis starts from the tender workspace after you upload the right source there.",
     };
   }
 
@@ -111,7 +111,7 @@ function buildAssistantReply(
       ],
       id: crypto.randomUUID(),
       role: "assistant",
-      text: "Eligibility stays tender-scoped. Open the relevant tender first, then use Overview and Eligibility to review extracted requirements, cited evidence, and any conflict or human-review state. I do not compare evidence across tenders here.",
+      text: "Eligibility stays inside each tender. Open the relevant tender first, then use Overview and Eligibility to review requirements, cited evidence, and any conflict or human-review state.",
     };
   }
 
@@ -155,7 +155,7 @@ function buildAssistantReply(
           : tenderChatActions,
       id: crypto.randomUUID(),
       role: "assistant",
-      text: "Tender questions belong in tender AI Chat, where retrieval, citations, and source mode stay tied to one authorised tender and version. This global assistant does not answer tender-content questions without that scope.",
+      text: "Tender questions belong in tender AI Chat, where answers stay tied to one tender and its cited sources. This workspace assistant does not answer tender-content questions without that tender scope.",
     };
   }
 
@@ -179,7 +179,7 @@ function buildAssistantReply(
     ],
     id: crypto.randomUUID(),
     role: "assistant",
-    text: "I can help with workspace navigation, upload guidance, and where to continue next. I do not answer tender-content questions here because this assistant has no cross-tender evidence context.",
+    text: "I can help with workspace navigation, upload guidance, and where to continue next. For tender-specific questions, open the relevant tender's AI Chat.",
   };
 }
 
@@ -244,10 +244,10 @@ export function AssistantWorkspace({
     <div className="workspace-page">
       <header className="workspace-page__header">
         <div>
-          <h1>AI Assistant</h1>
+          <h1>Workspace Assistant</h1>
           <p>
-            Organisation-scoped workspace guidance. Tender-grounded answers stay
-            inside tender AI Chat.
+            Get help navigating your workspace, managing company information,
+            and deciding what to do next.
           </p>
         </div>
       </header>
@@ -267,9 +267,7 @@ export function AssistantWorkspace({
           <div className="chat-rail__group">
             <div className="chat-rail__group-header">
               <strong>Quick prompts</strong>
-              <small>
-                Deterministic guidance without tender evidence access.
-              </small>
+              <small>Get help without opening a tender first.</small>
             </div>
             <div className="chat-rail__shortcuts">
               {starterPrompts.map((prompt) => (
@@ -322,7 +320,7 @@ export function AssistantWorkspace({
               href={`/documents/${organisationId}`}
             >
               <FileCheck2 aria-hidden="true" size={14} />
-              <span>Open Company Docs</span>
+              <span>Open company documents</span>
             </Link>
             <Link
               className="chat-rail__shortcut"
@@ -339,16 +337,15 @@ export function AssistantWorkspace({
             <div>
               <span className="chat-canvas__context">
                 <Bot aria-hidden="true" size={14} />
-                <strong>Organisation-scoped guidance</strong>
+                <strong>How this assistant helps</strong>
               </span>
               <h2>Workspace assistant</h2>
               <p className="chat-canvas__status-note">
-                This assistant helps you navigate the product. It does not
-                answer tender-content questions without an explicit tender
-                scope.
+                This assistant helps you navigate the product. For questions
+                about a specific tender, open that tender's AI Chat.
               </p>
             </div>
-            <Badge tone="warning">No cross-tender evidence mode</Badge>
+            <Badge tone="warning">Tender AI Chat stays tender-specific</Badge>
           </div>
 
           <div className="chat-canvas__status-row">
@@ -381,7 +378,7 @@ export function AssistantWorkspace({
                     <small>
                       {entry.role === "user"
                         ? "Your prompt"
-                        : "Deterministic workspace guidance"}
+                        : "Workspace guidance"}
                     </small>
                   </div>
                   <p>{entry.text}</p>

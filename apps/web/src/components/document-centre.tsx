@@ -25,7 +25,6 @@ import {
   IconButton,
   Input,
   Modal,
-  PageHeader,
   Select,
   Table,
   humanizeEnum,
@@ -33,6 +32,7 @@ import {
 import { apiRequest, formatApiError, PublicApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
+import { CompanyWorkspaceHeader } from "./company-workspace-nav";
 
 interface DocumentSummary {
   readonly category: string;
@@ -485,16 +485,27 @@ export function DocumentCentre({
 
   return (
     <div className="workspace-page company-docs-page">
-      <PageHeader
+      <CompanyWorkspaceHeader
         actions={
           <Button onClick={() => setUploadOpen(true)}>
             <Plus aria-hidden="true" size={18} />
             Upload document
           </Button>
         }
-        description="Reusable organisation documents and supporting evidence used across tender assessments."
-        title="Company documents"
+        organisationId={organisationId}
       />
+
+      <section className="workspace-section">
+        <div className="workspace-section__header">
+          <div>
+            <h2>Company documents</h2>
+            <p>
+              Reusable company evidence, current status, and upcoming review
+              work.
+            </p>
+          </div>
+        </div>
+      </section>
 
       <Alert title={healthCallout.title} tone={healthCallout.tone}>
         <p>{healthCallout.description}</p>
@@ -537,7 +548,7 @@ export function DocumentCentre({
           <div className="company-docs-sidebar__header">
             <h2>Categories</h2>
             <p>
-              Use the current classification already stored with each document.
+              Browse documents by the category already stored with each file.
             </p>
           </div>
           <button
@@ -592,9 +603,10 @@ export function DocumentCentre({
           <div className="security-note">
             <ShieldCheck aria-hidden="true" size={20} />
             <p>
-              Files upload directly to private storage using a short-lived
-              signed URL. Downloads always require fresh authorisation, and
-              processing alone does not verify tender suitability.
+              Files upload directly to private storage using short-lived signed
+              access. Downloads always need fresh authorisation, and a ready
+              file still needs human review where the evidence state requires
+              it.
             </p>
           </div>
 
@@ -649,7 +661,7 @@ export function DocumentCentre({
                               </span>
                             ) : (
                               <span className="company-docs-table__meta">
-                                Reusable organisation document
+                                Reusable company document
                               </span>
                             )}
                           </div>
