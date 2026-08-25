@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./dashboard";
 
 const { apiRequest } = vi.hoisted(() => ({ apiRequest: vi.fn() }));
+
 vi.mock("../lib/api", () => ({
   apiRequest,
   formatApiError: (_error: unknown, fallback: string) => fallback,
@@ -13,16 +14,19 @@ describe("dashboard organisation flow", () => {
   beforeEach(() => {
     let created = false;
     apiRequest.mockReset();
+
     apiRequest.mockImplementation((path: string, init?: RequestInit) => {
       if (path === "/organisations" && init?.method === "POST") {
         created = true;
         return Promise.resolve({ id: "org-1" });
       }
+
       if (path === "/auth/session")
         return Promise.resolve({
           active_organisation_id: created ? "org-1" : null,
           user: { display_name: "Dinesh" },
         });
+
       if (path === "/organisations")
         return Promise.resolve(
           created
@@ -38,6 +42,7 @@ describe("dashboard organisation flow", () => {
               ]
             : [],
         );
+
       if (path.endsWith("/dashboard-recommendations"))
         return Promise.resolve({
           completeness: {
@@ -54,39 +59,55 @@ describe("dashboard organisation flow", () => {
           },
           recommendations: [],
         });
+
       if (path.endsWith("/documents") || path.endsWith("/tenders"))
         return Promise.resolve([]);
+
       return Promise.reject(new Error(`Unexpected request: ${path}`));
     });
   });
+
   it("shows the empty state and creates an organisation without a stale form reference", async () => {
     const user = userEvent.setup();
+
     render(<Dashboard />);
+
     expect(
       await screen.findByRole("heading", {
         name: "Good morning, Dinesh",
       }),
     ).toBeInTheDocument();
+
     await user.click(
       screen.getAllByRole("button", { name: /Create organisation/ })[0]!,
     );
-    const dialog = screen.getByRole("dialog", { name: "Create organisation" });
+
+    const dialog = screen.getByRole("dialog", {
+      name: "Create organisation",
+    });
+
     await user.type(
       within(dialog).getByLabelText(/Organisation name/),
       "Acme Works",
     );
+
     await user.click(
-      within(dialog).getByRole("button", { name: "Create organisation" }),
+      within(dialog).getByRole("button", {
+        name: "Create organisation",
+      }),
     );
+
     await waitFor(() =>
       expect(apiRequest).toHaveBeenCalledWith(
         "/organisations",
         expect.objectContaining({ method: "POST" }),
       ),
     );
+
     expect(
       await screen.findByRole("link", { name: /Add tender/ }),
     ).toHaveAttribute("href", "/tenders/org-1");
+
     expect(
       screen.queryByRole("dialog", { name: "Create organisation" }),
     ).not.toBeInTheDocument();
@@ -96,6 +117,7 @@ describe("dashboard organisation flow", () => {
 describe("dashboard home parity behavior", () => {
   beforeEach(() => {
     apiRequest.mockReset();
+
     apiRequest.mockImplementation((path: string) => {
       if (path === "/auth/session") {
         return Promise.resolve({
@@ -103,6 +125,7 @@ describe("dashboard home parity behavior", () => {
           user: { display_name: "Dinesh" },
         });
       }
+
       if (path === "/organisations") {
         return Promise.resolve([
           {
@@ -115,6 +138,7 @@ describe("dashboard home parity behavior", () => {
           },
         ]);
       }
+
       if (path === "/organisations/org-1/dashboard-recommendations") {
         return Promise.resolve({
           completeness: {
@@ -143,6 +167,7 @@ describe("dashboard home parity behavior", () => {
           ],
         });
       }
+
       if (path === "/organisations/org-1/tenders") {
         return Promise.resolve([
           {
@@ -197,87 +222,132 @@ describe("dashboard home parity behavior", () => {
           },
         ]);
       }
+
       return Promise.reject(new Error(`Unexpected request: ${path}`));
     });
   });
 
   it("shows deadline text, removes helper copy, and hides in-progress when no real work exists", async () => {
-    render(<Dashboard />);
+    vi.useFakeTimers({
+      toFake: ["Date"],
+    });
+    vi.setSystemTime(new Date(2026, 7, 26, 12, 0, 0));
 
-    expect(
-      await screen.findByRole("heading", {
-        name: "Good morning, Dinesh",
-      }),
-    ).toBeInTheDocument();
+    try {
+      render(<Dashboard />);
 
-    expect(screen.getAllByText("3 days left")).toHaveLength(2);
-    expect(screen.getAllByText("6 days overdue")).toHaveLength(2);
+      expect(
+        await screen.findByRole("heading", {
+          name: "Good morning, Dinesh",
+        }),
+      ).toBeInTheDocument();
 
-    expect(
-      screen.queryByText(
-        "Highest-value items surfaced from current tender and organisation state.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Use Home as a work queue across active tender workspaces.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText(
-        "Shown only when the backend exposes real running work.",
-      ),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("Active work that is still processing."),
-    ).not.toBeInTheDocument();
+      expect(screen.getAllByText("3 days left")).toHaveLength(2);
+      expect(screen.getAllByText("6 days overdue")).toHaveLength(2);
 
-    const summaryGrid = screen
-      .getByText("Need attention")
-      .closest(".tender-summary-grid");
-    expect(summaryGrid).toBeInstanceOf(HTMLElement);
-    if (!(summaryGrid instanceof HTMLElement)) {
-      throw new Error("Expected summary grid to render");
+      expect(
+        screen.queryByText(
+          "Highest-value items surfaced from current tender and organisation state.",
+        ),
+      ).not.toBeInTheDocument();
+
+      expect(
+        screen.queryByText(
+          "Use Home as a work queue across active tender workspaces.",
+        ),
+      ).not.toBeInTheDocument();
+
+      expect(
+        screen.queryByText(
+          "Shown only when the backend exposes real running work.",
+        ),
+      ).not.toBeInTheDocument();
+
+      expect(
+        screen.queryByText("Active work that is still processing."),
+      ).not.toBeInTheDocument();
+
+      const summaryGrid = screen
+        .getByText("Need attention")
+        .closest(".tender-summary-grid");
+
+      expect(summaryGrid).toBeInstanceOf(HTMLElement);
+
+      if (!(summaryGrid instanceof HTMLElement)) {
+        throw new Error("Expected summary grid to render");
+      }
+
+      expect(within(summaryGrid).getByText("4")).toBeInTheDocument();
+
+      const attentionHeading = screen.getByRole("heading", {
+        name: "Needs your attention",
+      });
+
+      const attentionSection = attentionHeading.closest("section");
+
+      expect(attentionSection).not.toBeNull();
+
+      expect(within(attentionSection!).getAllByRole("listitem")).toHaveLength(
+        3,
+      );
+
+      const tendersHeading = screen.getByRole("heading", {
+        name: "Your tenders",
+      });
+
+      const tendersSection = tendersHeading.closest("section");
+
+      expect(tendersSection).not.toBeNull();
+
+      expect(
+        within(tendersSection!).getByRole("button", {
+          name: "All 2",
+        }),
+      ).toBeInTheDocument();
+
+      expect(
+        within(tendersSection!).getByRole("button", {
+          name: "Active 2",
+        }),
+      ).toBeInTheDocument();
+
+      expect(
+        within(tendersSection!).getByRole("button", {
+          name: "Completed 0",
+        }),
+      ).toBeInTheDocument();
+
+      expect(
+        within(tendersSection!).getByRole("button", {
+          name: "In progress 0",
+        }),
+      ).toBeInTheDocument();
+
+      expect(
+        screen.queryByRole("heading", {
+          name: "In progress",
+        }),
+      ).not.toBeInTheDocument();
+
+      expect(
+        screen.queryByText("No background processing is currently running."),
+      ).not.toBeInTheDocument();
+
+      expect(
+        screen.getByRole("link", {
+          name: "AI Assistant",
+        }),
+      ).toHaveAttribute("href", "/assistant/org-1");
+
+      expect(
+        screen
+          .getByRole("link", {
+            name: "AI Assistant",
+          })
+          .getAttribute("href"),
+      ).not.toContain("?stage=ask");
+    } finally {
+      vi.useRealTimers();
     }
-    expect(within(summaryGrid).getByText("4")).toBeInTheDocument();
-
-    const attentionHeading = screen.getByRole("heading", {
-      name: "Needs your attention",
-    });
-    const attentionSection = attentionHeading.closest("section");
-    expect(attentionSection).not.toBeNull();
-    expect(within(attentionSection!).getAllByRole("listitem")).toHaveLength(3);
-
-    const tendersHeading = screen.getByRole("heading", {
-      name: "Your tenders",
-    });
-    const tendersSection = tendersHeading.closest("section");
-    expect(tendersSection).not.toBeNull();
-    expect(
-      within(tendersSection!).getByRole("button", { name: "All 2" }),
-    ).toBeInTheDocument();
-    expect(
-      within(tendersSection!).getByRole("button", { name: "Active 2" }),
-    ).toBeInTheDocument();
-    expect(
-      within(tendersSection!).getByRole("button", { name: "Completed 0" }),
-    ).toBeInTheDocument();
-    expect(
-      within(tendersSection!).getByRole("button", { name: "In progress 0" }),
-    ).toBeInTheDocument();
-
-    expect(
-      screen.queryByRole("heading", { name: "In progress" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByText("No background processing is currently running."),
-    ).not.toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "AI Assistant" })).toHaveAttribute(
-      "href",
-      "/assistant/org-1",
-    );
-    expect(
-      screen.getByRole("link", { name: "AI Assistant" }).getAttribute("href"),
-    ).not.toContain("?stage=ask");
   });
 });
