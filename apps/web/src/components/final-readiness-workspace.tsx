@@ -220,14 +220,12 @@ function readinessBlockerCopy(denial: {
     case "ELIGIBILITY_ASSESSMENT":
     case "EVIDENCE_SNAPSHOT":
       return {
-        detail:
-          "Refresh the latest eligibility review so final review uses current evidence.",
+        detail: "Check requirements again to ensure they are up to date.",
         label: "Eligibility review needs to be current",
       };
     case "CHECKLIST_GENERATION":
       return {
-        detail:
-          "Refresh missing items from the latest eligibility review and resolve the remaining work.",
+        detail: "Review your missing info and resolve the remaining items.",
         label: "Missing items still need attention",
       };
     case "CONSOLIDATED_DRAFT":

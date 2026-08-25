@@ -178,6 +178,7 @@ test("moves the open workspace into current eligibility after Continue without r
           tenderVersionId: MOCK_VERSION_ID,
         });
       }
+
       return ok(
         decisionRecorded
           ? [
@@ -250,15 +251,17 @@ test("moves the open workspace into current eligibility after Continue without r
     })
     .check();
   await page.getByRole("button", { name: "Save decision" }).click();
+
   await expect.poll(() => decisionRecorded).toBe(true);
   await expect(page.getByText("Human pursue decision recorded.")).toBeVisible();
 
   await page
     .getByRole("navigation", { name: "Tender workspace primary" })
-    .getByRole("button", { exact: true, name: "Eligibility" })
+    .getByRole("button", { exact: true, name: "Requirements" })
     .click();
+
   await expect(
-    page.getByRole("heading", { name: "Eligibility" }),
+    page.getByRole("heading", { name: "Requirements" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Delivery timeline" }),
@@ -331,7 +334,10 @@ test("makes the draft surface available automatically once prerequisites become 
     `/tenders/${fixture.organisationId}/${MOCK_TENDER_ID}?stage=draft`,
   );
 
-  await expect(page.getByText("Drafting is currently blocked")).toBeVisible();
+  await expect(page.getByText("No proposal draft yet")).toBeVisible();
+  await expect(
+    page.getByText("Set up the first draft to start writing and review."),
+  ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Set up draft" }),
   ).toBeVisible();
@@ -353,6 +359,7 @@ test("keeps rationale typing stable while eligibility and checklist polling stay
         savedBodies.push(parsed);
         return ok({ ok: true });
       }
+
       return ok({
         items: [
           {
@@ -427,9 +434,11 @@ test("keeps rationale typing stable while eligibility and checklist polling stay
   await page
     .getByRole("button", { name: "Review ambiguous requirement" })
     .click();
+
   const dialog = page.getByRole("dialog", {
     name: "Review ambiguous requirement",
   });
+
   const rationale = dialog.getByRole("textbox", { name: "Rationale" });
   const sentence = "Reviewed against the cited tender clause";
 
@@ -447,6 +456,7 @@ test("keeps rationale typing stable while eligibility and checklist polling stay
   await expect
     .poll(() => savedBodies.length, { timeout: REQUEST_TIMEOUT_MS })
     .toBe(1);
+
   expect(savedBodies[0]).toMatchObject({
     rationale: sentence,
     status: "IN_PROGRESS",
@@ -475,6 +485,7 @@ async function installWorkspaceApiMock(
   const prefix = new RegExp(
     `^${escapeRegExp(apiBaseUrl)}/organisations/${organisationId}/tenders(?:$|/|\\?)`,
   );
+
   await page.route(prefix, async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -487,12 +498,14 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.tenderSummary?.() ?? []);
       return;
     }
+
     if (
       pathname === `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}`
     ) {
       await fulfillData(route, handlers.workspace());
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/extractions`
@@ -500,6 +513,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.extractions?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/extractions/${MOCK_EXTRACTION_ID}/requirements`
@@ -507,6 +521,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.extractionRequirements?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/extractions/${MOCK_EXTRACTION_ID}/fields`
@@ -514,6 +529,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.extractionFields?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/extractions/${MOCK_EXTRACTION_ID}/issues`
@@ -521,6 +537,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.extractionIssues?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/risk-analyses`
@@ -528,6 +545,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.riskAnalyses?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/risk-analyses/current`
@@ -539,6 +557,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/risk-analyses/${MOCK_RISK_ID}/findings`
@@ -546,6 +565,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.riskFindings?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/risk-analyses/${MOCK_RISK_ID}/decisions`
@@ -556,6 +576,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/eligibility-assessments`
@@ -563,6 +584,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.assessmentRuns?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/eligibility-assessments/current`
@@ -577,6 +599,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/eligibility-assessments/${MOCK_ASSESSMENT_ID}/matrix`
@@ -587,6 +610,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/checklists`
@@ -594,6 +618,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.checklistRuns?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/checklists/current`
@@ -605,6 +630,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
         `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/checklists/${MOCK_CHECKLIST_ID}/items` ||
@@ -624,6 +650,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/draft-templates`
@@ -631,6 +658,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.draftTemplates?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/draft-generation-runs`
@@ -638,6 +666,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.draftRuns?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/drafts`
@@ -645,6 +674,7 @@ async function installWorkspaceApiMock(
       await fulfillData(route, handlers.drafts?.() ?? []);
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/final-readiness`
@@ -655,6 +685,7 @@ async function installWorkspaceApiMock(
       );
       return;
     }
+
     if (
       pathname ===
       `/organisations/${organisationId}/tenders/${MOCK_TENDER_ID}/versions/${MOCK_VERSION_ID}/controlled-review-packages`
@@ -678,6 +709,7 @@ async function fulfillMockResponse(
     await fulfillData(route, response.data, response.status ?? 200);
     return;
   }
+
   await route.fulfill({
     body: JSON.stringify({
       error: {
@@ -892,12 +924,14 @@ function assessmentMatrixItem(): Record<string, unknown> {
 
 async function preparePage(page: Page, intervalMs: number): Promise<void> {
   await accelerateIntervals(page, intervalMs);
+
   if (authenticatedCookies !== null) {
     await page.context().addCookies(authenticatedCookies);
     await page.goto("/dashboard");
     await page.waitForURL("**/dashboard", { timeout: REQUEST_TIMEOUT_MS });
     return;
   }
+
   await loginAs(page, fixture.user.email);
   authenticatedCookies = await page.context().cookies();
 }
@@ -908,6 +942,7 @@ async function accelerateIntervals(
 ): Promise<void> {
   await page.addInitScript((interval: number) => {
     const originalSetInterval = window.setInterval.bind(window);
+
     window.setInterval = ((handler: TimerHandler, timeout?: number, ...args) =>
       originalSetInterval(
         handler,
@@ -925,25 +960,34 @@ function captureBrowserQuality(page: Page): {
 } {
   const errors: string[] = [];
   const failedRequests: string[] = [];
+
   page.on("console", (message) => {
     if (message.type() !== "error") return;
+
     const text = message.text();
+
     if (
       /favicon|next start does not work with output: standalone/iu.test(text) ||
       text ===
         "Failed to load resource: the server responded with a status of 404 (Not Found)"
     )
       return;
+
     errors.push(text);
   });
+
   page.on("pageerror", (error) => {
     errors.push(error.message);
   });
+
   page.on("requestfailed", (request) => {
     const url = request.url();
+
     if (/favicon.ico$/u.test(url)) return;
+
     failedRequests.push(`${request.method()} ${url}`);
   });
+
   return { errors, failedRequests };
 }
 
@@ -958,6 +1002,7 @@ async function loginAs(page: Page, email: string): Promise<void> {
 async function seedFixture(): Promise<BrowserFixture> {
   const tag = Date.now().toString(36);
   const passwordHash = await hashPassword(PASSWORD);
+
   const user = await prisma.user.create({
     data: {
       displayName: `Workspace Browser ${tag}`,
@@ -965,6 +1010,7 @@ async function seedFixture(): Promise<BrowserFixture> {
       passwordHash,
     },
   });
+
   const organisation = await prisma.organisation.create({
     data: {
       createdByUserId: user.id,
@@ -972,6 +1018,7 @@ async function seedFixture(): Promise<BrowserFixture> {
       type: "MSME",
     },
   });
+
   await prisma.organisationMembership.create({
     data: {
       organisationId: organisation.id,
@@ -979,6 +1026,7 @@ async function seedFixture(): Promise<BrowserFixture> {
       userId: user.id,
     },
   });
+
   return {
     organisationId: organisation.id,
     user: {
@@ -991,6 +1039,7 @@ async function seedFixture(): Promise<BrowserFixture> {
 function hashPassword(password: string): Promise<string> {
   return new Promise((resolve, reject) => {
     const salt = randomBytes(16);
+
     scryptCallback(
       password,
       salt,
@@ -1001,6 +1050,7 @@ function hashPassword(password: string): Promise<string> {
           reject(error);
           return;
         }
+
         resolve(
           [
             "scrypt",

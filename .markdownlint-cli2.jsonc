@@ -2,5 +2,11 @@
   "config": {
     "MD013": false,
   },
-  "ignores": ["**/.next/**", "**/dist/**", "**/node_modules/**"],
+  "ignores": [
+    "**/.next/**",
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/playwright-report/**",
+    "**/test-results/**",
+  ],
 }

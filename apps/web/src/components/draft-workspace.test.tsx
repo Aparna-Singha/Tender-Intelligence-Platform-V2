@@ -59,7 +59,7 @@ describe("draft workspace safety", () => {
     expect(source).toContain("Request changes");
     expect(source).toContain("Approve for final readiness review");
     expect(source).toContain("Open review package");
-    expect(source).toContain("Evidence scope");
+    expect(source).toContain("Source scope");
     expect(source).toContain("citation");
   });
 

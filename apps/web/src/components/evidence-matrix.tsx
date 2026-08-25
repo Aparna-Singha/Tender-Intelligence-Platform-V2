@@ -206,7 +206,7 @@ export function EvidenceMatrix({
           method: "POST",
         },
       );
-      setMessage("Evidence comparison queued from an immutable snapshot.");
+      setMessage("Refreshing requirements...");
       await loadRuns();
     } catch {
       setMessage(
@@ -383,7 +383,8 @@ export function EvidenceMatrix({
   }, [currentRun?.id, focusRequest, matrix, runId]);
 
   return (
-    <section id="evidence-matrix-panel">
+    <section aria-labelledby="matrix-heading" id="evidence-matrix-panel">
+      <h2 id="matrix-heading">Requirements & Evidence</h2>
       <p className="warning">
         Assessment results do not guarantee eligibility or bid success. Verified
         and not-applicable states still require authorised human action.
@@ -397,7 +398,7 @@ export function EvidenceMatrix({
         </p>
       </details>
       <button onClick={() => void start()} type="button">
-        Start controlled evidence comparison
+        Refresh requirements check
       </button>
       <p aria-live="polite">{message}</p>
       <form onSubmit={(event) => void captureFact(event)}>

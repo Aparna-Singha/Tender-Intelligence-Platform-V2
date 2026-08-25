@@ -80,16 +80,6 @@ function deadlineTone(
   return "info";
 }
 
-function progressHeading(
-  presentation: ReturnType<typeof describeTender>,
-  tenderTitle: string,
-): string {
-  if (presentation.statusLabel === "Preparing draft...") {
-    return `Drafting: ${tenderTitle}`;
-  }
-  return `Analysing: ${tenderTitle}`;
-}
-
 export function Dashboard(): JSX.Element {
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -298,7 +288,7 @@ export function Dashboard(): JSX.Element {
             href={`/tenders/${selectedId}`}
           >
             <Plus aria-hidden="true" size={18} />
-            Analyse new tender
+            Add tender
           </Link>
         )}
       </header>
@@ -334,7 +324,7 @@ export function Dashboard(): JSX.Element {
                   Active tenders
                 </span>
                 <strong>{counts.ACTIVE}</strong>
-                <p>Current tender workspaces that still need action.</p>
+                <p>Tenders you are currently tracking.</p>
               </div>
               <div className="tender-summary-card">
                 <span className="tender-summary-card__label">
@@ -483,49 +473,6 @@ export function Dashboard(): JSX.Element {
               )}
             </div>
           </section>
-
-          {inProgressRows.length > 0 ? (
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h2>In progress</h2>
-                  <p>Active work that is still processing.</p>
-                </div>
-              </div>
-              <div className="workspace-progress-grid">
-                {inProgressRows.map(({ presentation, tender }) => (
-                  <article
-                    className="workspace-card progress-card"
-                    key={tender.id}
-                  >
-                    <div className="progress-card__header">
-                      <strong>
-                        {progressHeading(presentation, tender.title)}
-                      </strong>
-                      {typeof tender.workspace?.processingProgress ===
-                        "number" &&
-                      tender.workspace.processingProgress > 0 &&
-                      tender.workspace.processingProgress < 100 ? (
-                        <span>{tender.workspace.processingProgress}%</span>
-                      ) : null}
-                    </div>
-                    <p>{presentation.supportingLabel}</p>
-                    {typeof tender.workspace?.processingProgress === "number" &&
-                    tender.workspace.processingProgress > 0 &&
-                    tender.workspace.processingProgress < 100 ? (
-                      <div className="progress-bar" aria-hidden="true">
-                        <span
-                          style={{
-                            width: `${tender.workspace.processingProgress}%`,
-                          }}
-                        />
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-              </div>
-            </section>
-          ) : null}
         </>
       )}
 
