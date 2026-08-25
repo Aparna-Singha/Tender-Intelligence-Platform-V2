@@ -241,7 +241,7 @@ export function DraftWorkspace({
   }, [version]);
 
   async function createControlledTemplate(): Promise<void> {
-    setStatus("Creating controlled organisation template…");
+    setStatus("Creating draft template…");
     try {
       const template = await apiRequest<Template>(`${base}/draft-templates`, {
         body: JSON.stringify({
@@ -313,7 +313,7 @@ export function DraftWorkspace({
       typeof instructions !== "string"
     )
       return;
-    setStatus("Validating current drafting authority…");
+    setStatus("Verifying drafting authority...");
     try {
       await apiRequest(`${base}/draft-generation-runs`, {
         body: JSON.stringify({
@@ -327,9 +327,7 @@ export function DraftWorkspace({
         method: "POST",
       });
       form.reset();
-      setStatus(
-        "Draft generation queued. Human approval will still be required.",
-      );
+      setStatus("Draft generation started. Review will be required.");
       await load();
     } catch (error) {
       setStatus(
@@ -409,30 +407,35 @@ export function DraftWorkspace({
           Draft title
           <input id="draft-title-input" maxLength={200} name="title" required />
         </label>
-        <label>
-          Evidence scope
-          <select
-            value={mode}
-            onChange={(event) => setMode(event.target.value as SourceMode)}
-          >
-            <option value="TENDER_ONLY">Tender only</option>
-            <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
-              Tender and approved company evidence
-            </option>
-            <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
-              Tender and derived workflow warnings
-            </option>
-            <option value="FULL_AUTHORISED_TENDER_CONTEXT">
-              Full authorised context
-            </option>
-          </select>
-        </label>
-        <label>
-          Writing preference only (not factual evidence)
-          <textarea maxLength={2000} name="instructions" />
-        </label>
+        <details className="disclosure" style={{ margin: "16px 0" }}>
+          <summary>Advanced settings</summary>
+          <div className="disclosure__body">
+            <label>
+              Source scope
+              <select
+                value={mode}
+                onChange={(event) => setMode(event.target.value as SourceMode)}
+              >
+                <option value="TENDER_ONLY">Tender only</option>
+                <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
+                  Tender and company evidence
+                </option>
+                <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
+                  Tender and workflow warnings
+                </option>
+                <option value="FULL_AUTHORISED_TENDER_CONTEXT">
+                  Use all approved documents
+                </option>
+              </select>
+            </label>
+            <label>
+              Writing preferences
+              <textarea maxLength={2000} name="instructions" />
+            </label>
+          </div>
+        </details>
         <button disabled={templates.length === 0} type="submit">
-          Generate controlled first draft
+          Generate draft
         </button>
       </form>
     </>

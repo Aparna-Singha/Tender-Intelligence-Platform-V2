@@ -157,9 +157,7 @@ export function describeTender(tender: TenderSummary): TenderPresentation {
       needsAttention: true,
       onHold: false,
       statusLabel: "Needs attention",
-      supportingLabel: humanizeEnum(
-        workspaceStatus !== "" ? workspaceStatus : lifecycle,
-      ),
+      supportingLabel: "Issue detected",
       tone: "danger",
     };
   }
@@ -173,9 +171,7 @@ export function describeTender(tender: TenderSummary): TenderPresentation {
       needsAttention: true,
       onHold: false,
       statusLabel: "Needs review",
-      supportingLabel: humanizeEnum(
-        workspaceStatus !== "" ? workspaceStatus : lifecycle,
-      ),
+      supportingLabel: "Check requirements",
       tone: "warning",
     };
   }
@@ -193,7 +189,7 @@ export function describeTender(tender: TenderSummary): TenderPresentation {
       supportingLabel:
         progress > 0 && progress < 100
           ? `${progress}% ready`
-          : humanizeEnum(workspaceStatus !== "" ? workspaceStatus : lifecycle),
+          : "Draft in progress",
       tone: readyForReview ? "accent" : "info",
     };
   }
@@ -242,10 +238,7 @@ export function describeTender(tender: TenderSummary): TenderPresentation {
     needsAttention: overdue || deadlineSoon,
     onHold: false,
     statusLabel: humanizeEnum(lifecycle),
-    supportingLabel:
-      workspaceStatus === ""
-        ? "Awaiting next action"
-        : humanizeEnum(workspaceStatus),
+    supportingLabel: "Awaiting next action",
     tone: deadlineSoon ? "warning" : "neutral",
   };
 }

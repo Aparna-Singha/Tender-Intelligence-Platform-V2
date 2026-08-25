@@ -162,7 +162,7 @@ export function TenderCentre({
         </div>
         <Button onClick={() => setOpen(true)}>
           <Plus aria-hidden="true" size={18} />
-          Analyse new tender
+          Add tender
         </Button>
       </header>
 
@@ -240,10 +240,10 @@ export function TenderCentre({
             action={
               <Button onClick={() => setOpen(true)}>
                 <Plus aria-hidden="true" size={18} />
-                Analyse new tender
+                Add tender
               </Button>
             }
-            description="Start with tender metadata. Official source URLs remain metadata only and are never scraped."
+            description="Enter details to create a tracking space for this tender."
             title="No tender workspaces yet"
           />
         </section>
@@ -319,8 +319,8 @@ export function TenderCentre({
         >
           <div className="drawer-header">
             <div>
-              <span className="eyebrow">Manual ingestion</span>
-              <h2>Analyse new tender</h2>
+              <span className="eyebrow">Add tender</span>
+              <h2>Start new tender</h2>
             </div>
             <IconButton
               disabled={submitting}
@@ -330,10 +330,7 @@ export function TenderCentre({
               <X aria-hidden="true" size={18} />
             </IconButton>
           </div>
-          <p>
-            Enter only known tender metadata. Secure source upload begins after
-            the workspace is created.
-          </p>
+          <p>Enter tender details to start tracking.</p>
           <form onSubmit={(event) => void create(event)}>
             <Field label="Tender title" required>
               <Input name="title" required />
@@ -359,10 +356,7 @@ export function TenderCentre({
                 />
               </Field>
             </div>
-            <Field
-              hint="Stored as metadata only. The platform does not scrape this URL."
-              label="Official HTTPS source URL, if supplied"
-            >
+            <Field label="Official HTTPS source URL, if supplied">
               <Input name="official_source_url" type="url" />
             </Field>
             <Field label="Description, if supplied">
@@ -371,7 +365,7 @@ export function TenderCentre({
             {error !== "" ? <FormMessage>{error}</FormMessage> : null}
             <div className="inline-actions">
               <Button loading={submitting} type="submit">
-                {submitting ? "Creating..." : "Create private workspace"}
+                {submitting ? "Creating..." : "Add tender"}
               </Button>
               <Button
                 disabled={submitting}

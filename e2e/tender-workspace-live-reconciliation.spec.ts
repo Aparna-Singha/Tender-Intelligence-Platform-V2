@@ -255,10 +255,10 @@ test("moves the open workspace into current eligibility after Continue without r
 
   await page
     .getByRole("navigation", { name: "Tender workspace primary" })
-    .getByRole("button", { exact: true, name: "Eligibility" })
+    .getByRole("button", { exact: true, name: "Requirements" })
     .click();
   await expect(
-    page.getByRole("heading", { name: "Eligibility" }),
+    page.getByRole("heading", { name: "Requirements" }),
   ).toBeVisible();
   await expect(
     page.getByRole("heading", { name: "Delivery timeline" }),

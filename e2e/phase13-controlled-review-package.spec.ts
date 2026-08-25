@@ -2131,10 +2131,10 @@ async function assertWorkspaceStages(
 
   await expect(
     page.getByRole("heading", {
-      name: /^Review package$/u,
+      name: /^Final Review$/u,
     }),
   ).toBeVisible();
-  await expectLegacyCompatibilityNote("Export", "Review package");
+  await expectLegacyCompatibilityNote("Export", "Final Review");
 
   await page.goto(`${tenderPath}?stage=extraction`);
   await expect(page).toHaveURL(/stage=extraction/u);
@@ -2153,7 +2153,7 @@ async function assertWorkspaceStages(
   await page.goto(`${tenderPath}?stage=evidence`);
   await expect(page).toHaveURL(/stage=evidence/u);
   await expect(
-    page.getByRole("heading", { name: "Eligibility" }),
+    page.getByRole("heading", { name: "Requirements" }),
   ).toBeVisible();
   await expect(
     page.locator("summary", { hasText: /Audit & evidence/u }),
@@ -2162,13 +2162,19 @@ async function assertWorkspaceStages(
   await page.goto(`${tenderPath}?stage=checklist`);
   await expect(page).toHaveURL(/stage=checklist/u);
   await expect(
-    page.getByRole("heading", { name: "Eligibility" }),
+    page.getByRole("heading", { name: "Requirements" }),
   ).toBeVisible();
   await expect(
     page.locator("summary", { hasText: /Audit & evidence/u }),
   ).toBeVisible();
 
-  await primaryNav
+  await expect(
+    primaryNav.getByRole("button", { exact: true, name: "AI Chat" }),
+  ).toHaveCount(0);
+  await expect(
+    utilityNav.getByRole("button", { exact: true, name: "AI Chat" }),
+  ).toBeVisible();
+  await utilityNav
     .getByRole("button", { exact: true, name: "AI Chat" })
     .click();
   await expect(page).toHaveURL(/stage=ask/u);
@@ -2193,11 +2199,11 @@ async function assertWorkspaceStages(
   ).toBeVisible();
 
   await primaryNav
-    .getByRole("button", { exact: true, name: "Eligibility" })
+    .getByRole("button", { exact: true, name: "Requirements" })
     .click();
   await expect(page).toHaveURL(/stage=eligibility/u);
   await expect(
-    page.getByRole("heading", { name: "Eligibility" }),
+    page.getByRole("heading", { name: "Requirements" }),
   ).toBeVisible();
 
   await utilityNav
@@ -2216,9 +2222,9 @@ async function assertWorkspaceStages(
 
   await page.goto(`${tenderPath}?stage=readiness`);
   await expect(page).toHaveURL(/stage=readiness/u);
-  await expectLegacyCompatibilityNote("Readiness", "Review package");
+  await expectLegacyCompatibilityNote("Readiness", "Final Review");
   await expect(
-    page.getByRole("heading", { name: /^Review package$/u }),
+    page.getByRole("heading", { name: /^Final Review$/u }),
   ).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Proceed to review package" }),
@@ -2226,7 +2232,7 @@ async function assertWorkspaceStages(
 
   await page.goto(`${tenderPath}?stage=export`);
   await expect(page).toHaveURL(/stage=export/u);
-  await expectLegacyCompatibilityNote("Export", "Review package");
+  await expectLegacyCompatibilityNote("Export", "Final Review");
 }
 
 async function confirmControlledReviewPackageCreation(

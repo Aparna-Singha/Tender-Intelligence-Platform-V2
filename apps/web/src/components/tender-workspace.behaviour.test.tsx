@@ -273,7 +273,7 @@ describe("tender workspace stages", () => {
       screen.getByRole("button", { name: "Overview" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Eligibility" }),
+      screen.getByRole("button", { name: /Requirements/i }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Draft" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI Chat" })).toBeInTheDocument();
@@ -283,7 +283,7 @@ describe("tender workspace stages", () => {
     expect(
       screen.getByRole("button", { name: "Activity" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Eligibility" }));
+    await user.click(screen.getByRole("button", { name: /Requirements/i }));
     await waitFor(() =>
       expect(push).toHaveBeenCalledWith(
         "/tenders/org-1/tender-1?stage=eligibility",
@@ -294,7 +294,7 @@ describe("tender workspace stages", () => {
   it("maps legacy evidence and checklist stages into eligibility", async () => {
     search = new URLSearchParams("stage=evidence");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
-    await screen.findByRole("heading", { name: "Eligibility" });
+    await screen.findByRole("heading", { name: /Requirements/i });
     expect(screen.getByText("Audit & evidence")).toBeInTheDocument();
     expect(screen.getByText("Evidence module mounted")).toBeInTheDocument();
     expect(
@@ -333,7 +333,7 @@ describe("tender workspace stages", () => {
     const view = render(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
-    await screen.findByRole("heading", { name: "Review package" });
+    await screen.findByRole("heading", { name: "Final Review" });
     expect(screen.getByText("Readiness module mounted")).toBeInTheDocument();
     expect(screen.getByText("Export module mounted")).toBeInTheDocument();
     search = new URLSearchParams("stage=export");
@@ -341,7 +341,7 @@ describe("tender workspace stages", () => {
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
     expect(
-      await screen.findByRole("heading", { name: "Review package" }),
+      await screen.findByRole("heading", { name: "Final Review" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Readiness module mounted")).toBeInTheDocument();
     expect(screen.getByText("Export module mounted")).toBeInTheDocument();
@@ -352,7 +352,7 @@ describe("tender workspace stages", () => {
     const view = render(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
-    await screen.findByRole("heading", { name: "Review package" });
+    await screen.findByRole("heading", { name: "Final Review" });
     search = new URLSearchParams("stage=draft");
     view.rerender(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
@@ -374,7 +374,7 @@ describe("tender workspace stages", () => {
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
     expect(
-      await screen.findByRole("heading", { name: "Review package" }),
+      await screen.findByRole("heading", { name: "Final Review" }),
     ).toBeInTheDocument();
   });
 
@@ -1041,7 +1041,7 @@ describe("tender workspace stages", () => {
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
     expect(
-      await screen.findByRole("heading", { name: "Eligibility" }),
+      await screen.findByRole("heading", { name: /Requirements/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(/Review pursuit decision/)).toBeInTheDocument();
     expect(
@@ -1274,7 +1274,7 @@ describe("tender workspace stages", () => {
         expect(currentAssessmentPolls).toBeGreaterThanOrEqual(2),
       );
       expect(
-        screen.getAllByRole("button", { name: "Review eligibility" }).length,
+        screen.getAllByRole("button", { name: "Review requirements" }).length,
       ).toBeGreaterThan(0);
     } finally {
       intervalSpy.mockRestore();
@@ -1636,7 +1636,7 @@ describe("tender workspace stages", () => {
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
     expect(
-      await screen.findByRole("heading", { name: "Eligibility" }),
+      await screen.findByRole("heading", { name: /Requirements/i }),
     ).toBeInTheDocument();
     expect(screen.getByText("Eligibility is starting")).toBeInTheDocument();
     expect(
@@ -1659,7 +1659,7 @@ describe("tender workspace stages", () => {
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
     expect(
-      await screen.findByRole("heading", { name: "Review package" }),
+      await screen.findByRole("heading", { name: "Final Review" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Readiness module mounted")).toBeInTheDocument();
     expect(screen.getByText("Export module mounted")).toBeInTheDocument();
@@ -2138,7 +2138,7 @@ describe("tender workspace stages", () => {
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
     expect(
-      await screen.findByRole("heading", { name: "Eligibility" }),
+      await screen.findByRole("heading", { name: /Requirements/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("heading", {

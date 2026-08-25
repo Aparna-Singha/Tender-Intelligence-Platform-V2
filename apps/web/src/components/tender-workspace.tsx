@@ -483,20 +483,24 @@ const surfaceLabels: Readonly<Record<TenderSurface, string>> = {
   activity: "Activity",
   ask: "AI Chat",
   draft: "Draft",
-  eligibility: "Eligibility",
+  eligibility: "Requirements",
   files: "Tender Files",
   overview: "Overview",
-  review: "Review package",
+  review: "Final Review",
 };
 
 const primarySurfaces: readonly TenderSurface[] = [
   "overview",
   "eligibility",
   "draft",
-  "ask",
+  "review",
 ];
 
-const secondarySurfaces: readonly TenderSurface[] = ["files", "activity"];
+const secondarySurfaces: readonly TenderSurface[] = [
+  "ask",
+  "files",
+  "activity",
+];
 
 function resolveSurface(requestedStage: string | null): SurfaceResolution {
   const stage = requestedStage as LegacyStage | null;
@@ -737,16 +741,14 @@ function deriveAssessmentLabel(input: {
   if (input.matrix !== null) return bestAssessmentLabel(input.matrix);
   if (!input.hasReadySource) {
     return {
-      detail:
-        "Upload a primary tender source to start extraction and downstream analysis.",
+      detail: "Upload a primary tender source to begin.",
       label: "Awaiting source",
       tone: "neutral",
     };
   }
   if (input.extractionRun === null && !input.hasExtractedContent) {
     return {
-      detail:
-        "The current tender source is ready, but extraction has not started yet for the current version.",
+      detail: "Source is ready. Processing will begin shortly.",
       label: "Extraction not started",
       tone: "warning",
     };
@@ -756,33 +758,28 @@ function deriveAssessmentLabel(input: {
     input.extractionRun.status !== "COMPLETE"
   ) {
     return {
-      detail:
-        "The platform is extracting tender requirements and key fields from the current authorised source set.",
+      detail: "Analyzing tender...",
       label: "Analysing tender...",
       tone: "info",
     };
   }
   if (input.riskRun?.status === "FAILED") {
     return {
-      detail:
-        input.riskRun.safeFailureMessage ??
-        "Early risk analysis failed safely for the current source version.",
+      detail: input.riskRun.safeFailureMessage ?? "Risk analysis failed.",
       label: "Risk analysis failed",
       tone: "danger",
     };
   }
   if (input.riskRun === null) {
     return {
-      detail:
-        "Tender extraction is complete, but early risk analysis has not started yet for the current tender version.",
+      detail: "Extraction complete. Awaiting risk analysis.",
       label: "Risk analysis not started",
       tone: "warning",
     };
   }
   if (input.riskRun?.status !== "COMPLETE") {
     return {
-      detail:
-        "Extraction is complete. Cited early risk analysis is still running for the current tender version.",
+      detail: "Analyzing tender...",
       label: "Analysing tender...",
       tone: "info",
     };
@@ -792,8 +789,7 @@ function deriveAssessmentLabel(input: {
     input.assessmentRun.status !== "COMPLETE"
   ) {
     return {
-      detail:
-        "Eligibility comparison is running against the current authorised evidence snapshot.",
+      detail: "Comparing evidence...",
       label: "Comparing evidence...",
       tone: "info",
     };
@@ -813,15 +809,13 @@ function deriveAssessmentLabel(input: {
     input.assessmentRun === null
   ) {
     return {
-      detail:
-        "A current authorised CONTINUE decision exists, but eligibility comparison has not started yet for the current tender version.",
-      label: "Eligibility not started",
+      detail: "Ready for requirements check.",
+      label: "Requirements check not started",
       tone: "warning",
     };
   }
   return {
-    detail:
-      "Tender extraction and early risk analysis are complete. Eligibility comparison will start automatically after an authorised CONTINUE decision.",
+    detail: "Please review risks and make a pursuit decision.",
     label: "Decision needed",
     tone: "warning",
   };
@@ -1030,15 +1024,15 @@ function toExtractedRequirement(
                 : "Reading source...";
   const whatToDo =
     phase === "ASSESSING"
-      ? "Wait for evidence comparison to finish. The detail panel will update automatically."
+      ? "Ready for requirements check. Wait for evidence comparison to finish. The detail panel will update automatically."
       : phase === "ASSESSMENT_NOT_STARTED"
-        ? "Eligibility will start automatically for the latest Continue decision."
+        ? "Requirements check will start automatically for the latest Continue decision."
         : phase === "RISK_FAILED"
           ? "Retry the failed risk review before eligibility comparison can continue."
           : phase === "RISK_NOT_STARTED"
             ? "Extraction is complete, but risk review has not started yet."
             : phase === "AWAITING_DECISION"
-              ? "Eligibility will start after you choose Continue. Review the extracted tender requirement while you decide whether to proceed."
+              ? "Requirements check will start after you choose Continue. Review the extracted tender requirement while you decide whether to proceed."
               : phase === "RISK"
                 ? "Risk review is still running before evidence comparison can start."
                 : "Tender extraction is still running. Requirement details will continue to fill in automatically.";
@@ -1187,7 +1181,7 @@ function buildActivityItems(
       description: support.assessmentRun.publicMessage,
       occurredAt: support.assessmentRun.snapshot?.capturedAt ?? null,
       stage: "eligibility",
-      title: `Eligibility check ${humanizeEnum(support.assessmentRun.status)}`,
+      title: `Requirements check `,
     });
   }
 
@@ -2078,7 +2072,7 @@ export function TenderWorkspace({
       ? []
       : [
           {
-            action: "Review eligibility",
+            action: "Review requirements",
             detail:
               reviewRequirementCount === 1
                 ? "One current requirement needs evidence or a reviewer decision."
@@ -2096,7 +2090,7 @@ export function TenderWorkspace({
       ? []
       : [
           {
-            action: "Open eligibility",
+            action: "Open requirements",
             detail:
               otherChecklistItems.length === 1
                 ? "One current action is not tied to a single requirement."
@@ -2152,7 +2146,7 @@ export function TenderWorkspace({
         cta: "Retry risk analysis",
         description:
           support.riskRun.safeFailureMessage ??
-          "Early risk analysis failed safely. Retry before eligibility comparison continues.",
+          "Early risk analysis failed safely. Retry before requirements check continues.",
         surface: "overview" as TenderSurface,
       };
     if (support.riskRun?.status !== "COMPLETE")
@@ -2168,14 +2162,14 @@ export function TenderWorkspace({
       return {
         cta: "Record pursue decision",
         description:
-          "Extraction and risk review are ready. Eligibility stays blocked until an authorised Continue decision exists.",
+          "Extraction and risk review are ready. Requirements check stays blocked until an authorised Continue decision exists.",
         surface: "overview" as TenderSurface,
       };
     if (support.assessmentRun === null)
       return {
         cta: "View extracted requirements",
         description:
-          "Tender requirements are ready. Eligibility comparison has not started yet for the latest Continue decision.",
+          "Tender requirements are ready. Requirements check has not started yet for the latest Continue decision.",
         surface: "eligibility" as TenderSurface,
       };
     if (
@@ -2186,7 +2180,7 @@ export function TenderWorkspace({
       )
     )
       return {
-        cta: "Review eligibility",
+        cta: "Review requirements",
         description:
           "Resolve the highest-priority evidence and assessment items first.",
         surface: "eligibility" as TenderSurface,
@@ -2210,12 +2204,12 @@ export function TenderWorkspace({
       ? support.assessmentRun !== null
         ? "Tender requirements are available and the evidence comparison is still running."
         : support.riskRun?.status === "FAILED"
-          ? "Risk review needs attention before eligibility can start. You can still inspect the extracted tender requirements below."
+          ? "Risk review needs attention before requirements check can start. You can still inspect the extracted tender requirements below."
           : support.riskRun?.status !== "COMPLETE"
             ? "The tender requirements below are still being prepared while extraction and risk review finish."
             : support.currentDecision?.decision === "CONTINUE"
-              ? "Eligibility will start automatically for the latest Continue decision. You can review the extracted tender requirements below while the comparison begins."
-              : "Eligibility will start after you choose Continue. You can review the extracted tender requirements below before deciding."
+              ? "Requirements check will start automatically for the latest Continue decision. You can review the extracted tender requirements below while the comparison begins."
+              : "Requirements check will start after you choose Continue. You can review the extracted tender requirements below before deciding."
       : null;
   const activityItems = buildActivityItems(workspace, support);
   const [showAuditSummary, setShowAuditSummary] = useState(false);
@@ -2260,7 +2254,7 @@ export function TenderWorkspace({
           : support.currentDecision?.decision !== "CONTINUE"
             ? "Drafting is blocked until an authorised CONTINUE decision is recorded."
             : support.assessmentRun?.status !== "COMPLETE"
-              ? "Drafting is blocked until eligibility comparison finishes for the current tender version."
+              ? "Drafting is blocked until requirements check finishes for the current tender version."
               : null;
 
   const askHref = assistantHref(organisationId);
@@ -2676,7 +2670,7 @@ export function TenderWorkspace({
                 <h2>Top risks</h2>
                 <p>
                   Current cited risk and contract findings stay distinct from
-                  eligibility decisions.
+                  requirements decisions.
                 </p>
               </div>
             </div>
@@ -2739,7 +2733,7 @@ export function TenderWorkspace({
             <div className="workspace-section__header">
               <div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <h2 style={{ marginBottom: 0 }}>Eligibility</h2>
+                  <h2 style={{ marginBottom: 0 }}>Requirements</h2>
                   <span
                     className={`status-badge status-badge--${assessmentSummary.tone}`}
                   >
@@ -2805,8 +2799,8 @@ export function TenderWorkspace({
                     <summary>
                       Extracted tender requirements
                       <small>
-                        Browse the source-backed requirements while eligibility
-                        is waiting
+                        Browse the source-backed requirements while requirements
+                        check is waiting
                       </small>
                     </summary>
                     <div className="disclosure__body">
@@ -2870,7 +2864,7 @@ export function TenderWorkspace({
                       <div className="workspace-empty-row">
                         <p>
                           {eligibilityRequirements.length === 0
-                            ? "Eligibility requirements are not available yet."
+                            ? "Requirements are not available yet."
                             : "No requirements match this filter."}
                         </p>
                       </div>
@@ -3707,7 +3701,7 @@ export function TenderWorkspace({
           <section className="workspace-section">
             <div className="workspace-section__header">
               <div>
-                <h2>Review package</h2>
+                <h2>Final Review</h2>
                 <p>
                   Review status, human decisions, and controlled download for{" "}
                   {workspace.title}.

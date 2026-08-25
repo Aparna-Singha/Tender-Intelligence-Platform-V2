@@ -85,7 +85,7 @@ describe("dashboard organisation flow", () => {
       ),
     );
     expect(
-      await screen.findByRole("link", { name: /Analyse new tender/ }),
+      await screen.findByRole("link", { name: /Add tender/ }),
     ).toHaveAttribute("href", "/tenders/org-1");
     expect(
       screen.queryByRole("dialog", { name: "Create organisation" }),
@@ -210,8 +210,8 @@ describe("dashboard home parity behavior", () => {
       }),
     ).toBeInTheDocument();
 
-    expect(screen.getAllByText("5 days left")).toHaveLength(2);
-    expect(screen.getAllByText("4 days overdue")).toHaveLength(2);
+    expect(screen.getAllByText("3 days left")).toHaveLength(2);
+    expect(screen.getAllByText("6 days overdue")).toHaveLength(2);
 
     expect(
       screen.queryByText(
