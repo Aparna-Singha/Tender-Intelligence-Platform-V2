@@ -1117,15 +1117,13 @@ export function withoutResolvedCompanyFactPlaceholders(
   generated: GeneratedDraftSection,
   groundedCompanyFactTypes: ReadonlySet<string> = new Set(),
 ): GeneratedDraftSection {
-  const acceptedFactTypes = new Set(
-    [
-      ...groundedCompanyFactTypes,
-      ...generated.claims
-        .filter(({ claimClass }) => claimClass === "APPROVED_COMPANY_FACT")
-        .map(({ claim }) => claim.split(":", 1)[0]?.trim())
-        .filter((factType): factType is string => factType !== undefined),
-    ],
-  );
+  const acceptedFactTypes = new Set([
+    ...groundedCompanyFactTypes,
+    ...generated.claims
+      .filter(({ claimClass }) => claimClass === "APPROVED_COMPANY_FACT")
+      .map(({ claim }) => claim.split(":", 1)[0]?.trim())
+      .filter((factType): factType is string => factType !== undefined),
+  ]);
   const removed = generated.placeholders.filter((placeholder) => {
     const text = `${placeholder.marker} ${placeholder.explanation}`;
     return [...acceptedFactTypes].some((factType) =>
