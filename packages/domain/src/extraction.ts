@@ -1,5 +1,5 @@
 export const PARSER_POLICY_VERSION = "deterministic-v1";
-export const STRUCTURING_POLICY_VERSION = "rules-v3";
+export const STRUCTURING_POLICY_VERSION = "rules-v4";
 
 export type SourceFormat = "CSV" | "DOCX" | "PDF" | "XLSX" | "ZIP_MEMBER";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "HUMAN_REVIEW_REQUIRED";
@@ -239,57 +239,98 @@ export function extractDeterministicRequirements(
   anchorFor: (block: ParsedBlock) => SourceAnchor,
 ): readonly RequirementCandidate[] {
   return blocks.flatMap((block) => {
-    const structuredRequirement =
-      /^(?:experience|turnover|quality|oem authori[sz]ation)\s*:/iu.test(
-        block.text.trim(),
-      );
-    const documentTableRequirement =
-      /\b(?:gst registration|udyam\/?msme|incorporation certificate|po\s*\+\s*invoice|turnover certificate|iso\s*9001|oem authori[sz]ation|declarations?)\b.*\b(?:mandatory|conditional|evidence|if claiming|unless)\b/iu.test(
-        block.text,
-      );
-    const conditionalRequirement =
-      /\b(?:relaxation|only when|only if|provided that)\b/iu.test(block.text);
-    if (
-      !structuredRequirement &&
-      !documentTableRequirement &&
-      !conditionalRequirement &&
-      !/\b(must|shall|required|mandatory|should|may need to|is to be)\b/iu.test(
-        block.text,
-      )
+    const sentenceCandidates = block.text
+      .split(/(?<=[.!?])\s+(?=[A-Z0-9])/u)
+      .map((sentence) => sentence.trim())
+      .filter(isRequirementCandidateText);
+    const requirementTexts =
+      sentenceCandidates.length > 1
+        ? sentenceCandidates
+        : isRequirementCandidateText(block.text)
+          ? [block.text.trim()]
+          : [];
+    return requirementTexts.map((requirementText) =>
+      extractRequirementCandidate(block, requirementText, anchorFor(block)),
+    );
+  });
+}
+
+function isRequirementCandidateText(value: string): boolean {
+  const text = value.trim();
+  const structuredRequirement =
+    /^(?:experience|turnover|quality|oem authori[sz]ation)\s*:/iu.test(text);
+  const labelledRequirement =
+    /^(?:mandatory|optional|conditional)\s+requirement\s*:/iu.test(text);
+  const documentTableRequirement =
+    /\b(?:gst registration|udyam\/?msme|incorporation certificate|po\s*\+\s*invoice|turnover certificate|iso\s*9001|oem authori[sz]ation|declarations?)\b.*\b(?:mandatory|conditional|evidence|if claiming|unless)\b/iu.test(
+      text,
+    );
+  const conditionalRequirement =
+    /\b(?:relaxation|only when|only if|provided that)\b/iu.test(text);
+  const bindingDeliveryRequirement =
+    /\bdelivery(?:\s+(?:period|schedule))?\s+(?:is|will be|shall be|must be|required(?:\s+within|\s+in|\s+by)?)\b/iu.test(
+      text,
+    );
+  return (
+    structuredRequirement ||
+    labelledRequirement ||
+    documentTableRequirement ||
+    conditionalRequirement ||
+    bindingDeliveryRequirement ||
+    /\b(must|shall|required|mandatory|should|may need to|is to be)\b/iu.test(
+      text,
     )
-      return [];
-    const category =
-      requirementRules.find(([pattern]) => pattern.test(block.text))?.[1] ??
-      "OTHER";
-    const conditional =
-      /\b(if|conditional|where applicable|subject to|unless|only when|only if|provided that)\b/iu.test(
-        block.text,
-      );
-    const obligation = conditional
-      ? "CONDITIONAL"
-      : /\b(must|shall|required|mandatory)\b/iu.test(block.text) ||
+  );
+}
+
+function extractRequirementCandidate(
+  block: ParsedBlock,
+  requirementText: string,
+  anchor: SourceAnchor,
+): RequirementCandidate {
+  const structuredRequirement =
+    /^(?:experience|turnover|quality|oem authori[sz]ation)\s*:/iu.test(
+      requirementText,
+    );
+  const category =
+    requirementRules.find(([pattern]) => pattern.test(requirementText))?.[1] ??
+    "OTHER";
+  const conditional =
+    /\b(if|conditional|where applicable|subject to|unless|only when|only if|provided that)\b/iu.test(
+      requirementText,
+    );
+  const explicitlyOptional = /^optional\s+requirement\s*:/iu.test(
+    requirementText,
+  );
+  const bindingDeliveryRequirement =
+    /\bdelivery(?:\s+(?:period|schedule))?\s+(?:is|will be|shall be|must be|required(?:\s+within|\s+in|\s+by)?)\b/iu.test(
+      requirementText,
+    );
+  const obligation = conditional
+    ? "CONDITIONAL"
+    : explicitlyOptional
+      ? "OPTIONAL"
+      : /\b(must|shall|required|mandatory)\b/iu.test(requirementText) ||
+          bindingDeliveryRequirement ||
           structuredRequirement
         ? "MANDATORY"
         : "OPTIONAL";
-    const ambiguous = /\b(may|normally|generally|as applicable)\b/iu.test(
-      block.text,
-    );
-    const threshold = extractRequirementThreshold(block.text);
-    return [
-      {
-        anchor: anchorFor(block),
-        category,
-        confidence: ambiguous ? "LOW" : block.confidence,
-        ...(conditional ? { conditionText: block.text.trim() } : {}),
-        findingState: ambiguous ? "AMBIGUOUS" : "FOUND",
-        normalizedStatement: block.text.trim().slice(0, 4000),
-        obligation,
-        sourceWording: block.text.slice(0, 8000),
-        ...(threshold === null ? {} : { threshold }),
-        title: `${category.replaceAll("_", " ")} requirement`.slice(0, 300),
-      },
-    ];
-  });
+  const ambiguous = /\b(may|normally|generally|as applicable)\b/iu.test(
+    requirementText,
+  );
+  const threshold = extractRequirementThreshold(requirementText);
+  return {
+    anchor,
+    category,
+    confidence: ambiguous ? "LOW" : block.confidence,
+    ...(conditional ? { conditionText: requirementText } : {}),
+    findingState: ambiguous ? "AMBIGUOUS" : "FOUND",
+    normalizedStatement: requirementText.slice(0, 4000),
+    obligation,
+    sourceWording: requirementText.slice(0, 8000),
+    ...(threshold === null ? {} : { threshold }),
+    title: `${category.replaceAll("_", " ")} requirement`.slice(0, 300),
+  };
 }
 
 function extractRequirementThreshold(

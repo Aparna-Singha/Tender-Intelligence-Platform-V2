@@ -1,4 +1,10 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -115,31 +121,38 @@ function installApi(
     qualifying_consolidated_draft_version_id: string | null;
   } = preflight,
 ): void {
+  let currentRunValue = runValue;
   apiRequest.mockImplementation((path: string, init?: RequestInit) => {
     if (path === "/organisations")
       return Promise.resolve([{ organisation: { id: "org-1" }, role }]);
     if (path.endsWith("/final-readiness/preflight"))
       return Promise.resolve(preflightValue);
     if (path.includes("/versions/version-1/final-readiness/current"))
-      return Promise.resolve({ run: runValue });
+      return Promise.resolve({ run: currentRunValue });
     if (path.includes("/versions/version-1/final-readiness?"))
-      return Promise.resolve({ items: [runValue], next_cursor: null });
+      return Promise.resolve({ items: [currentRunValue], next_cursor: null });
     if (path.endsWith("/final-readiness/run-1/events"))
-      return Promise.resolve(runValue);
+      return Promise.resolve(currentRunValue);
     if (path.endsWith("/final-readiness/run-1/findings?limit=100"))
       return Promise.resolve({ items: [finding, blocker], next_cursor: null });
     if (path.endsWith("/final-readiness/run-1"))
-      if (init?.method === "DELETE")
+      if (init?.method === "DELETE") {
+        currentRunValue = {
+          ...currentRunValue,
+          completed_at: "2026-08-04T10:05:00.000Z",
+          status: "CANCELLED",
+          updated_at: "2026-08-04T10:05:00.000Z",
+        };
         return Promise.resolve({ cancellation_requested: true });
-      else
+      } else
         return Promise.resolve({
-          occurred_at: runValue.updated_at,
-          progress_percent: runValue.status === "PROCESSING" ? 40 : 100,
+          occurred_at: currentRunValue.updated_at,
+          progress_percent: currentRunValue.status === "PROCESSING" ? 40 : 100,
           stage:
-            runValue.status === "PROCESSING"
+            currentRunValue.status === "PROCESSING"
               ? "EVALUATING_FINAL_RISK"
               : "COMPLETE",
-          status: runValue.status,
+          status: currentRunValue.status,
         });
     if (path.endsWith("/risk-analyses/risk-run-1/findings"))
       return Promise.resolve([
@@ -324,6 +337,7 @@ describe("final readiness workspace", () => {
   });
 
   it("uses server lifecycle state for cancellation, retry, stale and invalidated visibility", async () => {
+    const user = userEvent.setup();
     installApi("OWNER", { ...run, completed_at: null, status: "PROCESSING" });
     const view = render(
       <FinalReadinessWorkspace
@@ -333,25 +347,28 @@ describe("final readiness workspace", () => {
         versionId="version-1"
       />,
     );
-    await userEvent.click(
-      await screen.findByRole("button", { name: "Cancel run" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Cancel run" }));
     const dialog = await screen.findByRole("dialog", {
       name: "Cancel final review run",
     });
-    await userEvent.type(
-      within(dialog).getByLabelText("Rationale"),
-      "Cancel because the authoritative inputs are changing.",
-    );
-    await userEvent.click(
+    fireEvent.change(within(dialog).getByLabelText("Rationale"), {
+      target: {
+        value: "Cancel because the authoritative inputs are changing.",
+      },
+    });
+    await user.click(
       within(dialog).getByRole("button", { name: "Cancel run" }),
     );
-    expect(
-      calls().some(
-        ([path, init]) =>
-          path.endsWith("/final-readiness/run-1") && init?.method === "DELETE",
-      ),
-    ).toBe(true);
+    expect(await screen.findByText("Cancelled")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(
+        calls().some(
+          ([path, init]) =>
+            path.endsWith("/final-readiness/run-1") &&
+            init?.method === "DELETE",
+        ),
+      ).toBe(true),
+    );
 
     view.unmount();
     apiRequest.mockReset();
@@ -365,14 +382,16 @@ describe("final readiness workspace", () => {
     });
     renderWorkspace();
     expect(await screen.findByText("Superseded")).toBeInTheDocument();
-    await userEvent.click(
+    await user.click(
       screen.getByRole("button", { name: "Retry as a new run" }),
     );
-    expect(
-      calls().some(
-        ([path, init]) => path.endsWith("/retry") && init?.method === "POST",
-      ),
-    ).toBe(true);
+    await waitFor(() =>
+      expect(
+        calls().some(
+          ([path, init]) => path.endsWith("/retry") && init?.method === "POST",
+        ),
+      ).toBe(true),
+    );
   });
 
   it("loads append-only history and submits the authoritative current review version", async () => {

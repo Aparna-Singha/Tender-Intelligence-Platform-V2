@@ -170,6 +170,48 @@ describe("deterministic extraction policy", () => {
     );
   });
 
+  it("extracts independent requirements from a multi-sentence source block", () => {
+    const source =
+      "Mandatory requirement: the bidder shall submit an ISO 9001 certificate. Conditional requirement: if subcontractors are used, declarations shall be submitted. Conflicting statement: delivery is 30 days. Elsewhere delivery is 45 days.";
+    const sourceAnchor = {
+      ...anchor,
+      documentId: "multi-requirement-document",
+      endOffset: source.length,
+      excerpt: source,
+      pageNumber: 7,
+    };
+    const requirements = extractDeterministicRequirements(
+      [block(source)],
+      () => sourceAnchor,
+    );
+
+    expect(requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "CERTIFICATION",
+          obligation: "MANDATORY",
+        }),
+        expect.objectContaining({
+          category: "DOCUMENT_SUBMISSION",
+          obligation: "CONDITIONAL",
+        }),
+        expect.objectContaining({
+          anchor: expect.objectContaining({
+            documentId: "multi-requirement-document",
+            pageNumber: 7,
+          }),
+          category: "DELIVERY",
+          normalizedStatement: "Conflicting statement: delivery is 30 days.",
+          obligation: "MANDATORY",
+        }),
+      ]),
+    );
+    expect(
+      requirements.filter(({ category }) => category === "DELIVERY"),
+    ).toHaveLength(2);
+    expect(validateCitation(block(source), sourceAnchor)).toBe(true);
+  });
+
   it("treats manufacturer-only relaxation wording as conditional", () => {
     const requirements = extractDeterministicRequirements(
       [
