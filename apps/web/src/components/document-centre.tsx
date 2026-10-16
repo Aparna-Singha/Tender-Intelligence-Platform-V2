@@ -1,20 +1,12 @@
 "use client";
 
-import {
-  AlertTriangle,
-  Clock3,
-  Download,
-  FileCheck2,
-  Plus,
-  Search,
-  ShieldCheck,
-  Sparkles,
-  X,
-} from "lucide-react";
+import { ContextualAssistant } from "./contextual-assistant";
+
+import { Download, FileCheck2, Plus, Search, X } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
 import {
-  Alert,
   Badge,
   Button,
   Card,
@@ -25,6 +17,7 @@ import {
   IconButton,
   Input,
   Modal,
+  PageHeader,
   Select,
   Table,
   humanizeEnum,
@@ -32,7 +25,6 @@ import {
 import { apiRequest, formatApiError, PublicApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
-import { CompanyWorkspaceHeader } from "./company-workspace-nav";
 
 interface DocumentSummary {
   readonly category: string;
@@ -127,15 +119,6 @@ function isExpiringSoon(date: string | null): boolean {
   return days >= 0 && days <= 30;
 }
 
-function statusTone(
-  status: string,
-): "neutral" | "info" | "success" | "warning" | "danger" {
-  if (status === "READY") return "success";
-  if (["REJECTED", "FAILED", "EXPIRED"].includes(status)) return "danger";
-  if (["SCANNING", "QUARANTINED"].includes(status)) return "warning";
-  return "info";
-}
-
 function verificationTone(
   status: string,
 ): "neutral" | "info" | "success" | "warning" | "danger" {
@@ -146,12 +129,34 @@ function verificationTone(
 }
 
 function expiryLabel(value: string | null): string {
-  if (value === null) return "Not supplied";
-  if (isExpired(value))
-    return `Expired ${new Date(value).toLocaleDateString()}`;
-  if (isExpiringSoon(value))
-    return `Expiring soon ${new Date(value).toLocaleDateString()}`;
-  return new Date(value).toLocaleDateString();
+  if (value === null) return "—";
+  return new Date(value).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+const categoryGroups: Readonly<Record<string, string>> = {
+  AUDITED_FINANCIAL_STATEMENT: "Financial",
+  BANK_DOCUMENT: "Financial",
+  CIN: "Legal & Registration",
+  COMPLETION_CERTIFICATE: "Past Experience",
+  DECLARATION: "Legal & Registration",
+  EXPERIENCE_CERTIFICATE: "Past Experience",
+  GST: "Legal & Registration",
+  ISO_CERTIFICATE: "Certificates",
+  LICENCE: "Certificates",
+  OEM_AUTHORISATION: "Certificates",
+  PAN: "Legal & Registration",
+  PRODUCT_DATASHEET: "Certificates",
+  PURCHASE_ORDER: "Past Experience",
+  TURNOVER_CERTIFICATE: "Financial",
+  UDYAM: "Legal & Registration",
+};
+
+function categoryGroup(category: string): string {
+  return categoryGroups[category] ?? "Other";
 }
 
 function documentHealth(document: DocumentSummary): {
@@ -175,6 +180,28 @@ function documentHealth(document: DocumentSummary): {
   return { current, expiringSoon, needsAttention, outdated };
 }
 
+function documentDisplayStatus(document: DocumentSummary): {
+  readonly label: string;
+  readonly tone: "neutral" | "info" | "success" | "warning" | "danger";
+} {
+  if (document.status === "REJECTED")
+    return { label: "Rejected", tone: "danger" };
+  if (document.status === "FAILED") return { label: "Failed", tone: "danger" };
+  if (document.status === "QUARANTINED")
+    return { label: "Quarantined", tone: "warning" };
+  const health = documentHealth(document);
+  if (health.outdated) return { label: "Outdated", tone: "danger" };
+  if (health.expiringSoon) return { label: "Expiring soon", tone: "warning" };
+  if (health.needsAttention) return { label: "Needs review", tone: "warning" };
+  if (health.current) return { label: "Verified", tone: "success" };
+  if (transitionalDocumentStatuses.has(document.status))
+    return { label: "Processing", tone: "info" };
+  return {
+    label: humanizeEnum(document.verificationStatus || document.status),
+    tone: verificationTone(document.verificationStatus),
+  };
+}
+
 function formatTimestamp(value: string): string {
   return new Date(value).toLocaleString();
 }
@@ -191,12 +218,6 @@ function uploadErrorMessage(error: unknown): string {
     );
   }
 
-  const requestId =
-    error.source instanceof PublicApiError &&
-    error.source.requestId !== undefined
-      ? ` Request ID: ${error.source.requestId}`
-      : "";
-
   if (error.stage === "file-type") {
     return "This file type is not supported.";
   }
@@ -204,26 +225,26 @@ function uploadErrorMessage(error: unknown): string {
     return "This file is too large. Upload a file up to 25 MB.";
   }
   if (error.stage === "storage") {
-    return `Upload to secure storage failed. Please try again.${requestId}`;
+    return "Upload to secure storage failed. Please try again.";
   }
   if (error.stage === "verification") {
-    return `The file reached secure storage but could not be verified.${requestId}`;
+    return "The file reached secure storage but could not be verified.";
   }
   if (error.stage === "processing") {
-    return `Security checks or processing rejected this upload.${requestId}`;
+    return "Security checks or processing rejected this upload.";
   }
   if (error.source instanceof PublicApiError) {
     if (
       error.source.status === 409 &&
-      error.source.message === "Duplicate document"
+      error.source.code === "DOCUMENT_DUPLICATE"
     ) {
-      return `This exact document has already been uploaded.${requestId}`;
+      return "This exact document has already been uploaded.";
     }
     if (error.source.message === "File type is not allowed") {
-      return `This file type is not supported.${requestId}`;
+      return "This file type is not supported.";
     }
   }
-  return `Could not start a secure upload. Please try again.${requestId}`;
+  return "Could not start a secure upload. Please try again.";
 }
 
 async function sha256(file: File): Promise<string> {
@@ -241,10 +262,14 @@ export function DocumentCentre({
 }: {
   readonly organisationId: string;
 }): JSX.Element {
+  const searchParams = useSearchParams();
+  const returnToCandidate = searchParams.get("returnTo");
+  const returnTo = returnToCandidate?.startsWith(`/tenders/${organisationId}/`)
+    ? returnToCandidate
+    : null;
   const [documents, setDocuments] = useState<readonly DocumentSummary[]>([]);
   const [query, setQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [statusFilter, setStatusFilter] = useState("");
   const [message, setMessage] = useState("Loading documents...");
   const [selected, setSelected] = useState<DocumentDetails | null>(null);
   const [uploadOpen, setUploadOpen] = useState(false);
@@ -274,17 +299,21 @@ export function DocumentCentre({
   const categoryCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const document of documents) {
-      counts.set(document.category, (counts.get(document.category) ?? 0) + 1);
+      const group = categoryGroup(document.category);
+      counts.set(group, (counts.get(group) ?? 0) + 1);
     }
     return counts;
   }, [documents]);
 
-  const availableCategories = useMemo(() => {
-    const values = [...new Set(documents.map((document) => document.category))];
-    return values.sort((left, right) =>
-      humanizeEnum(left).localeCompare(humanizeEnum(right)),
-    );
-  }, [documents]);
+  const availableCategories = useMemo(
+    () =>
+      [
+        ...new Set(
+          documents.map((document) => categoryGroup(document.category)),
+        ),
+      ].sort((left, right) => left.localeCompare(right)),
+    [documents],
+  );
 
   const healthSummary = useMemo(() => {
     let current = 0;
@@ -304,9 +333,11 @@ export function DocumentCentre({
   const filteredDocuments = useMemo(() => {
     const trimmedQuery = query.trim().toLowerCase();
     return documents.filter((document) => {
-      if (selectedCategory !== "" && document.category !== selectedCategory)
+      if (
+        selectedCategory !== "" &&
+        categoryGroup(document.category) !== selectedCategory
+      )
         return false;
-      if (statusFilter !== "" && document.status !== statusFilter) return false;
       if (trimmedQuery === "") return true;
       return (
         document.displayName.toLowerCase().includes(trimmedQuery) ||
@@ -314,32 +345,7 @@ export function DocumentCentre({
         humanizeEnum(document.status).toLowerCase().includes(trimmedQuery)
       );
     });
-  }, [documents, query, selectedCategory, statusFilter]);
-
-  const healthCallout =
-    healthSummary.needsAttention > 0 || healthSummary.outdated > 0
-      ? {
-          description:
-            healthSummary.outdated > 0
-              ? `${healthSummary.outdated} document(s) are outdated or expired.`
-              : `${healthSummary.needsAttention} document(s) need processing or verification attention.`,
-          title: "Evidence health needs review",
-          tone: "warning" as const,
-        }
-      : healthSummary.expiringSoon > 0
-        ? {
-            description: `${healthSummary.expiringSoon} document(s) expire within 30 days.`,
-            title: "Expiry review coming up",
-            tone: "info" as const,
-          }
-        : {
-            description:
-              healthSummary.current > 0
-                ? "Current reusable documents are available for tender assessments."
-                : "Upload the first organisation document to begin building reusable evidence.",
-            title: "Evidence health is stable",
-            tone: "success" as const,
-          };
+  }, [documents, query, selectedCategory]);
 
   async function refreshUploadedDocument(documentId: string): Promise<void> {
     for (let attempt = 0; attempt < 12; attempt += 1) {
@@ -485,71 +491,94 @@ export function DocumentCentre({
 
   return (
     <div className="workspace-page company-docs-page">
-      <CompanyWorkspaceHeader
+      <PageHeader
         actions={
-          <Button onClick={() => setUploadOpen(true)}>
-            <Plus aria-hidden="true" size={18} />
-            Upload document
-          </Button>
+          <>
+            {returnTo === null ? null : (
+              <Link className="button button--secondary" href={returnTo}>
+                Return to tender
+              </Link>
+            )}
+            <Button onClick={() => setUploadOpen(true)}>
+              <Plus aria-hidden="true" size={18} />
+              Upload document
+            </Button>
+          </>
         }
-        organisationId={organisationId}
+        description="Reusable company evidence used across tender eligibility checks."
+        title="Company documents"
       />
 
-      <section className="workspace-section">
-        <div className="workspace-section__header">
-          <div>
-            <h2>Company documents</h2>
-            <p>
-              Reusable company evidence, current status, and upcoming review
-              work.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      <Alert title={healthCallout.title} tone={healthCallout.tone}>
-        <p>{healthCallout.description}</p>
-      </Alert>
-
-      <div className="tender-summary-grid">
-        <Card className="tender-summary-card">
+      <div className="company-docs-health" aria-label="Evidence health">
+        <div className="company-docs-health__item">
           <span className="tender-summary-card__label">Current</span>
           <strong>{healthSummary.current}</strong>
           <p>
             Ready documents with verified review state and without expired
             validity.
           </p>
-        </Card>
-        <Card className="tender-summary-card">
+        </div>
+        <div className="company-docs-health__item">
           <span className="tender-summary-card__label">Need attention</span>
           <strong>{healthSummary.needsAttention}</strong>
           <p>
             Processing failures, quarantine, or verification states that still
             need review.
           </p>
-        </Card>
-        <Card className="tender-summary-card">
+        </div>
+        <div className="company-docs-health__item">
           <span className="tender-summary-card__label">Expiring soon</span>
           <strong>{healthSummary.expiringSoon}</strong>
           <p>Documents with known expiry dates inside the next 30 days.</p>
-        </Card>
-        <Card className="tender-summary-card">
+        </div>
+        <div className="company-docs-health__item">
           <span className="tender-summary-card__label">Outdated</span>
           <strong>{healthSummary.outdated}</strong>
           <p>
             Expired documents or records already marked with expired processing
             state.
           </p>
-        </Card>
+        </div>
+        <div className="company-docs-health__item company-docs-health__item--summary">
+          <span className="tender-summary-card__label">Evidence health</span>
+          <p>
+            {healthSummary.needsAttention + healthSummary.expiringSoon} document
+            {healthSummary.needsAttention + healthSummary.expiringSoon === 1
+              ? ""
+              : "s"}{" "}
+            may affect active tenders
+          </p>
+        </div>
       </div>
+
+      <Card className="company-docs-toolbar">
+        <div className="company-docs-toolbar__search">
+          <Search aria-hidden="true" size={16} />
+          <Input
+            aria-label="Search company docs"
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search documents"
+            value={query}
+          />
+        </div>
+        <Select
+          aria-label="Filter company documents by category"
+          onChange={(event) => setSelectedCategory(event.target.value)}
+          value={selectedCategory}
+        >
+          <option value="">All categories</option>
+          {availableCategories.map((category) => (
+            <option key={category} value={category}>
+              {category}
+            </option>
+          ))}
+        </Select>
+      </Card>
 
       <div className="company-docs-layout">
         <aside className="workspace-card company-docs-sidebar">
           <div className="company-docs-sidebar__header">
             <h2>Categories</h2>
-            <p>
-              Browse documents by the category already stored with each file.
-            </p>
           </div>
           <button
             className={`company-docs-sidebar__link ${selectedCategory === "" ? "company-docs-sidebar__link--active" : ""}`}
@@ -566,50 +595,13 @@ export function DocumentCentre({
               onClick={() => setSelectedCategory(category)}
               type="button"
             >
-              <span>{humanizeEnum(category)}</span>
+              <span>{category}</span>
               <Badge tone="neutral">{categoryCounts.get(category) ?? 0}</Badge>
             </button>
           ))}
         </aside>
 
         <div className="workspace-section">
-          <Card className="company-docs-toolbar">
-            <div className="company-docs-toolbar__search">
-              <Search aria-hidden="true" size={16} />
-              <Input
-                aria-label="Search company docs"
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search document name, category, or status"
-                value={query}
-              />
-            </div>
-            <Field label="Processing status">
-              <Select
-                onChange={(event) => setStatusFilter(event.target.value)}
-                value={statusFilter}
-              >
-                <option value="">All statuses</option>
-                {[...new Set(documents.map((document) => document.status))]
-                  .sort()
-                  .map((status) => (
-                    <option key={status} value={status}>
-                      {humanizeEnum(status)}
-                    </option>
-                  ))}
-              </Select>
-            </Field>
-          </Card>
-
-          <div className="security-note">
-            <ShieldCheck aria-hidden="true" size={20} />
-            <p>
-              Files upload directly to private storage using short-lived signed
-              access. Downloads always need fresh authorisation, and a ready
-              file still needs human review where the evidence state requires
-              it.
-            </p>
-          </div>
-
           {message !== "" ? <p aria-live="polite">{message}</p> : null}
 
           {filteredDocuments.length === 0 && message === "" ? (
@@ -633,71 +625,30 @@ export function DocumentCentre({
                     <th>Document</th>
                     <th>Category</th>
                     <th>Status</th>
-                    <th>Verification</th>
-                    <th>Validity</th>
-                    <th>Updated</th>
-                    <th>
-                      <span className="visually-hidden">Actions</span>
-                    </th>
+                    <th>Valid until</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredDocuments.map((document) => {
-                    const health = documentHealth(document);
+                    const displayStatus = documentDisplayStatus(document);
                     return (
                       <tr key={document.id}>
                         <td>
-                          <strong>{document.displayName}</strong>
-                          <div className="company-docs-table__meta">
-                            {health.needsAttention ? (
-                              <span className="company-docs-attention">
-                                <AlertTriangle aria-hidden="true" size={14} />
-                                Needs review
-                              </span>
-                            ) : health.expiringSoon ? (
-                              <span className="company-docs-attention">
-                                <Clock3 aria-hidden="true" size={14} />
-                                Expiring soon
-                              </span>
-                            ) : (
-                              <span className="company-docs-table__meta">
-                                Reusable company document
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td>{humanizeEnum(document.category)}</td>
-                        <td>
-                          <Badge tone={statusTone(document.status)}>
-                            {humanizeEnum(document.status)}
-                          </Badge>
-                        </td>
-                        <td>
-                          <Badge
-                            tone={verificationTone(document.verificationStatus)}
+                          <button
+                            className="company-docs-table__document"
+                            onClick={() => void showDetails(document.id)}
+                            type="button"
                           >
-                            {humanizeEnum(document.verificationStatus)}
+                            {document.displayName}
+                          </button>
+                        </td>
+                        <td>{categoryGroup(document.category)}</td>
+                        <td>
+                          <Badge tone={displayStatus.tone}>
+                            {displayStatus.label}
                           </Badge>
                         </td>
                         <td>{expiryLabel(document.expiryDate)}</td>
-                        <td>{formatTimestamp(document.updatedAt)}</td>
-                        <td>
-                          <div className="inline-actions">
-                            <Button
-                              onClick={() => void showDetails(document.id)}
-                              variant="quiet"
-                            >
-                              View
-                            </Button>
-                            <IconButton
-                              disabled={document.status !== "READY"}
-                              label={`Download ${document.displayName}`}
-                              onClick={() => void download(document.id)}
-                            >
-                              <Download aria-hidden="true" size={17} />
-                            </IconButton>
-                          </div>
-                        </td>
                       </tr>
                     );
                   })}
@@ -831,15 +782,11 @@ export function DocumentCentre({
         </Drawer>
       ) : null}
 
-      <Link
-        className="workspace-floating-ai"
-        href={assistantHref(organisationId)}
-      >
-        <span>
-          <Sparkles aria-hidden="true" size={16} />
-        </span>
-        AI Assistant
-      </Link>
+      <ContextualAssistant
+        context="company documents"
+        organisationId={organisationId}
+        openInChatHref={assistantHref(organisationId)}
+      />
     </div>
   );
 }

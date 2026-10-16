@@ -561,19 +561,56 @@ export function FinalReadinessWorkspace({
   return (
     <section
       aria-labelledby="final-readiness-heading"
-      className="stack"
+      className="final-readiness-workspace"
       style={{ minWidth: 0, overflowWrap: "anywhere" }}
     >
-      <h2 className="visually-hidden" id="final-readiness-heading">
-        Final readiness
-      </h2>
-      <p style={{ margin: 0, fontSize: "0.78rem" }}>
-        A final human check. This aid does not guarantee eligibility,
-        compliance, or bid success.
-      </p>
+      <header className="workspace-card final-readiness-workspace__header">
+        <div>
+          <h2 id="final-readiness-heading">Final readiness</h2>
+          <p>
+            Human-controlled decision based on current evidence, review status,
+            and package checks.
+          </p>
+        </div>
+        <Badge
+          tone={
+            selectedRun?.current_disposition?.disposition ===
+            "HOLD_FOR_REMEDIATION"
+              ? "warning"
+              : "neutral"
+          }
+        >
+          {selectedRun?.current_disposition === null || selectedRun === null
+            ? "Draft not started"
+            : dispositionLabels[selectedRun.current_disposition.disposition]}
+        </Badge>
+      </header>
       <p aria-live="polite" role="status">
         {message}
       </p>
+
+      {selectedRun !== null ? (
+        <div className="readiness-metrics" aria-label="Final readiness summary">
+          <div>
+            <strong>{selectedRun.finding_counts.blockers}</strong>
+            <span>Blockers</span>
+          </div>
+          <div>
+            <strong>
+              {selectedRun.finding_counts.human_disposition_required}
+            </strong>
+            <span>Human decisions</span>
+          </div>
+          <div>
+            <strong>{selectedRun.finding_counts.warnings}</strong>
+            <span>Warnings</span>
+          </div>
+          <div>
+            <strong>{selectedRun.finding_counts.informational}</strong>
+            <span>Informational</span>
+          </div>
+        </div>
+      ) : null}
 
       <details className="disclosure">
         <summary>Check readiness to start review</summary>
@@ -879,7 +916,9 @@ export function FinalReadinessWorkspace({
 
       {selectedRun !== null && (
         <Card>
-          <h3>Issues requiring attention</h3>
+          <h3>Readiness findings</h3>
+          <p>Only unresolved or decision-relevant items are shown here.</p>
+          <h4 className="visually-hidden">Issues requiring attention</h4>
           <div
             className="filter-bar"
             role="group"

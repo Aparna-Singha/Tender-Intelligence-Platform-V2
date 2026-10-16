@@ -731,6 +731,10 @@ export class EligibilityService {
       throw new UnprocessableEntityException(
         "Accepted document facts require an exact citation",
       );
+    if (input.action === "ACCEPT" && fact.factType.endsWith("_CONFLICT"))
+      throw new UnprocessableEntityException(
+        "Conflicting evidence cannot be accepted as a supported fact; review or invalidate the conflict",
+      );
     const state = factState(input.action);
     const review = await this.database.$transaction(async (transaction) => {
       const aggregate = await transaction.companyEvidenceReview.aggregate({
@@ -1079,6 +1083,24 @@ export class EligibilityService {
       this.database.checklistItem.updateMany({
         data: { invalidatedAt: now, status: "INVALIDATED" },
         where: { invalidatedAt: null, organisationId },
+      }),
+      this.database.ragIndexRun.updateMany({
+        data: {
+          invalidatedAt: now,
+          invalidationReason: "COMPANY_EVIDENCE_CHANGED",
+          status: "INVALIDATED",
+        },
+        where: {
+          invalidatedAt: null,
+          organisationId,
+          sourceMode: {
+            in: [
+              "TENDER_AND_APPROVED_COMPANY_EVIDENCE",
+              "FULL_AUTHORISED_TENDER_CONTEXT",
+            ],
+          },
+          status: { notIn: ["FAILED", "CANCELLED", "INVALIDATED"] },
+        },
       }),
     ]);
   }

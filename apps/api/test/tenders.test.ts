@@ -45,6 +45,55 @@ afterEach(() => {
 });
 
 describe("tender workspace tenant isolation", () => {
+  it("converts contract date strings before creating a tender", async () => {
+    const transaction = {
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      tender: {
+        create: vi.fn().mockResolvedValue({ id: "tender-a" }),
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+      tenderSource: { create: vi.fn().mockResolvedValue(undefined) },
+      tenderVersion: {
+        create: vi.fn().mockResolvedValue({ id: "version-a" }),
+      },
+      tenderWorkspace: {
+        create: vi.fn().mockResolvedValue({ id: "workspace-a" }),
+        update: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+    const database = {
+      $transaction: vi.fn(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    };
+    const service = new TendersService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    await service.create(
+      "organisation-a",
+      "user-a",
+      {
+        buyer: "Asteria Public Utilities Corporation",
+        publication_date: "2026-09-28",
+        submission_deadline: "2026-10-15T15:00:00+05:30",
+        title: "Smart Motor Protection Relays and Contactor Accessories",
+      },
+      "request-a",
+    );
+
+    expect(transaction.tender.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        publicationDate: new Date("2026-09-28"),
+        submissionDeadline: new Date("2026-10-15T15:00:00+05:30"),
+      }),
+    });
+  });
+
   it("does not reveal a cross-tenant tender", async () => {
     const database = {
       tender: { findFirst: vi.fn().mockResolvedValue(null) },

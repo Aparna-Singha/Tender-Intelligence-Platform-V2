@@ -364,6 +364,13 @@ Provider privacy terms require approval before production. The chatbot has no
 internet, tools, legal advice, readiness, export, scraping, or submission. Its
 answers are never drafting evidence.
 
+Before live provider validation, run `pnpm provider:preflight`. The command uses
+the same root `.env` loading as the worker and reports only safe diagnostics for
+key presence/fingerprint, DNS and HTTPS reachability, project model availability,
+minimal generation, JSON-schema output, and the configured 768-dimensional
+embedding model. It never prints the API key and exits non-zero if no verified
+generation model, structured output, or embedding is available.
+
 ## Phase 10 fact-constrained drafting
 
 After the current Phase 5–9 prerequisites and a human `CONTINUE` exist, the Draft

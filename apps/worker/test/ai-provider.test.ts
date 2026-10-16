@@ -112,6 +112,12 @@ describe("Gemini provider adapter", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
+        body: expect.stringContaining('"thinkingBudget":0'),
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
         body: expect.stringContaining('"INSUFFICIENT_EVIDENCE"'),
       }),
     );
@@ -153,44 +159,73 @@ describe("Gemini provider adapter", () => {
   it("classifies rate limits without leaking provider bodies", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response("raw provider details", { status: 429 }),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 429,
+              message: "Too many requests",
+              status: "RESOURCE_EXHAUSTED",
+            },
+          }),
+          { headers: { "retry-after": "2" }, status: 429 },
         ),
+      ),
     );
     const gateway = new GeminiGateway(
       "safe-test-key-value",
       "gemini-2.5-flash",
       "gemini-embedding-001",
+      { maxAttempts: 1 },
     );
 
     await expect(
       gateway.embedQuery("question", new AbortController().signal),
-    ).rejects.toMatchObject({ code: "PROVIDER_RATE_LIMITED" });
+    ).rejects.toMatchObject({
+      code: "PROVIDER_RATE_LIMITED",
+      diagnostics: {
+        model: "gemini-embedding-001",
+        operation: "embedContent",
+        retryAfter: "2",
+        retryable: true,
+        upstreamCode: "RESOURCE_EXHAUSTED",
+        upstreamStatus: 429,
+      },
+    });
   });
 
-  it("classifies provider 5xx as dependency unavailable", async () => {
+  it("classifies provider 5xx as service unavailable with safe diagnostics", async () => {
     vi.stubGlobal(
       "fetch",
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response("raw provider details", { status: 503 }),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            error: { code: 503, message: "High demand", status: "UNAVAILABLE" },
+          }),
+          { status: 503 },
         ),
+      ),
     );
     const gateway = new GeminiGateway(
       "safe-test-key-value",
       "gemini-2.5-flash",
       "gemini-embedding-001",
+      { maxAttempts: 1 },
     );
 
     await expect(
       gateway.embedQuery("question", new AbortController().signal),
-    ).rejects.toMatchObject({ code: "PROVIDER_DEPENDENCY_UNAVAILABLE" });
+    ).rejects.toMatchObject({
+      code: "PROVIDER_SERVICE_UNAVAILABLE",
+      diagnostics: {
+        retryable: true,
+        upstreamCode: "UNAVAILABLE",
+        upstreamStatus: 503,
+      },
+    });
   });
 
-  it("classifies denied provider projects as unavailable", async () => {
+  it("classifies denied provider projects as non-retryable auth failures", async () => {
     vi.stubGlobal(
       "fetch",
       vi
@@ -203,11 +238,98 @@ describe("Gemini provider adapter", () => {
       "safe-test-key-value",
       "gemini-2.5-flash",
       "gemini-embedding-001",
+      { maxAttempts: 1 },
     );
 
     await expect(
       gateway.embedQuery("question", new AbortController().signal),
-    ).rejects.toMatchObject({ code: "AI_PROVIDER_UNAVAILABLE" });
+    ).rejects.toMatchObject({
+      code: "PROVIDER_AUTH_FAILED",
+      diagnostics: { retryable: false, upstreamStatus: 403 },
+    });
+  });
+
+  it("retries transient service failures with Retry-After and then succeeds", async () => {
+    const sleep = vi.fn().mockResolvedValue(undefined);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            error: { code: 503, message: "High demand", status: "UNAVAILABLE" },
+          }),
+          { headers: { "retry-after": "2" }, status: 503 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ embedding: { values: Array(768).fill(0.1) } }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+      { random: () => 0, retryBaseDelayMs: 1_000, sleep },
+    );
+
+    await expect(
+      gateway.embedQuery("question", new AbortController().signal),
+    ).resolves.toHaveLength(768);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(sleep).toHaveBeenCalledWith(2_000, expect.any(AbortSignal));
+  });
+
+  it("does not retry daily quota exhaustion", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 429,
+            message: "Daily quota exhausted for this project",
+            status: "RESOURCE_EXHAUSTED",
+          },
+        }),
+        { status: 429 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+    );
+
+    await expect(
+      gateway.embedQuery("question", new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_QUOTA_EXHAUSTED",
+      diagnostics: { retryable: false, upstreamStatus: 429 },
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies network failures separately from provider responses", async () => {
+    const failure = new TypeError("fetch failed", {
+      cause: Object.assign(new Error("socket reset"), { code: "ECONNRESET" }),
+    });
+    const fetchMock = vi.fn().mockRejectedValue(failure);
+    vi.stubGlobal("fetch", fetchMock);
+    const gateway = new GeminiGateway(
+      "safe-test-key-value",
+      "gemini-2.5-flash",
+      "gemini-embedding-001",
+      { maxAttempts: 1 },
+    );
+
+    await expect(
+      gateway.embedQuery("question", new AbortController().signal),
+    ).rejects.toMatchObject({
+      code: "PROVIDER_NETWORK_ERROR",
+      diagnostics: { networkCode: "ECONNRESET", retryable: true },
+    });
   });
 
   it("classifies aborted provider requests safely", async () => {
@@ -268,6 +390,12 @@ describe("Gemini provider adapter", () => {
 
     const generated = await gateway.generateDraftSection(
       {
+        allowedClaimClasses: [
+          "TENDER_SOURCE_STATEMENT",
+          "APPROVED_COMPANY_FACT",
+          "HUMAN_AUTHORED_COMMITMENT",
+          "PLACEHOLDER",
+        ],
         formattingGuidance: "Use concise prose.",
         heading: "Technical",
         instructions: null,
@@ -284,6 +412,7 @@ describe("Gemini provider adapter", () => {
     );
 
     expect(generated.claims[0]?.handles).toEqual(["C1"]);
+    expect(generated.content).toBe("The tender requires ISO 9001.");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
@@ -343,6 +472,20 @@ describe("Gemini provider adapter", () => {
     expect(prompt).toContain(
       "A review placeholder must replace unsupported material text, not caveat it after asserting it.",
     );
+    expect(prompt).toContain(
+      "Every placeholder marker must use the exact format [[REVIEW REQUIRED: short description]].",
+    );
+    expect(prompt).toContain(
+      "ALLOWED_CLAIM_CLASSES: TENDER_SOURCE_STATEMENT, APPROVED_COMPANY_FACT, PLACEHOLDER",
+    );
+    expect(
+      request.generationConfig.responseSchema.properties.claims.items.properties
+        .claim_class.enum,
+    ).toEqual([
+      "TENDER_SOURCE_STATEMENT",
+      "APPROVED_COMPANY_FACT",
+      "PLACEHOLDER",
+    ]);
   });
 
   it("reports a safe reason for unsupported company facts misclassified as commitments", async () => {
@@ -469,12 +612,17 @@ function draftGatewayWithResponse(payload: unknown): GeminiGateway {
 }
 
 function draftPlan(sectionKey: string): {
+  readonly allowedClaimClasses: readonly [
+    "TENDER_SOURCE_STATEMENT",
+    "PLACEHOLDER",
+  ];
   readonly formattingGuidance: string;
   readonly heading: string;
   readonly instructions: null;
   readonly sectionKey: string;
 } {
   return {
+    allowedClaimClasses: ["TENDER_SOURCE_STATEMENT", "PLACEHOLDER"],
     formattingGuidance: "Use concise prose.",
     heading: "Draft",
     instructions: null,
@@ -487,7 +635,17 @@ function requestBodyFrom(fetchMock: ReturnType<typeof vi.fn>): {
     readonly parts: readonly { readonly text: string }[];
   }[];
   readonly generationConfig: {
-    readonly responseSchema: unknown;
+    readonly responseSchema: {
+      readonly properties: {
+        readonly claims: {
+          readonly items: {
+            readonly properties: {
+              readonly claim_class: { readonly enum: readonly string[] };
+            };
+          };
+        };
+      };
+    };
     readonly thinkingConfig?: unknown;
   };
 } {
@@ -498,7 +656,17 @@ function requestBodyFrom(fetchMock: ReturnType<typeof vi.fn>): {
       readonly parts: readonly { readonly text: string }[];
     }[];
     readonly generationConfig: {
-      readonly responseSchema: unknown;
+      readonly responseSchema: {
+        readonly properties: {
+          readonly claims: {
+            readonly items: {
+              readonly properties: {
+                readonly claim_class: { readonly enum: readonly string[] };
+              };
+            };
+          };
+        };
+      };
       readonly thinkingConfig?: unknown;
     };
   };

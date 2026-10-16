@@ -32,6 +32,10 @@ function block(text: string): ParsedBlock {
   };
 }
 
+function orderedBlock(text: string, readingOrder: number): ParsedBlock {
+  return { ...block(text), readingOrder };
+}
+
 describe("deterministic extraction policy", () => {
   it("extracts a cited obligation without making an eligibility decision", () => {
     const requirements = extractDeterministicRequirements(
@@ -89,6 +93,138 @@ describe("deterministic extraction policy", () => {
     expect(fields[0]?.normalizedDateValue?.toISOString()).toBe(
       "2026-08-21T00:00:00.000Z",
     );
+  });
+
+  it("extracts adjacent PDF label/value fields and ignores deadline headings without dates", () => {
+    const blocks = [
+      orderedBlock("Corrigendum No. 1 — Bid Deadline Extension", 0),
+      orderedBlock("Revised bid end", 1),
+      orderedBlock("18 October 2026, 15:00 IST", 2),
+      orderedBlock("Buyer", 3),
+      orderedBlock("Asteria Public Utilities Corporation", 4),
+      orderedBlock("Estimated value", 5),
+      orderedBlock("INR 48,50,000", 6),
+    ];
+    const fields = extractDeterministicFields(blocks, (sourceBlock) => ({
+      ...anchor,
+      blockReadingOrder: sourceBlock.readingOrder,
+      endOffset: sourceBlock.sourceEndOffset,
+      excerpt: sourceBlock.text,
+    }));
+    expect(fields).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          fieldType: "SUBMISSION_DEADLINE",
+          normalizedTextValue: "18 October 2026, 15:00 IST",
+        }),
+        expect.objectContaining({
+          fieldType: "BUYER_NAME",
+          normalizedTextValue: "Asteria Public Utilities Corporation",
+        }),
+        expect.objectContaining({
+          fieldType: "ESTIMATED_VALUE",
+          normalizedTextValue: "INR 48,50,000",
+        }),
+      ]),
+    );
+    expect(
+      fields.some((field) => field.normalizedTextValue === "Extension"),
+    ).toBe(false);
+    expect(
+      parseTenderDateTime("18 October 2026, 15:00 IST")?.toISOString(),
+    ).toBe("2026-10-18T09:30:00.000Z");
+  });
+
+  it("recognises explicit qualification lines and required-document table rows", () => {
+    const requirements = extractDeterministicRequirements(
+      [
+        block(
+          "Experience: one completed similar supply order of at least INR 25,00,000.",
+        ),
+        block("ISO 9001 Mandatory"),
+        block("OEM authorisation Conditional for reseller"),
+      ],
+      () => anchor,
+    );
+    expect(requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "EXPERIENCE",
+          obligation: "MANDATORY",
+          threshold: {
+            currency: "INR",
+            numericValue: 2_500_000,
+            operator: ">=",
+            textValue: "at least INR 25,00,000",
+          },
+        }),
+        expect.objectContaining({
+          category: "CERTIFICATION",
+          obligation: "MANDATORY",
+        }),
+        expect.objectContaining({
+          category: "OEM_AUTHORISATION",
+          obligation: "CONDITIONAL",
+        }),
+      ]),
+    );
+  });
+
+  it("extracts independent requirements from a multi-sentence source block", () => {
+    const source =
+      "Mandatory requirement: the bidder shall submit an ISO 9001 certificate. Conditional requirement: if subcontractors are used, declarations shall be submitted. Conflicting statement: delivery is 30 days. Elsewhere delivery is 45 days.";
+    const sourceAnchor = {
+      ...anchor,
+      documentId: "multi-requirement-document",
+      endOffset: source.length,
+      excerpt: source,
+      pageNumber: 7,
+    };
+    const requirements = extractDeterministicRequirements(
+      [block(source)],
+      () => sourceAnchor,
+    );
+
+    expect(requirements).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "CERTIFICATION",
+          obligation: "MANDATORY",
+        }),
+        expect.objectContaining({
+          category: "DOCUMENT_SUBMISSION",
+          obligation: "CONDITIONAL",
+        }),
+        expect.objectContaining({
+          anchor: expect.objectContaining({
+            documentId: "multi-requirement-document",
+            pageNumber: 7,
+          }),
+          category: "DELIVERY",
+          normalizedStatement: "Conflicting statement: delivery is 30 days.",
+          obligation: "MANDATORY",
+        }),
+      ]),
+    );
+    expect(
+      requirements.filter(({ category }) => category === "DELIVERY"),
+    ).toHaveLength(2);
+    expect(validateCitation(block(source), sourceAnchor)).toBe(true);
+  });
+
+  it("treats manufacturer-only relaxation wording as conditional", () => {
+    const requirements = extractDeterministicRequirements(
+      [
+        block(
+          "Turnover relaxation is available only when the bidder is the manufacturer.",
+        ),
+      ],
+      () => anchor,
+    );
+    expect(requirements[0]).toMatchObject({
+      category: "ANNUAL_TURNOVER",
+      obligation: "CONDITIONAL",
+    });
   });
 
   it("preserves the source calendar day when the IST instant crosses into the previous UTC day", () => {

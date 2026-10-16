@@ -12,7 +12,7 @@ import type {
   RagFeedbackRequest,
   RagSourceMode,
 } from "@tender/contracts";
-import type { PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 import {
   RAG_ANSWER_POLICY_VERSION,
   RAG_CHUNK_POLICY_VERSION,
@@ -21,6 +21,7 @@ import {
 } from "@tender/domain";
 import type { Queue } from "bullmq";
 import { createHash } from "node:crypto";
+import { conversationTitle } from "./conversations.service.js";
 import { Observable, concat, from, interval, takeUntil } from "rxjs";
 import {
   API_ENVIRONMENT,
@@ -111,7 +112,54 @@ export class RagService {
       where: { idempotencyKey },
     });
     if (existing !== null) return existing;
-    const run = await this.database.$transaction(async (transaction) => {
+    const equivalent = await this.database.ragIndexRun.findFirst({
+      orderBy: { createdAt: "desc" },
+      where: {
+        invalidatedAt: null,
+        organisationId,
+        sourceFingerprint: fingerprint,
+        sourceMode,
+        status: {
+          in: [
+            "QUEUED",
+            "CHUNKING",
+            "EMBEDDING",
+            "INDEXING",
+            "VALIDATING",
+            "COMPLETE",
+          ],
+        },
+        tenderId,
+        tenderVersionId: versionId,
+      },
+    });
+    if (equivalent !== null) return equivalent;
+    const result = await this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`${organisationId}:${tenderId}:${sourceMode}:${fingerprint}`}))::text AS acquired`,
+      );
+      const concurrent = await transaction.ragIndexRun.findFirst({
+        orderBy: { createdAt: "desc" },
+        where: {
+          invalidatedAt: null,
+          organisationId,
+          sourceFingerprint: fingerprint,
+          sourceMode,
+          status: {
+            in: [
+              "QUEUED",
+              "CHUNKING",
+              "EMBEDDING",
+              "INDEXING",
+              "VALIDATING",
+              "COMPLETE",
+            ],
+          },
+          tenderId,
+          tenderVersionId: versionId,
+        },
+      });
+      if (concurrent !== null) return { created: false, run: concurrent };
       const created = await transaction.ragIndexRun.create({
         data: {
           chunkPolicyVersion: RAG_CHUNK_POLICY_VERSION,
@@ -140,24 +188,25 @@ export class RagService {
           subjectType: "rag_index_run",
         },
       });
-      return created;
+      return { created: true, run: created };
     });
-    await this.jobs.add(
-      "index-tender-rag",
-      {
-        indexRunId: run.id,
-        kind: "INDEX",
-        organisationId,
-        requestId,
-      },
-      {
-        attempts: 2,
-        backoff: { delay: 2_000, type: "exponential" },
-        jobId: `rag-index-${run.id}`,
-        removeOnComplete: 100,
-      },
-    );
-    return run;
+    if (result.created)
+      await this.jobs.add(
+        "index-tender-rag",
+        {
+          indexRunId: result.run.id,
+          kind: "INDEX",
+          organisationId,
+          requestId,
+        },
+        {
+          attempts: 2,
+          backoff: { delay: 2_000, type: "exponential" },
+          jobId: `rag-index-${result.run.id}`,
+          removeOnComplete: 100,
+        },
+      );
+    return result.run;
   }
 
   public indexes(organisationId: string, tenderId: string): Promise<unknown> {
@@ -286,7 +335,7 @@ export class RagService {
           include: { citations: true },
           orderBy: { createdAt: "asc" },
         },
-        messages: { orderBy: { sequence: "asc" }, take: 100 },
+        messages: { orderBy: { sequence: "asc" } },
       },
       where: {
         deletedAt: null,
@@ -320,6 +369,9 @@ export class RagService {
     });
     if (conversation === null) throw new NotFoundException();
     if (
+      conversation.indexRun === null ||
+      conversation.indexRunId === null ||
+      conversation.tenderVersionId === null ||
       conversation.indexRun.status !== "COMPLETE" ||
       conversation.indexRun.invalidatedAt !== null
     )
@@ -332,8 +384,18 @@ export class RagService {
     });
     if (existing !== null) return existing;
     const run = await this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT id FROM rag_conversations WHERE id=${conversationId}::uuid AND organisation_id=${organisationId}::uuid FOR UPDATE`,
+      );
       const sequence = await transaction.ragMessage.count({
         where: { conversationId, organisationId, tenderId },
+      });
+      await transaction.ragConversation.update({
+        where: { id: conversationId },
+        data: {
+          updatedAt: new Date(),
+          ...(sequence === 0 ? { title: conversationTitle(question) } : {}),
+        },
       });
       const message = await transaction.ragMessage.create({
         data: {
@@ -351,7 +413,7 @@ export class RagService {
           answerPolicyVersion: RAG_ANSWER_POLICY_VERSION,
           conversationId,
           idempotencyKey,
-          indexRunId: conversation.indexRunId,
+          indexRunId: conversation.indexRunId!,
           model: this.environment.RAG_CHAT_MODEL,
           organisationId,
           provider: this.environment.RAG_PROVIDER,
@@ -359,7 +421,7 @@ export class RagService {
           retrievalPolicyVersion: RAG_RETRIEVAL_POLICY_VERSION,
           sourceMode: conversation.sourceMode,
           tenderId,
-          tenderVersionId: conversation.tenderVersionId,
+          tenderVersionId: conversation.tenderVersionId!,
         },
       });
     });
@@ -417,6 +479,79 @@ export class RagService {
     if (result.count !== 1)
       throw new ConflictException("Answer cannot be cancelled");
     return { cancelled: true };
+  }
+
+  /** Reuses the original question and run so a retry remains one visible chat turn. */
+  public async retryAnswer(
+    organisationId: string,
+    tenderId: string,
+    answerRunId: string,
+    requestId: string,
+  ): Promise<unknown> {
+    const result = await this.database.$transaction(async (transaction) => {
+      const run = await transaction.ragAnswerRun.findFirst({
+        select: { answerMessageId: true, id: true, status: true },
+        where: { id: answerRunId, organisationId, tenderId },
+      });
+      if (run === null) throw new NotFoundException();
+      if (
+        ["QUEUED", "RETRIEVING", "GENERATING", "VERIFYING_CITATIONS"].includes(
+          run.status,
+        )
+      )
+        return { queued: false, run };
+      if (
+        !["FAILED", "INSUFFICIENT_EVIDENCE", "HUMAN_REVIEW_REQUIRED"].includes(
+          run.status,
+        )
+      )
+        throw new ConflictException("Answer cannot be retried");
+      await transaction.ragAnswerCitation.deleteMany({
+        where: { answerRunId },
+      });
+      if (run.answerMessageId !== null) {
+        await transaction.ragMessage.delete({
+          where: { id: run.answerMessageId },
+        });
+      }
+      const update = await transaction.ragAnswerRun.updateMany({
+        data: {
+          answerMessageId: null,
+          cancellationRequestedAt: null,
+          completedAt: null,
+          currentStage: "Queued",
+          failureCode: null,
+          generationLatencyMs: null,
+          progressPercentage: 0,
+          retrievalLatencyMs: null,
+          startedAt: null,
+          status: "QUEUED",
+          totalLatencyMs: null,
+        },
+        where: {
+          id: answerRunId,
+          organisationId,
+          status: run.status,
+          tenderId,
+        },
+      });
+      if (update.count !== 1)
+        throw new ConflictException("Answer cannot be retried");
+      return { queued: true, run: { id: answerRunId } };
+    });
+    if (result.queued) {
+      await this.jobs.add(
+        "answer-tender-rag",
+        { answerRunId, kind: "ANSWER", organisationId, requestId },
+        {
+          attempts: 2,
+          backoff: { delay: 2_000, type: "exponential" },
+          jobId: `rag-answer-${answerRunId}-retry-${Date.now()}`,
+          removeOnComplete: 100,
+        },
+      );
+    }
+    return result.run;
   }
 
   public events(

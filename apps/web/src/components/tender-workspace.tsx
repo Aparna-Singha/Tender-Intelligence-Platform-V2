@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Trash2 } from "lucide-react";
+import { Download, MoreHorizontal, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -16,24 +16,33 @@ import {
   Button,
   Card,
   Field,
-  IconButton,
   Input,
   Modal,
   Select,
   Textarea,
-  Tooltip,
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
-import { assistantHref } from "../lib/assistant";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
 import { ActionChecklist } from "./action-checklist";
 import { ControlledReviewPackageWorkspace } from "./controlled-review-package-workspace";
+import {
+  conciseRequirementTitle,
+  requirementCategoryLabel,
+  requirementDisplaySummary,
+  compactSourceExcerpt,
+  customerAssessmentReason,
+  requirementPresentation,
+  type EligibilityViewRequirement,
+} from "./eligibility-presentation";
 import { DraftWorkspace } from "./draft-workspace";
 import { EvidenceMatrix } from "./evidence-matrix";
 import { FinalReadinessWorkspace } from "./final-readiness-workspace";
 import { RagChatbot } from "./rag-chatbot";
+import { ContextualAssistant } from "./contextual-assistant";
 import { formatDeadline, formatDeadlineCountdown } from "./tender-presentation";
+
+const SHOW_INTERNAL_ELIGIBILITY_TOOLS = false;
 
 interface Workspace {
   readonly buyer: string;
@@ -388,34 +397,6 @@ interface EarlyDecision {
   readonly tenderVersionId: string;
 }
 
-interface EligibilityViewRequirement {
-  readonly assessmentId: string | null;
-  readonly categoryLabel: string;
-  readonly evidenceLinks: readonly {
-    readonly excerpt: string;
-    readonly label: string;
-    readonly supportingText: string;
-  }[];
-  readonly id: string;
-  readonly reviewStateLabel: string;
-  readonly sourceCitation: {
-    readonly boundedExcerpt: string;
-    readonly clauseLabel?: string | null;
-    readonly documentName: string;
-    readonly pageNumber: number | null;
-    readonly tenderDocumentId: string;
-  } | null;
-  readonly stateKey: string;
-  readonly statement: string;
-  readonly statusLabel: string;
-  readonly statusTone:
-    "accent" | "danger" | "info" | "neutral" | "success" | "warning";
-  readonly structuredRequirementId: string | null;
-  readonly title: string;
-  readonly whatToDo: string;
-  readonly why: string;
-}
-
 type EvidenceFocusRequest = {
   readonly assessmentId?: string;
   readonly mode: "assessment" | "capture";
@@ -483,24 +464,20 @@ const surfaceLabels: Readonly<Record<TenderSurface, string>> = {
   activity: "Activity",
   ask: "AI Chat",
   draft: "Draft",
-  eligibility: "Requirements",
+  eligibility: "Eligibility",
   files: "Tender Files",
   overview: "Overview",
-  review: "Final Review",
+  review: "Review & Export",
 };
 
 const primarySurfaces: readonly TenderSurface[] = [
   "overview",
   "eligibility",
   "draft",
-  "review",
+  "ask",
 ];
 
-const secondarySurfaces: readonly TenderSurface[] = [
-  "ask",
-  "files",
-  "activity",
-];
+const secondarySurfaces: readonly TenderSurface[] = ["files", "activity"];
 
 function resolveSurface(requestedStage: string | null): SurfaceResolution {
   const stage = requestedStage as LegacyStage | null;
@@ -535,7 +512,7 @@ function resolveSurface(requestedStage: string | null): SurfaceResolution {
 function surfaceStage(surface: TenderSurface): string | null {
   switch (surface) {
     case "overview":
-      return null;
+      return "overview";
     case "eligibility":
       return "eligibility";
     case "draft":
@@ -628,18 +605,42 @@ function documentStatusLabel(document: {
     : humanizeEnum(document.status);
 }
 
-function documentStatusTone(document: {
-  readonly status: string;
-  readonly uploadSessionExpiresAt: string;
-}): "accent" | "danger" | "info" | "neutral" | "success" | "warning" {
-  return isExpiredUpload(document) ? "danger" : statusTone(document.status);
-}
-
 function formatTimestamp(value: string | null): string {
   if (value === null) return "";
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return "";
   return parsed.toLocaleString();
+}
+
+function formatActivityTime(value: string | null): string {
+  if (value === null) return "Time unavailable";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Time unavailable";
+  const now = new Date();
+  const startOfToday = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+  );
+  const startOfActivityDay = new Date(
+    parsed.getFullYear(),
+    parsed.getMonth(),
+    parsed.getDate(),
+  );
+  const dayDifference = Math.round(
+    (startOfToday.getTime() - startOfActivityDay.getTime()) / 86_400_000,
+  );
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(parsed);
+  if (dayDifference === 0) return time;
+  if (dayDifference === 1) return `Yesterday · ${time}`;
+  const date = new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+  }).format(parsed);
+  return `${date} · ${time}`;
 }
 
 function formatShortDate(value: string): string {
@@ -663,6 +664,13 @@ function formatFileSize(bytes: string): string {
     unitIndex += 1;
   }
   return `${size >= 10 || unitIndex === 0 ? Math.round(size) : size.toFixed(1)} ${units[unitIndex]}`;
+}
+
+function fileType(filename: string): string {
+  const extension = filename.split(".").pop()?.trim().toUpperCase();
+  return extension === undefined || extension === filename.toUpperCase()
+    ? "File"
+    : extension;
 }
 
 function bestAssessmentLabel(matrix: MatrixResult | null): {
@@ -809,8 +817,8 @@ function deriveAssessmentLabel(input: {
     input.assessmentRun === null
   ) {
     return {
-      detail: "Ready for requirements check.",
-      label: "Requirements check not started",
+      detail: "Ready for eligibility review.",
+      label: "Eligibility review not started",
       tone: "warning",
     };
   }
@@ -842,109 +850,6 @@ function hasCurrentExtractedContent(
     support.assessmentRun !== null ||
     support.matrix !== null
   );
-}
-
-function preferredReadableText(value: string): string {
-  const candidates = value
-    .split("/")
-    .map((part) => part.replace(/\s+/g, " ").trim())
-    .filter((part) => part.length > 0);
-  const englishCandidate =
-    candidates.find(
-      (part) => /[A-Za-z]/.test(part) && !/^[^A-Za-z]+$/.test(part),
-    ) ??
-    candidates.find((part) => /[A-Za-z]/.test(part)) ??
-    candidates[0] ??
-    value;
-  return englishCandidate.replace(/\s+/g, " ").trim();
-}
-
-function conciseRequirementTitle(input: {
-  readonly category: string;
-  readonly normalizedStatement: string;
-  readonly sourceCitation: {
-    readonly boundedExcerpt: string;
-  } | null;
-  readonly sourceWording: string;
-  readonly title: string;
-}): string {
-  const genericTitle = `${input.category} requirement`;
-  const title =
-    input.title.trim() === "" ||
-    input.title.toLowerCase() === genericTitle.toLowerCase() ||
-    input.title.toUpperCase() === "OTHER REQUIREMENT"
-      ? null
-      : input.title.trim();
-  if (title !== null) return title;
-  const source =
-    input.sourceCitation?.boundedExcerpt ??
-    input.normalizedStatement ??
-    input.sourceWording;
-  const readable = preferredReadableText(source);
-  if (readable.length <= 96) return readable;
-  return `${readable.slice(0, 93).trimEnd()}...`;
-}
-
-function requirementCategoryLabel(category: string): string {
-  const label = humanizeEnum(category).trim();
-  return label === "" ? "Requirement" : `${label} requirement`;
-}
-
-function matchingRequirementBody(
-  requirement: EligibilityViewRequirement,
-): string {
-  return requirement.statement.trim() === ""
-    ? requirement.title
-    : requirement.statement;
-}
-
-function shouldRepeatRequirementBody(
-  requirement: EligibilityViewRequirement,
-): boolean {
-  return (
-    requirement.title.replace(/\s+/g, " ").trim().toLowerCase() !==
-    matchingRequirementBody(requirement)
-      .replace(/\s+/g, " ")
-      .trim()
-      .toLowerCase()
-  );
-}
-
-function requirementMissingSummary(
-  requirement: EligibilityViewRequirement,
-  linkedChecklistItem: ChecklistItem | null,
-): string {
-  switch (requirement.stateKey) {
-    case "MISSING":
-      return requirement.evidenceLinks.length === 0
-        ? "No accepted company evidence currently supports this requirement."
-        : "The current company evidence does not yet satisfy this requirement.";
-    case "HUMAN_REVIEW_REQUIRED":
-      return linkedChecklistItem?.evidenceNeedCategory ===
-        "LEGAL_INTERPRETATION"
-        ? "Human interpretation is required before the system can determine whether this requirement is satisfied."
-        : "Human review is required before the system can determine whether this requirement is satisfied.";
-    case "CONFLICT":
-      return "The available tender or company evidence conflicts and needs review before this requirement can be confirmed.";
-    case "ASSESSING":
-      return "Eligibility comparison is still running for this requirement.";
-    case "ASSESSMENT_NOT_STARTED":
-      return "Eligibility has not started for the latest Continue decision yet.";
-    case "AWAITING_DECISION":
-      return "Eligibility cannot start until a reviewer chooses Continue.";
-    case "RISK_ANALYSIS":
-      return "Risk review is still running before this requirement can be assessed.";
-    case "RISK_NOT_STARTED":
-      return "Risk review has not started yet, so evidence comparison cannot begin.";
-    case "RISK_FAILED":
-      return "Risk review needs to be retried before this requirement can be assessed.";
-    case "EXTRACTING":
-      return "Tender extraction is still running, so this requirement is not ready for evidence comparison yet.";
-    default:
-      return linkedChecklistItem === null
-        ? "No current missing item is recorded for this requirement."
-        : "This requirement still has a linked action that needs attention.";
-  }
 }
 
 function toAssessmentRequirement(item: MatrixItem): EligibilityViewRequirement {
@@ -1024,9 +929,9 @@ function toExtractedRequirement(
                 : "Reading source...";
   const whatToDo =
     phase === "ASSESSING"
-      ? "Ready for requirements check. Wait for evidence comparison to finish. The detail panel will update automatically."
+      ? "Eligibility review is in progress. The detail panel will update automatically."
       : phase === "ASSESSMENT_NOT_STARTED"
-        ? "Requirements check will start automatically for the latest Continue decision."
+        ? "Eligibility review will start automatically after the latest Continue decision."
         : phase === "RISK_FAILED"
           ? "Retry the failed risk review before eligibility comparison can continue."
           : phase === "RISK_NOT_STARTED"
@@ -1038,9 +943,10 @@ function toExtractedRequirement(
                 : "Tender extraction is still running. Requirement details will continue to fill in automatically.";
   const why =
     item.sourceWording.trim() === ""
-      ? "This requirement was extracted from the tender source and is waiting for downstream workflow state."
+      ? "This requirement was found in the tender and is awaiting the next review step."
       : item.sourceWording;
   return {
+    extractionConfidence: item.confidence,
     assessmentId: null,
     categoryLabel: requirementCategoryLabel(item.category),
     evidenceLinks: [],
@@ -1147,6 +1053,49 @@ function extractKeyFields(
   return fields.filter((field) =>
     keywords.some((keyword) => field.fieldType.toUpperCase().includes(keyword)),
   );
+}
+
+function keyTenderDetailLabel(fieldType: string): string {
+  const type = fieldType.toUpperCase();
+  if (type.includes("PERFORMANCE_SECURITY")) return "Performance security";
+  if (type.includes("TURNOVER")) return "Minimum turnover";
+  if (type.includes("EXPERIENCE")) return "Required experience";
+  if (type.includes("DELIVERY")) return "Delivery period";
+  if (type.includes("EMD")) return "EMD";
+  if (type.includes("VALUE")) return "Tender value";
+  return humanizeEnum(fieldType);
+}
+
+function buildKeyTenderDetails(
+  fields: readonly ExtractedField[],
+  submissionDeadline: string | undefined,
+  sourceName: string | undefined,
+): readonly {
+  readonly id: string;
+  readonly label: string;
+  readonly normalizedTextValue: string;
+}[] {
+  const details = fields
+    .filter((field) => (field.normalizedTextValue ?? "").trim() !== "")
+    .slice(0, 5)
+    .map((field) => ({
+      id: field.id,
+      label: keyTenderDetailLabel(field.fieldType),
+      normalizedTextValue: field.normalizedTextValue ?? "",
+    }));
+  if (submissionDeadline !== undefined)
+    details.push({
+      id: "submission-deadline",
+      label: "Submission deadline",
+      normalizedTextValue: formatDeadline(submissionDeadline),
+    });
+  if (details.length === 0)
+    details.push({
+      id: "tender-source",
+      label: "Tender source",
+      normalizedTextValue: sourceName ?? "Details unavailable",
+    });
+  return details;
 }
 
 function buildActivityItems(
@@ -1293,14 +1242,6 @@ function isAssessmentRunValue(value: unknown): value is AssessmentRun {
   );
 }
 
-function isChecklistRunValue(value: unknown): value is ChecklistRun {
-  return (
-    isRecord(value) &&
-    typeof value.id === "string" &&
-    typeof value.status === "string"
-  );
-}
-
 function isMatrixResultValue(value: unknown): value is MatrixResult {
   return (
     isRecord(value) &&
@@ -1365,14 +1306,20 @@ export function TenderWorkspace({
   const [message, setMessage] = useState("Loading workspace...");
   const [selectedRequirementId, setSelectedRequirementId] = useState("");
   const [eligibilityFilter, setEligibilityFilter] = useState("ALL");
+  const [eligibilityFiltersOpen, setEligibilityFiltersOpen] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
   const [uploadRole, setUploadRole] = useState("PRIMARY");
   const [filesFilter, setFilesFilter] = useState<"ALL" | "CORRIGENDA">("ALL");
+  const [activityFilter, setActivityFilter] = useState("ALL");
+  const [showAllActivity, setShowAllActivity] = useState(false);
   const [decisionSubmitting, setDecisionSubmitting] = useState(false);
   const [decisionFeedback, setDecisionFeedback] = useState("");
   const [decisionEditorOpen, setDecisionEditorOpen] = useState(false);
+  const [evidenceReviewOpen, setEvidenceReviewOpen] = useState(false);
   const [evidenceFocusRequest, setEvidenceFocusRequest] =
     useState<EvidenceFocusRequest>(null);
+  const [eligibilityAutomationRetry, setEligibilityAutomationRetry] =
+    useState(0);
   const [riskRetrying, setRiskRetrying] = useState(false);
   const workspaceLoadToken = useRef(0);
   const supportLoadPromise = useRef<Promise<void> | null>(null);
@@ -1380,6 +1327,7 @@ export function TenderWorkspace({
   const supportLoadToken = useRef(0);
   const currentVersionIdRef = useRef("");
   const evidenceDetailsRef = useRef<HTMLDetailsElement | null>(null);
+  const automaticChecklistAttempts = useRef(new Set<string>());
   const [pendingFileRemoval, setPendingFileRemoval] = useState<null | {
     readonly confirmLabel: string;
     readonly description: string;
@@ -1413,14 +1361,22 @@ export function TenderWorkspace({
       setWorkspace(loaded);
       setMessage("");
       const latestVersionId = loaded.versions[0]?.id ?? "";
-      if (latestVersionId !== "") void refreshSupportData(latestVersionId);
+      if (latestVersionId !== "") {
+        void refreshSupportData(
+          latestVersionId,
+          (loaded.versions[0]?.documents.length ?? 0) > 0,
+        );
+      }
     } catch {
       if (workspaceLoadToken.current !== token) return;
       setMessage("Unable to load this tender workspace.");
     }
   }
 
-  async function loadSupportData(versionId: string): Promise<void> {
+  async function loadSupportData(
+    versionId: string,
+    fetchCurrentResults = true,
+  ): Promise<void> {
     const token = supportLoadToken.current + 1;
     supportLoadToken.current = token;
     const base = `/organisations/${organisationId}/tenders/${tenderId}`;
@@ -1433,9 +1389,6 @@ export function TenderWorkspace({
       drafts,
       readinessHistory,
       packageHistory,
-      currentRiskRun,
-      currentAssessmentRun,
-      currentChecklistRun,
     ] = await Promise.all([
       safeApi<readonly ExtractionRun[]>(
         `${base}/versions/${versionId}/extractions`,
@@ -1458,11 +1411,22 @@ export function TenderWorkspace({
       safeApi<PackageHistoryResponse>(
         `${base}/versions/${versionId}/controlled-review-packages`,
       ),
-      safeApi<unknown>(`${base}/versions/${versionId}/risk-analyses/current`),
-      safeApi<unknown>(
-        `${base}/versions/${versionId}/eligibility-assessments/current`,
-      ),
-      safeApi<unknown>(`${base}/versions/${versionId}/checklists/current`),
+    ]);
+
+    // The current-result endpoints intentionally return 404 before a source is
+    // uploaded. Keep polling semantics for every sourced tender, including the
+    // brief period where a current run exists before it appears in history.
+    const [currentRiskRun, currentAssessmentRun] = await Promise.all([
+      !fetchCurrentResults
+        ? Promise.resolve(null)
+        : safeApi<unknown>(
+            `${base}/versions/${versionId}/risk-analyses/current`,
+          ),
+      !fetchCurrentResults
+        ? Promise.resolve(null)
+        : safeApi<unknown>(
+            `${base}/versions/${versionId}/eligibility-assessments/current`,
+          ),
     ]);
 
     const latestExtractionRun = extractionRuns?.[0] ?? null;
@@ -1475,9 +1439,8 @@ export function TenderWorkspace({
         : null) ??
       assessmentRuns?.find((run) => run.invalidatedAt == null) ??
       null;
-    const currentChecklist = isChecklistRunValue(currentChecklistRun)
-      ? currentChecklistRun
-      : currentAssessment === null
+    const currentChecklist =
+      currentAssessment === null
         ? null
         : (checklistRuns?.find(
             (run) =>
@@ -1553,7 +1516,10 @@ export function TenderWorkspace({
     });
   }
 
-  async function refreshSupportData(versionId: string): Promise<void> {
+  async function refreshSupportData(
+    versionId: string,
+    fetchCurrentResults = true,
+  ): Promise<void> {
     if (supportLoadPromise.current !== null) {
       supportRefreshQueued.current = true;
       await supportLoadPromise.current;
@@ -1561,7 +1527,7 @@ export function TenderWorkspace({
     }
     do {
       supportRefreshQueued.current = false;
-      const pending = loadSupportData(versionId);
+      const pending = loadSupportData(versionId, fetchCurrentResults);
       supportLoadPromise.current = pending;
       try {
         await pending;
@@ -1583,6 +1549,8 @@ export function TenderWorkspace({
   }, [organisationId, tenderId]);
 
   const currentVersionId = workspace?.versions[0]?.id ?? "";
+  const currentVersionHasDocuments =
+    (workspace?.versions[0]?.documents.length ?? 0) > 0;
 
   useEffect(() => {
     currentVersionIdRef.current = currentVersionId;
@@ -1590,8 +1558,8 @@ export function TenderWorkspace({
 
   useEffect(() => {
     if (currentVersionId === "") return;
-    void refreshSupportData(currentVersionId);
-  }, [currentVersionId, organisationId, tenderId]);
+    void refreshSupportData(currentVersionId, currentVersionHasDocuments);
+  }, [currentVersionHasDocuments, currentVersionId, organisationId, tenderId]);
 
   const supportAutoRefreshNeeded =
     currentVersionId !== "" &&
@@ -1628,6 +1596,51 @@ export function TenderWorkspace({
     support.extractionRun?.status,
     support.riskRun,
     supportAutoRefreshNeeded,
+    tenderId,
+  ]);
+
+  useEffect(() => {
+    const assessment = support.assessmentRun;
+    if (
+      currentVersionId === "" ||
+      assessment?.status !== "COMPLETE" ||
+      support.checklistRun !== null ||
+      automaticChecklistAttempts.current.has(assessment.id)
+    )
+      return;
+    automaticChecklistAttempts.current.add(assessment.id);
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    void Promise.resolve(
+      apiRequest(
+        `/organisations/${organisationId}/tenders/${tenderId}/versions/${currentVersionId}/checklists`,
+        {
+          body: JSON.stringify({
+            idempotency_key:
+              globalThis.crypto?.randomUUID?.() ??
+              `${assessment.id}-automatic-checklist`,
+          }),
+          method: "POST",
+        },
+      ),
+    ).catch(() => {
+      automaticChecklistAttempts.current.delete(assessment.id);
+      if (!cancelled)
+        retryTimer = window.setTimeout(
+          () => setEligibilityAutomationRetry((current) => current + 1),
+          5_000,
+        );
+    });
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [
+    currentVersionId,
+    eligibilityAutomationRetry,
+    organisationId,
+    support.assessmentRun,
+    support.checklistRun,
     tenderId,
   ]);
 
@@ -1847,7 +1860,7 @@ export function TenderWorkspace({
         },
       );
       form.reset();
-      setDecisionFeedback("Human pursue decision recorded.");
+      setDecisionFeedback("Bid decision saved.");
       setDecisionEditorOpen(false);
       setSupport((current) => {
         const decisions = [
@@ -1881,17 +1894,19 @@ export function TenderWorkspace({
     mode: "assessment" | "capture",
     assessmentId?: string,
   ): void {
-    if (evidenceDetailsRef.current !== null) {
+    if (
+      SHOW_INTERNAL_ELIGIBILITY_TOOLS &&
+      evidenceDetailsRef.current !== null
+    ) {
       evidenceDetailsRef.current.open = true;
-      if (typeof evidenceDetailsRef.current.scrollIntoView === "function") {
-        evidenceDetailsRef.current.scrollIntoView({ block: "start" });
-      }
+      evidenceDetailsRef.current.scrollIntoView?.({ block: "start" });
     }
     setEvidenceFocusRequest(
       assessmentId === undefined
         ? { mode, token: Date.now() }
         : { assessmentId, mode, token: Date.now() },
     );
+    setEvidenceReviewOpen(true);
   }
 
   async function openTenderCitation(
@@ -1980,64 +1995,65 @@ export function TenderWorkspace({
     eligibilityRequirements[0] ??
     null;
 
-  useEffect(() => {
-    if (support.currentDecision !== null) {
-      setDecisionEditorOpen(false);
-      return;
-    }
-    if (
-      support.riskRun?.status === "COMPLETE" &&
-      support.currentDecision === null
-    ) {
-      setDecisionEditorOpen(true);
-    }
-  }, [support.currentDecision, support.riskRun?.status]);
-
-  const selectedRequirementAction =
+  const selectedRequirementPresentation =
     selectedRequirement === null
       ? null
-      : selectedRequirement.stateKey === "MISSING"
+      : requirementPresentation(selectedRequirement);
+  const selectedApplicabilityQuestion =
+    selectedRequirementPresentation?.applicabilityQuestion ?? null;
+  const companyDocsHref = `/documents/${organisationId}?${new URLSearchParams({
+    returnTo: `${pathname}?stage=eligibility`,
+  }).toString()}`;
+  const selectedRequirementAction =
+    selectedRequirement === null || selectedRequirementPresentation === null
+      ? null
+      : selectedRequirementPresentation.actionLabel === "Add evidence"
         ? {
-            label: "Add company evidence",
-            onClick: () => openEvidenceTools("capture"),
+            label: "Add evidence",
+            onClick: () => router.push(companyDocsHref),
           }
         : ["HUMAN_REVIEW_REQUIRED", "CONFLICT"].includes(
               selectedRequirement.stateKey,
             )
           ? {
-              label: "Review requirement",
+              label: "Review evidence",
               onClick: () =>
                 openEvidenceTools("assessment", selectedRequirement.id),
             }
-          : null;
+          : selectedRequirementPresentation.actionLabel === "Review source"
+            ? selectedRequirement.sourceCitation === null
+              ? null
+              : {
+                  label: "Review source",
+                  onClick: () =>
+                    void openTenderCitation(
+                      selectedRequirement.sourceCitation!.tenderDocumentId,
+                      selectedRequirement.sourceCitation!.pageNumber,
+                    ),
+                }
+            : selectedRequirementPresentation.actionLabel ===
+                "Confirm applicability"
+              ? {
+                  label: "Confirm applicability",
+                  onClick: () => navigateSurface("activity"),
+                }
+              : null;
   const eligibilityFilters: readonly {
     readonly label: string;
-    readonly states: readonly string[];
     readonly value: string;
   }[] = [
-    { label: "All", states: [], value: "ALL" },
-    {
-      label: "Satisfied",
-      states: ["VERIFIED", "LIKELY_MET"],
-      value: "SATISFIED",
-    },
-    { label: "Need info", states: ["MISSING"], value: "MISSING" },
-    {
-      label: "Need review",
-      states: ["HUMAN_REVIEW_REQUIRED"],
-      value: "HUMAN_REVIEW_REQUIRED",
-    },
-    { label: "Blocking", states: ["CONFLICT"], value: "CONFLICT" },
+    { label: "All", value: "ALL" },
+    { label: "Satisfied", value: "SATISFIED" },
+    { label: "Need evidence", value: "NEED_EVIDENCE" },
+    { label: "Need review", value: "NEED_REVIEW" },
+    { label: "Blocking", value: "BLOCKING" },
   ];
   const visibleRequirements =
     eligibilityFilter === "ALL"
       ? eligibilityRequirements
-      : eligibilityRequirements.filter((item) =>
-          (
-            eligibilityFilters.find(
-              (filter) => filter.value === eligibilityFilter,
-            )?.states ?? []
-          ).includes(item.stateKey),
+      : eligibilityRequirements.filter(
+          (item) =>
+            requirementPresentation(item).filterKey === eligibilityFilter,
         );
   const unresolvedChecklist = support.checklistItems.filter((item) =>
     ["OPEN", "IN_PROGRESS", "BLOCKED", "READY_FOR_REASSESSMENT"].includes(
@@ -2053,15 +2069,22 @@ export function TenderWorkspace({
       )
       .map((item) => item.id),
   );
-  const selectedRequirementChecklistItems =
-    selectedRequirement === null
-      ? []
-      : unresolvedChecklist.filter((item) =>
-          checklistItemMatchesRequirement(item, selectedRequirement),
-        );
   const otherChecklistItems = unresolvedChecklist.filter(
     (item) => !requirementLinkedChecklistIds.has(item.id),
   );
+  const selectedRequirementChecklistItem =
+    selectedRequirement === null
+      ? null
+      : (unresolvedChecklist.find((item) =>
+          checklistItemMatchesRequirement(item, selectedRequirement),
+        ) ?? null);
+  const selectedRequirementNeedSummary =
+    selectedRequirement?.stateKey === "HUMAN_REVIEW_REQUIRED"
+      ? selectedRequirementChecklistItem?.evidenceNeedCategory ===
+        "LEGAL_INTERPRETATION"
+        ? "Human interpretation is required before the system can determine whether this requirement is satisfied."
+        : "Human review is required before the system can determine whether this requirement is satisfied."
+      : null;
   const reviewRequirementCount = requirements.filter((item) =>
     ["CONFLICT", "HUMAN_REVIEW_REQUIRED", "MISSING"].includes(
       item.currentState,
@@ -2112,6 +2135,11 @@ export function TenderWorkspace({
     ) ??
     currentVersion?.documents.find((document) => document.status === "READY") ??
     null;
+  const keyTenderDetails = buildKeyTenderDetails(
+    keyFields,
+    workspace?.submissionDeadline,
+    currentReadyDocument?.displayFilename,
+  );
   const topRisks = [...support.riskFindings]
     .sort((left, right) => {
       const order = new Map([
@@ -2130,8 +2158,7 @@ export function TenderWorkspace({
     if ((currentVersion?.documents.length ?? 0) === 0)
       return {
         cta: "Upload tender files",
-        description:
-          "Add the primary tender source before downstream review can continue.",
+        description: "Add the primary tender file before review can continue.",
         surface: "files" as TenderSurface,
       };
     if (!extractedContentAvailable)
@@ -2162,14 +2189,14 @@ export function TenderWorkspace({
       return {
         cta: "Record pursue decision",
         description:
-          "Extraction and risk review are ready. Requirements check stays blocked until an authorised Continue decision exists.",
+          "Extraction and risk review are ready. Eligibility review starts after a human Continue decision.",
         surface: "overview" as TenderSurface,
       };
     if (support.assessmentRun === null)
       return {
         cta: "View extracted requirements",
         description:
-          "Tender requirements are ready. Requirements check has not started yet for the latest Continue decision.",
+          "Tender requirements are ready. Eligibility review has not started for the latest Continue decision.",
         surface: "eligibility" as TenderSurface,
       };
     if (
@@ -2208,28 +2235,36 @@ export function TenderWorkspace({
           : support.riskRun?.status !== "COMPLETE"
             ? "The tender requirements below are still being prepared while extraction and risk review finish."
             : support.currentDecision?.decision === "CONTINUE"
-              ? "Requirements check will start automatically for the latest Continue decision. You can review the extracted tender requirements below while the comparison begins."
-              : "Requirements check will start after you choose Continue. You can review the extracted tender requirements below before deciding."
+              ? "Eligibility review will start automatically for the latest Continue decision. You can inspect the tender requirements while it begins."
+              : "Eligibility review starts after you choose Continue. You can inspect tender requirements before deciding."
       : null;
   const activityItems = buildActivityItems(workspace, support);
-  const [showAuditSummary, setShowAuditSummary] = useState(false);
-  const activityCounts = useMemo(() => {
-    const map = new Map<string, number>();
-    activityItems.forEach((item) => {
-      map.set(item.category, (map.get(item.category) ?? 0) + 1);
-    });
-    return [...map.entries()];
-  }, [activityItems]);
+  const activityCategories = [
+    ...new Set(activityItems.map((item) => item.category)),
+  ].sort();
+  const filteredActivityItems = activityItems.filter(
+    (item) => activityFilter === "ALL" || item.category === activityFilter,
+  );
+  const visibleActivityItems = showAllActivity
+    ? filteredActivityItems
+    : filteredActivityItems.slice(0, 7);
   const currentReadinessRun =
     support.finalReadinessRuns.find((item) => item.is_current) ??
     support.finalReadinessRuns[0] ??
     null;
   const hasCurrentChecklist = support.checklistRun !== null;
-  const linkedChecklistItem = selectedRequirementChecklistItems[0] ?? null;
   const visibleVersionDocuments =
     currentVersion?.documents.filter((document) =>
       filesFilter === "ALL" ? true : document.role === "CORRIGENDUM",
     ) ?? [];
+  const visibleVersionDocumentBytes = visibleVersionDocuments.reduce(
+    (total, document) => total + (Number(document.sizeBytes) || 0),
+    0,
+  );
+  const corrigendumDocumentCount =
+    currentVersion?.documents.filter(
+      (document) => document.role === "CORRIGENDUM",
+    ).length ?? 0;
   const workflowSummary = workspace?.workflowState ?? {
     actionLabel: "Open",
     code: "ANALYSIS_READY" as const,
@@ -2242,22 +2277,7 @@ export function TenderWorkspace({
     statusLabel: assessmentSummary.label,
     tone: assessmentSummary.tone,
   };
-  const draftBlockedReason = !hasReadySource
-    ? "Upload a current primary tender source before drafting can start."
-    : support.extractionRun?.status !== "COMPLETE"
-      ? "Drafting is blocked until extraction finishes for the current tender version."
-      : support.riskRun?.status === "FAILED"
-        ? (support.riskRun.safeFailureMessage ??
-          "Drafting is blocked until the failed early risk analysis is retried successfully.")
-        : support.riskRun?.status !== "COMPLETE"
-          ? "Drafting is blocked until early risk analysis finishes."
-          : support.currentDecision?.decision !== "CONTINUE"
-            ? "Drafting is blocked until an authorised CONTINUE decision is recorded."
-            : support.assessmentRun?.status !== "COMPLETE"
-              ? "Drafting is blocked until requirements check finishes for the current tender version."
-              : null;
-
-  const askHref = assistantHref(organisationId);
+  const askHref = `/tenders/${organisationId}/${tenderId}?stage=ask&conversation=new`;
 
   if (workspace === null) {
     return (
@@ -2274,357 +2294,323 @@ export function TenderWorkspace({
 
   return (
     <div className="workspace-page tender-detail-page">
-      <header className="tender-header">
-        <div className="tender-header__row">
-          <Link
-            className="tender-header__back"
-            href={`/tenders/${organisationId}`}
-          >
-            ← Back to Tenders
-          </Link>
-          <span className="tender-header__deadline">
-            {workspace.submissionDeadline === undefined
-              ? "Deadline unavailable"
-              : `${formatDeadlineCountdown(workspace.submissionDeadline)} · ${formatDeadline(workspace.submissionDeadline)}`}
-          </span>
-        </div>
-        <div className="tender-header__identity">
-          <div>
-            <h1>{workspace.title}</h1>
-            <p className="tender-header__buyer">{workspace.buyer}</p>
-          </div>
-          <div className="tender-header__badges">
-            <span
-              className={`status-badge status-badge--${workflowSummary.tone}`}
+      {["overview", "ask", "review"].includes(activeSurface) ? (
+        <header className="tender-header">
+          <div className="tender-header__row">
+            <Link
+              className="tender-header__back"
+              href={`/tenders/${organisationId}`}
             >
-              {workflowSummary.statusLabel}
+              ← Back to Tenders
+            </Link>
+          </div>
+          <div className="tender-header__identity">
+            <div>
+              <h1>{workspace.title}</h1>
+              <p className="tender-header__buyer">{workspace.buyer}</p>
+            </div>
+            <div className="tender-header__badges">
+              <span
+                className={`status-badge status-badge--${workflowSummary.tone}`}
+              >
+                {workflowSummary.statusLabel}
+              </span>
+            </div>
+            <span className="tender-header__deadline">
+              {workspace.submissionDeadline === undefined
+                ? "Deadline unavailable"
+                : `Deadline: ${formatDeadline(workspace.submissionDeadline)} · ${formatDeadlineCountdown(workspace.submissionDeadline)}`}
             </span>
           </div>
-        </div>
-        {workspace.demonstration_label !== undefined ? (
-          <Alert tone="warning">
-            <p>{workspace.demonstration_label}</p>
-          </Alert>
-        ) : null}
-        {workspace.deadlineResolution?.hasMismatch ? (
-          <Alert tone="warning" title="Source deadline updated">
-            <p>
-              The current tender file deadline differs from the original
-              metadata. The workspace is now showing the source-extracted
-              deadline from the current tender file.
-            </p>
-          </Alert>
-        ) : null}
-        {resolution.legacyStage !== null &&
-        ![
-          "overview",
-          "eligibility",
-          "draft",
-          "ask",
-          "files",
-          "activity",
-          "review",
-        ].includes(resolution.legacyStage) ? (
-          <div className="tender-compat-note">
-            This saved link used the legacy{" "}
-            <strong>{humanizeEnum(resolution.legacyStage)}</strong> stage. It
-            now opens <strong>{surfaceLabels[activeSurface]}</strong> while
-            keeping the underlying workflow compatible.
+          {workspace.demonstration_label !== undefined ? (
+            <Alert tone="warning">
+              <p>{workspace.demonstration_label}</p>
+            </Alert>
+          ) : null}
+          {workspace.deadlineResolution?.hasMismatch ? (
+            <div className="tender-deadline-notice" role="status">
+              <strong>Deadline updated from tender source</strong>
+              <span>
+                The current tender file provides the deadline shown above.
+              </span>
+            </div>
+          ) : null}
+          {resolution.legacyStage !== null &&
+          ![
+            "overview",
+            "eligibility",
+            "draft",
+            "ask",
+            "files",
+            "activity",
+            "review",
+          ].includes(resolution.legacyStage) ? (
+            <div className="tender-compat-note">
+              This saved link used the legacy{" "}
+              <strong>{humanizeEnum(resolution.legacyStage)}</strong> stage. It
+              now opens <strong>{surfaceLabels[activeSurface]}</strong> while
+              keeping the underlying workflow compatible.
+            </div>
+          ) : null}
+          <div className="tender-header__tabbar">
+            <nav aria-label="Tender workspace primary" className="tender-nav">
+              {primarySurfaces.map((surface) => (
+                <SurfaceLink
+                  activeSurface={
+                    activeSurface === "review" ? "draft" : activeSurface
+                  }
+                  key={surface}
+                  label={surfaceLabels[surface]}
+                  onSelect={navigateSurface}
+                  surface={surface}
+                />
+              ))}
+            </nav>
+            <nav
+              aria-label="Tender workspace utilities"
+              className="tender-subnav"
+            >
+              {secondarySurfaces.map((surface) => (
+                <SurfaceLink
+                  activeSurface={activeSurface}
+                  key={surface}
+                  label={surfaceLabels[surface]}
+                  onSelect={navigateSurface}
+                  surface={surface}
+                />
+              ))}
+            </nav>
           </div>
-        ) : null}
-        <div className="tender-header__tabbar">
-          <nav aria-label="Tender workspace primary" className="tender-nav">
-            {primarySurfaces.map((surface) => (
-              <SurfaceLink
-                activeSurface={activeSurface}
-                key={surface}
-                label={surfaceLabels[surface]}
-                onSelect={navigateSurface}
-                surface={surface}
-              />
-            ))}
-          </nav>
-          <nav
-            aria-label="Tender workspace utilities"
-            className="tender-subnav"
-          >
-            {secondarySurfaces.map((surface) => (
-              <SurfaceLink
-                activeSurface={activeSurface}
-                key={surface}
-                label={surfaceLabels[surface]}
-                onSelect={navigateSurface}
-                surface={surface}
-              />
-            ))}
-          </nav>
-        </div>
-      </header>
+        </header>
+      ) : null}
 
       {activeSurface === "overview" ? (
         <div className="tender-surface">
-          <div className="tender-two-column">
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h2>What matters now</h2>
-                  <p>
-                    Current pursuit state, the next step, and the nearest
-                    blockers.
-                  </p>
-                </div>
+          <h2 className="visually-hidden">What matters now</h2>
+          <div className="tender-overview-top">
+            <Card className="overview-assessment-card">
+              <div className="overview-card-heading">
+                <h2>Assessment summary</h2>
               </div>
-              <Card className="tender-summary-card">
+              <div className="overview-assessment-status">
                 <span
                   className={`status-badge status-badge--${workflowSummary.tone}`}
                 >
                   {workflowSummary.statusLabel}
                 </span>
-                <p style={{ marginTop: 10, color: "var(--text-secondary)" }}>
-                  {workflowSummary.detail}
-                </p>
-                <div
-                  style={{
-                    display: "flex",
-                    gap: 12,
-                    alignItems: "center",
-                    flexWrap: "wrap",
-                    marginTop: 14,
-                    marginBottom: 14,
-                  }}
-                >
-                  {nextAction.cta === "Retry risk analysis" ? (
-                    <Button
-                      disabled={riskRetrying}
-                      onClick={() => void retryRiskAnalysis()}
-                    >
-                      {riskRetrying ? "Retrying..." : nextAction.cta}
-                    </Button>
-                  ) : (
-                    <Button onClick={() => navigateSurface(nextAction.surface)}>
-                      {nextAction.cta}
-                    </Button>
-                  )}
-                  <p style={{ margin: 0, color: "var(--text-secondary)" }}>
-                    {nextAction.description}
-                  </p>
+                <p>{workflowSummary.detail}</p>
+              </div>
+              {support.matrix === null ? (
+                <div className="tender-assessment-pending">
+                  <strong>
+                    {support.assessmentRun === null
+                      ? "Eligibility review not ready yet"
+                      : "Assessment in progress"}
+                  </strong>
+                  <span>
+                    Counts appear when current tender evidence is compared.
+                  </span>
                 </div>
-                <div className="tender-stat-row">
-                  <div className="tender-stat">
-                    <strong>
-                      {(support.matrix?.counts.find(
+              ) : (
+                <div className="overview-metric-row">
+                  {[
+                    [
+                      "Satisfied",
+                      (support.matrix.counts.find(
                         (item) => item.currentState === "VERIFIED",
                       )?._count ?? 0) +
-                        (support.matrix?.counts.find(
+                        (support.matrix.counts.find(
                           (item) => item.currentState === "LIKELY_MET",
-                        )?._count ?? 0)}
-                    </strong>
-                    <span>Satisfied</span>
-                  </div>
-                  <div className="tender-stat">
-                    <strong>
-                      {support.matrix?.counts.find(
+                        )?._count ?? 0),
+                      "success",
+                    ],
+                    [
+                      "Need evidence",
+                      support.matrix.counts.find(
                         (item) => item.currentState === "MISSING",
-                      )?._count ?? 0}
-                    </strong>
-                    <span>Need info</span>
-                  </div>
-                  <div className="tender-stat">
-                    <strong>
-                      {support.matrix?.counts.find(
+                      )?._count ?? 0,
+                      "warning",
+                    ],
+                    [
+                      "Need review",
+                      support.matrix.counts.find(
                         (item) => item.currentState === "HUMAN_REVIEW_REQUIRED",
-                      )?._count ?? 0}
-                    </strong>
-                    <span>Next review</span>
-                  </div>
-                  <div className="tender-stat">
-                    <strong>
-                      {support.matrix?.counts.find(
+                      )?._count ?? 0,
+                      "warning",
+                    ],
+                    [
+                      "Blocking",
+                      support.matrix.counts.find(
                         (item) => item.currentState === "CONFLICT",
-                      )?._count ?? 0}
-                    </strong>
-                    <span>Blocking</span>
-                  </div>
+                      )?._count ?? 0,
+                      "danger",
+                    ],
+                  ].map(([label, count, tone]) => (
+                    <div
+                      className={`overview-metric overview-metric--${tone}`}
+                      key={label as string}
+                    >
+                      <strong>{count}</strong>
+                      <span>{label}</span>
+                    </div>
+                  ))}
                 </div>
-                {support.riskRun?.status === "COMPLETE" ? (
-                  <div
-                    style={{
-                      borderTop: "1px solid var(--border-subtle)",
-                      marginTop: 18,
-                      paddingTop: 18,
-                    }}
-                  >
-                    <h3 style={{ marginBottom: 8 }}>Pursuit decision</h3>
-                    <p style={{ color: "var(--text-secondary)", marginTop: 0 }}>
-                      Only a human can Continue, Hold, or Stop this tender.
-                    </p>
+              )}
+              {support.riskRun?.status === "COMPLETE" ? (
+                <div className="overview-decision" aria-label="Bid decision">
+                  <div>
                     <p>
-                      Current decision:{" "}
+                      <span>Current decision:</span>{" "}
                       <strong>
                         {support.currentDecision === null
                           ? "No decision recorded"
                           : humanizeEnum(support.currentDecision.decision)}
                       </strong>
                     </p>
-                    {support.currentDecision !== null ? (
-                      <>
-                        {support.currentDecision.rationale.trim() !== "" ? (
-                          <p style={{ color: "var(--text-secondary)" }}>
-                            <strong>Decision rationale:</strong>{" "}
-                            {support.currentDecision.rationale}
-                          </p>
-                        ) : null}
-                        <Button
-                          onClick={() =>
-                            setDecisionEditorOpen((current) => !current)
-                          }
-                          type="button"
-                          variant="secondary"
-                        >
-                          {decisionEditorOpen
-                            ? "Hide decision form"
-                            : "Change decision"}
-                        </Button>
-                      </>
-                    ) : null}
-                    {support.currentDecision === null || decisionEditorOpen ? (
-                      <form
-                        onSubmit={(event) => void recordPursuitDecision(event)}
-                        style={{ display: "grid", gap: 12, marginTop: 12 }}
-                      >
-                        <Field
-                          htmlFor="pursuit-decision"
-                          label="Decision"
-                          required
-                        >
-                          <Select
-                            defaultValue=""
-                            id="pursuit-decision"
-                            name="decision"
-                            required
-                          >
-                            <option disabled value="">
-                              Select Continue, Hold, or Stop
-                            </option>
-                            <option value="CONTINUE">Continue</option>
-                            <option value="HOLD">Hold</option>
-                            <option value="STOP">Stop</option>
-                          </Select>
-                        </Field>
-                        <Field
-                          htmlFor="pursuit-rationale"
-                          label="Rationale"
-                          required
-                        >
-                          <Textarea
-                            id="pursuit-rationale"
-                            minLength={20}
-                            name="rationale"
-                            required
-                          />
-                        </Field>
-                        <label
-                          style={{
-                            display: "flex",
-                            gap: 8,
-                            alignItems: "start",
-                            fontSize: "0.82rem",
-                          }}
-                        >
-                          <input name="acknowledged" required type="checkbox" />
-                          <span>
-                            I understand the unresolved findings and source
-                            limits still need human judgment.
-                          </span>
-                        </label>
-                        <div>
-                          <Button disabled={decisionSubmitting} type="submit">
-                            {decisionSubmitting
-                              ? "Saving decision..."
-                              : "Save decision"}
-                          </Button>
-                        </div>
-                      </form>
+                    {support.currentDecision?.rationale.trim() ? (
+                      <p>
+                        <strong>Decision rationale:</strong>{" "}
+                        {support.currentDecision.rationale}
+                      </p>
                     ) : null}
                   </div>
-                ) : null}
-              </Card>
-              {decisionFeedback !== "" ? (
-                <Alert tone="info">
-                  <p>{decisionFeedback}</p>
-                </Alert>
-              ) : null}
-            </section>
-
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h2>Top blockers and follow-ups</h2>
-                  <p>
-                    Highest-priority unresolved work from current evidence,
-                    missing items, and review state.
-                  </p>
-                </div>
-                {overviewAttention.length > 0 ? (
                   <Button
-                    onClick={() => navigateSurface("eligibility")}
+                    onClick={() => setDecisionEditorOpen(true)}
+                    type="button"
                     variant="quiet"
                   >
-                    View all
+                    {support.currentDecision === null
+                      ? "Record decision"
+                      : "Change decision"}
                   </Button>
-                ) : null}
+                </div>
+              ) : null}
+            </Card>
+
+            <Card className="overview-attention-card">
+              <div className="overview-card-heading">
+                <h2 className="visually-hidden">Top blockers and follow-ups</h2>
+                <h2>
+                  What needs your attention
+                  {overviewAttention.length > 0
+                    ? ` (${overviewAttention.length})`
+                    : ""}
+                </h2>
+                <Button
+                  onClick={() => navigateSurface("eligibility")}
+                  variant="quiet"
+                >
+                  View all
+                </Button>
               </div>
-              <div className="workspace-card">
-                {overviewAttention.length === 0 ? (
-                  <div className="workspace-empty-row">
-                    <p>No urgent unresolved items are currently surfaced.</p>
-                  </div>
-                ) : (
-                  <ul className="attention-list">
-                    {overviewAttention.map((item) => (
-                      <li className="attention-row" key={item.key}>
-                        <span
-                          aria-hidden="true"
-                          className={`status-dot status-dot--${item.tone}`}
-                        />
-                        <div className="attention-row__main">
-                          <strong>{item.title}</strong>
-                          <p>{item.detail}</p>
-                        </div>
-                        <span />
-                        <Button
-                          onClick={() => navigateSurface(item.stage)}
-                          variant="secondary"
-                        >
-                          {item.action}
-                        </Button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </section>
+              {overviewAttention.length === 0 ? (
+                <div className="workspace-empty-row">
+                  <p>No urgent unresolved items are currently surfaced.</p>
+                </div>
+              ) : (
+                <ul className="attention-list">
+                  {overviewAttention.slice(0, 3).map((item) => (
+                    <li className="attention-row" key={item.key}>
+                      <span
+                        aria-hidden="true"
+                        className={`status-dot status-dot--${item.tone}`}
+                      />
+                      <div className="attention-row__main">
+                        <strong>{item.title}</strong>
+                        <p>{item.detail}</p>
+                      </div>
+                      <Button
+                        onClick={() => navigateSurface(item.stage)}
+                        variant="secondary"
+                      >
+                        {item.action}
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Card>
           </div>
+
+          {decisionEditorOpen ? (
+            <Modal
+              label="Bid decision"
+              onClose={() => setDecisionEditorOpen(false)}
+            >
+              <form
+                onSubmit={(event) => void recordPursuitDecision(event)}
+                className="bid-decision__form"
+              >
+                <Field htmlFor="pursuit-decision" label="Decision" required>
+                  <Select
+                    defaultValue={support.currentDecision?.decision ?? ""}
+                    id="pursuit-decision"
+                    name="decision"
+                    required
+                  >
+                    <option disabled value="">
+                      Select a decision
+                    </option>
+                    <option value="CONTINUE">Continue</option>
+                    <option value="HOLD">Hold</option>
+                    <option value="STOP">Stop</option>
+                  </Select>
+                </Field>
+                <Field htmlFor="pursuit-rationale" label="Rationale" required>
+                  <Textarea
+                    defaultValue={support.currentDecision?.rationale ?? ""}
+                    id="pursuit-rationale"
+                    minLength={20}
+                    name="rationale"
+                    required
+                  />
+                </Field>
+                <label className="bid-decision__acknowledgement">
+                  <input name="acknowledged" required type="checkbox" />
+                  <span>
+                    I understand the unresolved findings and source limits still
+                    need human judgment.
+                  </span>
+                </label>
+                <div className="inline-actions">
+                  <Button disabled={decisionSubmitting} type="submit">
+                    {decisionSubmitting
+                      ? "Saving decision..."
+                      : "Save decision"}
+                  </Button>
+                  <Button
+                    disabled={decisionSubmitting}
+                    onClick={() => setDecisionEditorOpen(false)}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          ) : null}
+          {decisionFeedback !== "" ? (
+            <Alert tone="info">
+              <p>{decisionFeedback}</p>
+            </Alert>
+          ) : null}
 
           <section className="workspace-section">
             <div className="workspace-section__header">
               <div>
-                <h2>Key facts</h2>
-                <p>
-                  Only source-extracted values currently supported by the
-                  application are shown here.
-                </p>
+                <h2>Key tender details</h2>
               </div>
             </div>
-            <div className="workspace-card detail-grid-card">
-              {keyFields.length === 0 ? (
+            <div className="workspace-card detail-grid-card key-detail-strip">
+              {keyTenderDetails.length === 0 ? (
                 <div className="tender-stat-row">
                   <div className="tender-stat">
                     <strong>
                       {currentReadyDocument?.displayFilename ??
                         "No ready source"}
                     </strong>
-                    <span>Current source file</span>
+                    <span>Current tender file</span>
                   </div>
                   <div className="tender-stat">
                     <strong>{support.extractionRequirements.length}</strong>
@@ -2648,18 +2634,46 @@ export function TenderWorkspace({
                           : "Waiting on extraction"
                         : humanizeEnum(support.riskRun.status)}
                     </strong>
-                    <span>Early risk</span>
+                    <span>Risk review</span>
                   </div>
                 </div>
               ) : (
-                <div className="tender-stat-row">
-                  {keyFields.map((field) => (
-                    <div className="tender-stat" key={field.id}>
-                      <strong>{field.normalizedTextValue ?? "—"}</strong>
-                      <span>{humanizeEnum(field.fieldType)}</span>
+                <>
+                  <div className="tender-stat-row">
+                    {keyTenderDetails.map((field) => (
+                      <div className="tender-stat" key={field.id}>
+                        <strong>{field.normalizedTextValue ?? "—"}</strong>
+                        <span>{field.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="tender-stat-row">
+                    <div className="tender-stat">
+                      <strong>{support.extractionRequirements.length}</strong>
+                      <span>Extracted requirements</span>
                     </div>
-                  ))}
-                </div>
+                    <div className="tender-stat">
+                      <strong>
+                        {support.extractionRun === null
+                          ? extractedContentAvailable
+                            ? "Complete"
+                            : "Queued automatically"
+                          : humanizeEnum(support.extractionRun.status)}
+                      </strong>
+                      <span>Extraction</span>
+                    </div>
+                    <div className="tender-stat">
+                      <strong>
+                        {support.riskRun === null
+                          ? extractedContentAvailable
+                            ? "Not started"
+                            : "Waiting on extraction"
+                          : humanizeEnum(support.riskRun.status)}
+                      </strong>
+                      <span>Risk review</span>
+                    </div>
+                  </div>
+                </>
               )}
             </div>
           </section>
@@ -2667,507 +2681,511 @@ export function TenderWorkspace({
           <section className="workspace-section">
             <div className="workspace-section__header">
               <div>
-                <h2>Top risks</h2>
+                <h2>Important things to consider</h2>
                 <p>
                   Current cited risk and contract findings stay distinct from
                   requirements decisions.
                 </p>
               </div>
             </div>
-            <div className="tender-risk-grid">
-              {support.riskRun?.status === "FAILED" ? (
-                <div className="workspace-card">
+            <div className="overview-bottom-grid">
+              <Card className="overview-risks-card">
+                {support.riskRun?.status === "FAILED" ? (
                   <div className="workspace-empty-row">
                     <p>
                       {support.riskRun.safeFailureMessage ??
-                        "Early risk analysis failed safely."}
+                        "Risk review could not finish. Try again when ready."}
                     </p>
                     <Button
                       disabled={riskRetrying}
                       onClick={() => void retryRiskAnalysis()}
                       variant="secondary"
                     >
-                      {riskRetrying
-                        ? "Retrying..."
-                        : "Retry early risk analysis"}
+                      {riskRetrying ? "Retrying..." : "Retry risk review"}
                     </Button>
                   </div>
-                </div>
-              ) : topRisks.length === 0 ? (
-                <div className="workspace-card">
+                ) : topRisks.length === 0 ? (
                   <div className="workspace-empty-row">
                     <p>No current cited risk findings are available.</p>
                   </div>
-                </div>
-              ) : (
-                topRisks.map((finding) => (
-                  <Card
-                    className="tender-risk-card"
-                    key={finding.id}
-                    onClick={() => navigateSurface("eligibility")}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ")
-                        navigateSurface("eligibility");
-                    }}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <span
-                      className={`status-badge status-badge--${statusTone(finding.severity)}`}
+                ) : (
+                  topRisks.slice(0, 3).map((finding) => (
+                    <button
+                      className="overview-risk-item"
+                      key={finding.id}
+                      onClick={() => navigateSurface("eligibility")}
+                      type="button"
                     >
-                      {humanizeEnum(finding.severity)}
-                    </span>
-                    <strong>{finding.title}</strong>
-                    <p>{finding.explanation}</p>
-                  </Card>
-                ))
-              )}
+                      <span
+                        aria-hidden="true"
+                        className={`status-dot status-dot--${statusTone(finding.severity)}`}
+                      />
+                      <span>
+                        <strong>{finding.title}</strong>
+                        <small>{finding.explanation}</small>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </Card>
+              <Card className="overview-next-action-card">
+                <h3>Next best action</h3>
+                <p>{nextAction.description}</p>
+                {nextAction.cta === "Retry risk analysis" ? (
+                  <Button
+                    disabled={riskRetrying}
+                    onClick={() => void retryRiskAnalysis()}
+                  >
+                    {riskRetrying ? "Retrying..." : nextAction.cta}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={() => {
+                      if (nextAction.cta === "Record pursue decision") {
+                        setDecisionEditorOpen(true);
+                        return;
+                      }
+                      navigateSurface(nextAction.surface);
+                    }}
+                  >
+                    {nextAction.cta}
+                  </Button>
+                )}
+              </Card>
             </div>
           </section>
         </div>
       ) : null}
 
       {activeSurface === "eligibility" ? (
-        <div className="tender-surface">
-          <section className="workspace-section">
-            <div className="workspace-section__header">
-              <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <h2 style={{ marginBottom: 0 }}>Requirements</h2>
-                  <span
-                    className={`status-badge status-badge--${assessmentSummary.tone}`}
+        <div className="tender-surface eligibility-page">
+          <header className="eligibility-page__header">
+            <button
+              className="tender-header__back"
+              onClick={() => navigateSurface("overview")}
+              type="button"
+            >
+              ← Back to Overview
+            </button>
+            <div>
+              <h1>Eligibility review</h1>
+              <span
+                className={`status-badge status-badge--${assessmentSummary.tone}`}
+              >
+                {assessmentSummary.label}
+              </span>
+            </div>
+          </header>
+          <section className="workspace-section eligibility-workspace">
+            <div className="eligibility-toolbar">
+              <div
+                aria-label="Eligibility filters"
+                className="workspace-chip-row workspace-chip-row--left"
+                role="tablist"
+              >
+                {eligibilityFilters.map((filter) => (
+                  <button
+                    aria-pressed={eligibilityFilter === filter.value}
+                    className={`workspace-chip ${eligibilityFilter === filter.value ? "workspace-chip--active" : ""}`}
+                    key={filter.value}
+                    onClick={() => setEligibilityFilter(filter.value)}
+                    type="button"
                   >
-                    {assessmentSummary.label}
-                  </span>
+                    {filter.label} (
+                    {filter.value === "ALL"
+                      ? eligibilityRequirements.length
+                      : eligibilityRequirements.filter(
+                          (item) =>
+                            requirementPresentation(item).filterKey ===
+                            filter.value,
+                        ).length}
+                    )
+                  </button>
+                ))}
+              </div>
+              <Button
+                aria-controls="eligibility-filter-panel"
+                aria-expanded={eligibilityFiltersOpen}
+                onClick={() => setEligibilityFiltersOpen((current) => !current)}
+                type="button"
+                variant="secondary"
+              >
+                Filters
+              </Button>
+            </div>
+            {eligibilityFiltersOpen ? (
+              <div
+                className="workspace-card eligibility-filter-panel"
+                id="eligibility-filter-panel"
+              >
+                <Field label="Requirement status">
+                  <Select
+                    aria-label="Filter eligibility requirements"
+                    onChange={(event) =>
+                      setEligibilityFilter(event.target.value)
+                    }
+                    value={eligibilityFilter}
+                  >
+                    {eligibilityFilters.map((filter) => (
+                      <option key={filter.value} value={filter.value}>
+                        {filter.label}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+              </div>
+            ) : null}
+            {eligibilityStatusMessage === null ? null : (
+              <div className="eligibility-status-notice">
+                <Alert
+                  tone={support.assessmentRun === null ? "warning" : "info"}
+                >
+                  <p>{eligibilityStatusMessage}</p>
+                </Alert>
+              </div>
+            )}
+            <div className="tender-eligibility-layout">
+              <div className="workspace-card requirement-list">
+                <div className="requirement-list__header">
+                  <h2>Requirements</h2>
+                  <span>Sort: Priority</span>
                 </div>
-                <p>
-                  Understand the tender requirements, current evidence, and what
-                  still needs human review.
-                </p>
+                {visibleRequirements.length === 0 ? (
+                  <div className="workspace-empty-row">
+                    <p>
+                      {eligibilityRequirements.length === 0
+                        ? "Eligibility requirements are not available yet."
+                        : "No requirements match this filter."}
+                    </p>
+                  </div>
+                ) : (
+                  visibleRequirements.map((item) => {
+                    const presentation = requirementPresentation(item);
+                    return (
+                      <button
+                        className={`requirement-list__item ${selectedRequirement?.id === item.id ? "requirement-list__item--active" : ""}`}
+                        key={item.id}
+                        onClick={() => setSelectedRequirementId(item.id)}
+                        type="button"
+                      >
+                        <div>
+                          <strong>{presentation.displayTitle}</strong>
+                          <small>{presentation.kindLabel ?? "Required"}</small>
+                        </div>
+                        <span
+                          className={`status-badge status-badge--${presentation.statusTone}`}
+                        >
+                          {presentation.statusLabel}
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+              <div className="workspace-card requirement-detail">
+                {selectedRequirement === null ? (
+                  <div className="workspace-empty-row">
+                    <p>
+                      Select a requirement to inspect its current evidence and
+                      assessment context.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="requirement-detail__header">
+                      <div>
+                        <h3>
+                          {selectedRequirement.categoryLabel ===
+                          "Other requirement"
+                            ? selectedRequirement.statement
+                            : (selectedRequirementPresentation?.displayTitle ??
+                              selectedRequirement.title)}
+                        </h3>
+                        <p>{selectedRequirement.categoryLabel}</p>
+                      </div>
+                      <span
+                        className={`status-badge status-badge--${selectedRequirementPresentation?.statusTone ?? selectedRequirement.statusTone}`}
+                      >
+                        {selectedRequirementPresentation?.statusLabel ??
+                          selectedRequirement.statusLabel}
+                      </span>
+                    </div>
+                    <section className="requirement-detail__requirement">
+                      <h4>Requirement</h4>
+                      <p>
+                        {selectedRequirement.statement.trim() === ""
+                          ? (selectedRequirementPresentation?.whatThisMeans ??
+                            requirementDisplaySummary(selectedRequirement))
+                          : selectedRequirement.statement}
+                      </p>
+                      {selectedRequirementNeedSummary === null ? null : (
+                        <p>{selectedRequirementNeedSummary}</p>
+                      )}
+                      {selectedApplicabilityQuestion === null ? null : (
+                        <div className="requirement-applicability">
+                          <h4>Confirm applicability</h4>
+                          <p>{selectedApplicabilityQuestion}</p>
+                        </div>
+                      )}
+                    </section>
+                    <section className="requirement-source-section">
+                      <h4>Source in tender</h4>
+                      {selectedRequirement.sourceCitation === null ? (
+                        <p>
+                          A current tender citation is not available for this
+                          extracted requirement. Review the source before making
+                          a decision.
+                        </p>
+                      ) : (
+                        <>
+                          <p className="requirement-source-meta">
+                            {selectedRequirement.sourceCitation.pageNumber ===
+                            null
+                              ? "Page unavailable"
+                              : `Page ${selectedRequirement.sourceCitation.pageNumber}`}
+                            {selectedRequirement.sourceCitation.clauseLabel
+                              ? ` · Clause ${selectedRequirement.sourceCitation.clauseLabel}`
+                              : ""}
+                          </p>
+                          <blockquote className="visually-hidden">
+                            {compactSourceExcerpt(
+                              selectedRequirement.sourceCitation.boundedExcerpt,
+                            )}
+                          </blockquote>
+                          <Button
+                            onClick={() =>
+                              selectedRequirement.sourceCitation === null
+                                ? undefined
+                                : void openTenderCitation(
+                                    selectedRequirement.sourceCitation
+                                      .tenderDocumentId,
+                                    selectedRequirement.sourceCitation
+                                      .pageNumber,
+                                  )
+                            }
+                            variant="secondary"
+                          >
+                            View in document
+                          </Button>
+                        </>
+                      )}
+                    </section>
+                    <section className="requirement-evidence-section">
+                      <h4>Your evidence</h4>
+                      {selectedRequirement.evidenceLinks.length === 0 ? (
+                        <div className="requirement-evidence-empty">
+                          <span aria-hidden="true">□</span>
+                          <strong>
+                            {selectedRequirementPresentation?.filterKey ===
+                            "SATISFIED"
+                              ? "No linked evidence returned"
+                              : "No supporting document found"}
+                          </strong>
+                          <p>
+                            {selectedRequirementPresentation?.filterKey ===
+                            "SATISFIED"
+                              ? "This assessment is marked satisfied, but no direct supporting document is linked. Review company documents before final approval."
+                              : (selectedRequirementPresentation?.evidenceNeeded ??
+                                selectedRequirementPresentation?.evidenceEmptyLabel ??
+                                "Upload current supporting evidence for this requirement.")}
+                          </p>
+                          <Link
+                            className={`button ${selectedRequirementPresentation?.filterKey === "SATISFIED" ? "button--secondary" : "button--primary"}`}
+                            href={companyDocsHref}
+                          >
+                            {selectedRequirementPresentation?.filterKey ===
+                            "SATISFIED"
+                              ? "Review documents"
+                              : "Upload document"}
+                          </Link>
+                        </div>
+                      ) : (
+                        <div className="requirement-evidence-list">
+                          {selectedRequirement.evidenceLinks.map(
+                            (link, index) => (
+                              <div
+                                className="evidence-link"
+                                key={`${selectedRequirement.id}-${index}`}
+                              >
+                                <strong>{link.supportingText}</strong>
+                                <p>{link.excerpt}</p>
+                                <small>{link.label}</small>
+                              </div>
+                            ),
+                          )}
+                          <Link
+                            className="button button--secondary"
+                            href={companyDocsHref}
+                          >
+                            Manage company documents
+                          </Link>
+                        </div>
+                      )}
+                    </section>
+                    <div className="assessment-block">
+                      <span className="eyebrow">Assessment</span>
+                      <h4>
+                        {selectedRequirementPresentation?.statusLabel ??
+                          selectedRequirement.statusLabel}
+                      </h4>
+                      <p>
+                        Why: {customerAssessmentReason(selectedRequirement)}{" "}
+                        What to do: {selectedRequirement.whatToDo}
+                      </p>
+                    </div>
+                    {selectedRequirementAction !== null ? (
+                      <div className="requirement-primary-action">
+                        <Button
+                          onClick={selectedRequirementAction.onClick}
+                          type="button"
+                          variant="secondary"
+                        >
+                          {selectedRequirementAction.label}
+                        </Button>
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </div>
             </div>
-            {eligibilityStatusMessage === null ? null : (
-              <Alert tone={support.assessmentRun === null ? "warning" : "info"}>
-                <p>{eligibilityStatusMessage}</p>
-              </Alert>
-            )}
-            {support.matrix === null ? (
-              <>
-                <Card className="tender-summary-card">
-                  <span
-                    className={`status-badge status-badge--${assessmentSummary.tone}`}
-                  >
-                    {assessmentSummary.label}
-                  </span>
-                  <p style={{ marginTop: 10, color: "var(--text-secondary)" }}>
-                    {assessmentSummary.detail}
-                  </p>
-                  {eligibilityRequirements.length > 0 ? (
-                    <p>
-                      {eligibilityRequirements.length} tender requirement
-                      {eligibilityRequirements.length === 1 ? "" : "s"} are
-                      already extracted and ready for the next review step.
-                    </p>
-                  ) : null}
-                  <div className="inline-actions">
-                    {support.riskRun?.status === "FAILED" ? (
-                      <Button
-                        disabled={riskRetrying}
-                        onClick={() => void retryRiskAnalysis()}
-                      >
-                        {riskRetrying ? "Retrying..." : "Retry risk review"}
-                      </Button>
-                    ) : support.currentDecision?.decision !== "CONTINUE" ? (
-                      <Button onClick={() => navigateSurface("overview")}>
-                        Review pursuit decision
-                      </Button>
-                    ) : (
-                      <Button onClick={() => navigateSurface("overview")}>
-                        Open overview
-                      </Button>
-                    )}
-                    <Link
-                      className="button button--secondary"
-                      href={`/documents/${organisationId}`}
-                    >
-                      Open company documents
-                    </Link>
-                  </div>
-                </Card>
-                {eligibilityRequirements.length > 0 && (
-                  <details className="disclosure">
-                    <summary>
-                      Extracted tender requirements
-                      <small>
-                        Browse the source-backed requirements while requirements
-                        check is waiting
-                      </small>
-                    </summary>
-                    <div className="disclosure__body">
-                      <div className="workspace-rows">
-                        {eligibilityRequirements.map((item) => (
-                          <article className="workspace-row" key={item.id}>
-                            <div className="workspace-row__title">
-                              <strong>{item.title}</strong>
-                              <p>{item.statement}</p>
-                            </div>
-                            {item.sourceCitation === null ? (
-                              <span />
-                            ) : (
-                              <Button
-                                onClick={() =>
-                                  void openTenderCitation(
-                                    item.sourceCitation!.tenderDocumentId,
-                                    item.sourceCitation!.pageNumber,
-                                  )
-                                }
-                                variant="quiet"
-                              >
-                                View source
-                              </Button>
-                            )}
-                          </article>
-                        ))}
-                      </div>
-                    </div>
-                  </details>
-                )}
-              </>
-            ) : (
-              <>
-                <div
-                  className="workspace-chip-row workspace-chip-row--left"
-                  role="tablist"
-                  aria-label="Eligibility filters"
-                >
-                  {eligibilityFilters.map((filter) => (
-                    <button
-                      aria-pressed={eligibilityFilter === filter.value}
-                      className={`workspace-chip ${eligibilityFilter === filter.value ? "workspace-chip--active" : ""}`}
-                      key={filter.value}
-                      onClick={() => setEligibilityFilter(filter.value)}
-                      type="button"
-                    >
-                      {filter.label} (
-                      {filter.value === "ALL"
-                        ? eligibilityRequirements.length
-                        : eligibilityRequirements.filter((item) =>
-                            filter.states.includes(item.stateKey),
-                          ).length}
-                      )
-                    </button>
-                  ))}
-                </div>
-                <div className="tender-eligibility-layout">
-                  <div className="workspace-card requirement-list">
-                    {visibleRequirements.length === 0 ? (
-                      <div className="workspace-empty-row">
-                        <p>
-                          {eligibilityRequirements.length === 0
-                            ? "Requirements are not available yet."
-                            : "No requirements match this filter."}
-                        </p>
-                      </div>
-                    ) : (
-                      visibleRequirements.map((item) => (
-                        <button
-                          className={`requirement-list__item ${selectedRequirement?.id === item.id ? "requirement-list__item--active" : ""}`}
-                          key={item.id}
-                          onClick={() => setSelectedRequirementId(item.id)}
-                          type="button"
-                        >
-                          <div>
-                            <strong>{item.title}</strong>
-                            {shouldRepeatRequirementBody(item) ? (
-                              <p>{matchingRequirementBody(item)}</p>
-                            ) : null}
-                            <small>{item.categoryLabel}</small>
-                          </div>
-                          <span
-                            className={`status-badge status-badge--${item.statusTone}`}
-                          >
-                            {item.statusLabel}
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                  <div className="workspace-card requirement-detail">
-                    {selectedRequirement === null ? (
-                      <div className="workspace-empty-row">
-                        <p>
-                          Select a requirement to inspect its current evidence
-                          and assessment context.
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="requirement-detail__header">
-                          <div>
-                            <h3>{selectedRequirement.title}</h3>
-                            <p>{selectedRequirement.categoryLabel}</p>
-                          </div>
-                        </div>
-                        <div className="assessment-block">
-                          <div style={{ display: "grid", gap: 8 }}>
-                            <h4>Status</h4>
-                            <div>
-                              <span
-                                className={`status-badge status-badge--${selectedRequirement.statusTone}`}
-                              >
-                                {selectedRequirement.statusLabel}
-                              </span>
-                            </div>
-                          </div>
-                          <div style={{ display: "grid", gap: 6 }}>
-                            <h4>Why</h4>
-                            <p>{selectedRequirement.why}</p>
-                          </div>
-                          <div style={{ display: "grid", gap: 6 }}>
-                            <h4>What is missing</h4>
-                            <p>
-                              {requirementMissingSummary(
-                                selectedRequirement,
-                                linkedChecklistItem,
-                              )}
-                            </p>
-                          </div>
-                          <div style={{ display: "grid", gap: 6 }}>
-                            <h4>What to do</h4>
-                            <p>{selectedRequirement.whatToDo}</p>
-                          </div>
-                        </div>
-                        <div className="requirement-detail__grid">
-                          <section>
-                            <h4>Tender source</h4>
-                            {selectedRequirement.sourceCitation === null ? (
-                              <p>
-                                A current tender citation is not available for
-                                this extracted requirement.
-                              </p>
-                            ) : (
-                              <>
-                                <p>
-                                  {
-                                    selectedRequirement.sourceCitation
-                                      .boundedExcerpt
-                                  }
-                                </p>
-                                <p>
-                                  {
-                                    selectedRequirement.sourceCitation
-                                      .documentName
-                                  }
-                                  {selectedRequirement.sourceCitation
-                                    .clauseLabel
-                                    ? `, clause ${selectedRequirement.sourceCitation.clauseLabel}`
-                                    : ""}
-                                  {selectedRequirement.sourceCitation
-                                    .pageNumber === null
-                                    ? ""
-                                    : `, page ${selectedRequirement.sourceCitation.pageNumber}`}
-                                </p>
-                                <Button
-                                  onClick={() =>
-                                    selectedRequirement.sourceCitation === null
-                                      ? undefined
-                                      : void openTenderCitation(
-                                          selectedRequirement.sourceCitation
-                                            .tenderDocumentId,
-                                          selectedRequirement.sourceCitation
-                                            .pageNumber,
-                                        )
-                                  }
-                                  variant="secondary"
-                                >
-                                  View in document
-                                </Button>
-                              </>
-                            )}
-                          </section>
-                          <section>
-                            <h4>Company evidence</h4>
-                            {selectedRequirement.evidenceLinks.length === 0 ? (
-                              <p>
-                                No accepted company evidence was found for this
-                                requirement.
-                              </p>
-                            ) : (
-                              selectedRequirement.evidenceLinks.map(
-                                (link, index) => (
-                                  <div
-                                    className="evidence-link"
-                                    key={`${selectedRequirement.id}-${index}`}
-                                  >
-                                    <strong>{link.label}</strong>
-                                    <p>{link.excerpt}</p>
-                                    <small>{link.supportingText}</small>
-                                  </div>
-                                ),
-                              )
-                            )}
-                            <div className="inline-actions">
-                              <Link
-                                className="button button--secondary"
-                                href={`/documents/${organisationId}`}
-                              >
-                                Open company documents
-                              </Link>
-                            </div>
-                          </section>
-                        </div>
-                        {selectedRequirementAction !== null ? (
-                          <div
-                            className="tender-tools-panel"
-                            style={{ marginTop: 16 }}
-                          >
-                            <h4>Primary action</h4>
-                            <div className="inline-actions">
-                              <Button
-                                onClick={selectedRequirementAction.onClick}
-                                type="button"
-                              >
-                                {selectedRequirementAction.label}
-                              </Button>
-                            </div>
-                          </div>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                </div>
-              </>
-            )}
           </section>
 
-          {hasCurrentChecklist ? (
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h3>Missing items</h3>
-                  <p>Current actions that still need attention.</p>
-                </div>
-              </div>
-              <div className="workspace-card tender-tools-panel">
-                <div className="tender-stat-row">
-                  <div className="tender-stat">
-                    <strong>{unresolvedChecklist.length}</strong>
-                    <span>
-                      action{unresolvedChecklist.length === 1 ? "" : "s"} need
-                      attention
-                    </span>
-                  </div>
-                  {otherChecklistItems.length > 0 ? (
-                    <div className="tender-stat">
-                      <strong>{otherChecklistItems.length}</strong>
-                      <span>Other actions</span>
+          {SHOW_INTERNAL_ELIGIBILITY_TOOLS ? (
+            <>
+              {hasCurrentChecklist ? (
+                <section className="workspace-section">
+                  <div className="workspace-section__header">
+                    <div>
+                      <h3>Missing items</h3>
+                      <p>Current actions that still need attention.</p>
                     </div>
-                  ) : null}
-                </div>
-                <p>
-                  Review the selected requirement above to see what is missing
-                  and the next step for the current action.
-                </p>
-                {otherChecklistItems.length > 0 && currentVersionId !== "" ? (
-                  <>
-                    <h4>Other actions</h4>
+                  </div>
+                  <div className="workspace-card tender-tools-panel">
+                    <div className="tender-stat-row">
+                      <div className="tender-stat">
+                        <strong>{unresolvedChecklist.length}</strong>
+                        <span>
+                          action{unresolvedChecklist.length === 1 ? "" : "s"}{" "}
+                          need attention
+                        </span>
+                      </div>
+                      {otherChecklistItems.length > 0 ? (
+                        <div className="tender-stat">
+                          <strong>{otherChecklistItems.length}</strong>
+                          <span>Other actions</span>
+                        </div>
+                      ) : null}
+                    </div>
+                    {otherChecklistItems.length > 0 &&
+                    currentVersionId !== "" ? (
+                      <ActionChecklist
+                        currentAssessmentRunId={
+                          support.assessmentRun?.id ?? null
+                        }
+                        organisationId={organisationId}
+                        tenderId={tenderId}
+                        versionId={currentVersionId}
+                        visibleItemIds={otherChecklistItems.map(
+                          (item) => item.id,
+                        )}
+                      />
+                    ) : null}
+                  </div>
+                </section>
+              ) : currentVersionId !== "" ? (
+                <section className="workspace-section eligibility-action-tools">
+                  <div className="workspace-section__header">
+                    <div>
+                      <h3>Missing items</h3>
+                      <p>
+                        Create the action list from the current eligibility
+                        review.
+                      </p>
+                    </div>
+                  </div>
+                  <div className="workspace-card tender-tools-panel">
                     <ActionChecklist
                       currentAssessmentRunId={support.assessmentRun?.id ?? null}
                       organisationId={organisationId}
                       tenderId={tenderId}
                       versionId={currentVersionId}
-                      visibleItemIds={otherChecklistItems.map(
-                        (item) => item.id,
-                      )}
                     />
-                  </>
-                ) : null}
-              </div>
-            </section>
+                  </div>
+                </section>
+              ) : null}
+
+              <section className="workspace-section eligibility-evidence-tools">
+                <details className="disclosure" ref={evidenceDetailsRef}>
+                  <summary>
+                    Audit &amp; evidence
+                    <small>
+                      Historical reviews, evidence tools, and currentness
+                      details
+                    </small>
+                  </summary>
+                  <div className="disclosure__body tender-tools-panel">
+                    {currentVersionId !== "" ? (
+                      <>
+                        <ActionChecklist
+                          currentAssessmentRunId={
+                            support.assessmentRun?.id ?? null
+                          }
+                          organisationId={organisationId}
+                          presentation="history"
+                          tenderId={tenderId}
+                          versionId={currentVersionId}
+                        />
+                        <EvidenceMatrix
+                          currentAssessmentRunId={
+                            support.assessmentRun?.id ?? null
+                          }
+                          focusRequest={evidenceFocusRequest}
+                          organisationId={organisationId}
+                          tenderId={tenderId}
+                          versionId={currentVersionId}
+                        />
+                      </>
+                    ) : (
+                      <div className="workspace-empty-row">
+                        <p>
+                          The current tender version is unavailable for evidence
+                          review.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </details>
+              </section>
+            </>
           ) : null}
 
-          <section className="workspace-section">
-            <details className="disclosure" ref={evidenceDetailsRef}>
-              <summary>
-                Audit &amp; evidence
-                <small>
-                  Historical reviews, evidence tools, and currentness details
-                </small>
-              </summary>
-              <div className="disclosure__body tender-tools-panel">
-                {currentVersionId !== "" ? (
-                  <ActionChecklist
-                    currentAssessmentRunId={support.assessmentRun?.id ?? null}
-                    organisationId={organisationId}
-                    presentation="history"
-                    tenderId={tenderId}
-                    versionId={currentVersionId}
-                  />
-                ) : (
-                  <div className="workspace-empty-row">
-                    <p>
-                      The current tender version is unavailable for checklist
-                      history.
-                    </p>
-                  </div>
-                )}
-                {currentVersionId !== "" ? (
-                  <EvidenceMatrix
-                    currentAssessmentRunId={support.assessmentRun?.id ?? null}
-                    focusRequest={evidenceFocusRequest}
-                    organisationId={organisationId}
-                    tenderId={tenderId}
-                    versionId={currentVersionId}
-                  />
-                ) : (
-                  <div className="workspace-empty-row">
-                    <p>
-                      The current tender version is unavailable for evidence
-                      review.
-                    </p>
-                  </div>
-                )}
-              </div>
-            </details>
-          </section>
+          {evidenceReviewOpen && currentVersionId !== "" ? (
+            <Modal
+              label="Review evidence"
+              onClose={() => setEvidenceReviewOpen(false)}
+            >
+              <EvidenceMatrix
+                currentAssessmentRunId={support.assessmentRun?.id ?? null}
+                focusRequest={evidenceFocusRequest}
+                organisationId={organisationId}
+                presentation="focused"
+                tenderId={tenderId}
+                versionId={currentVersionId}
+              />
+            </Modal>
+          ) : null}
         </div>
       ) : null}
 
       {activeSurface === "draft" ? (
         <div className="tender-surface">
-          <h2 className="visually-hidden">Draft</h2>
-          {draftBlockedReason === null ? (
-            <DraftWorkspace
-              onOpenReview={() => navigateSurface("review")}
-              organisationId={organisationId}
-              tenderId={tenderId}
-            />
-          ) : (
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h2>Draft prerequisites</h2>
-                  <p>{draftBlockedReason}</p>
-                </div>
-              </div>
-              <Card className="tender-summary-card">
-                <strong>Drafting is currently blocked</strong>
-                <p>{draftBlockedReason}</p>
-                {support.riskRun?.status === "FAILED" ? (
-                  <Button
-                    disabled={riskRetrying}
-                    onClick={() => void retryRiskAnalysis()}
-                  >
-                    {riskRetrying ? "Retrying..." : "Retry early risk analysis"}
-                  </Button>
-                ) : (
-                  <Button onClick={() => navigateSurface("overview")}>
-                    Open overview
-                  </Button>
-                )}
-              </Card>
-            </section>
-          )}
+          <DraftWorkspace
+            onNavigateStage={(stage) => navigateSurface(stage)}
+            onOpenReview={() => navigateSurface("review")}
+            organisationId={organisationId}
+            tenderId={tenderId}
+            versionId={currentVersionId === "" ? null : currentVersionId}
+          />
         </div>
       ) : null}
 
@@ -3179,16 +3197,31 @@ export function TenderWorkspace({
                 <h2>AI Chat</h2>
                 <p>
                   Grounded tender Q&amp;A stays tender-scoped and preserves the
-                  existing authorised source modes.
+                  approved tender sources.
                 </p>
               </div>
             </div>
             <div className="tender-embedded-section">
               {currentVersionId !== "" ? (
                 <RagChatbot
+                  key={tenderId}
+                  onConversationChange={(id) => {
+                    const next = new URLSearchParams(searchParams.toString());
+                    next.set("conversation", id);
+                    router.replace(`${pathname}?${next.toString()}`, {
+                      scroll: false,
+                    });
+                  }}
+                  {...(searchParams.get("conversation") === null
+                    ? {}
+                    : {
+                        initialConversationId:
+                          searchParams.get("conversation")!,
+                      })}
                   organisationId={organisationId}
                   tenderId={tenderId}
                   tenderTitle={workspace?.title}
+                  streamlined
                   versionId={currentVersionId}
                 />
               ) : (
@@ -3205,23 +3238,30 @@ export function TenderWorkspace({
       ) : null}
 
       {activeSurface === "files" ? (
-        <div className="tender-surface">
-          <section className="workspace-section">
-            <div className="workspace-section__header">
-              <div>
-                <h2>Tender Files</h2>
-                <p>
-                  {visibleVersionDocuments.length} file
-                  {visibleVersionDocuments.length === 1 ? "" : "s"}
-                  {currentVersion === undefined
-                    ? ""
-                    : ` · Current source set · ${currentVersion.reason}`}
-                </p>
-              </div>
-              <Button onClick={() => setShowFileUpload(true)}>
-                Upload files
-              </Button>
+        <div className="tender-surface standalone-surface tender-files-page">
+          <header className="standalone-surface__header">
+            <div>
+              <button
+                className="tender-header__back"
+                onClick={() => navigateSurface("overview")}
+                type="button"
+              >
+                ← Back to Overview
+              </button>
+              <h1 aria-label="Tender Files">Tender files</h1>
+              <p>
+                {visibleVersionDocuments.length} file
+                {visibleVersionDocuments.length === 1 ? "" : "s"}
+                {visibleVersionDocuments.length === 0
+                  ? ""
+                  : ` · ${formatFileSize(String(visibleVersionDocumentBytes))}`}
+              </p>
             </div>
+            <Button onClick={() => setShowFileUpload(true)}>
+              Upload files
+            </Button>
+          </header>
+          <section className="workspace-section">
             <div
               className="workspace-chip-row workspace-chip-row--left"
               role="tablist"
@@ -3234,6 +3274,9 @@ export function TenderWorkspace({
                 type="button"
               >
                 All files
+                {currentVersion === undefined
+                  ? ""
+                  : ` (${currentVersion.documents.length})`}
               </button>
               <button
                 aria-pressed={filesFilter === "CORRIGENDA"}
@@ -3242,6 +3285,7 @@ export function TenderWorkspace({
                 type="button"
               >
                 Corrigenda
+                {` (${corrigendumDocumentCount})`}
               </button>
             </div>
             {!showFileUpload && message !== "" ? (
@@ -3256,10 +3300,12 @@ export function TenderWorkspace({
                     <tr>
                       <th scope="col">Name</th>
                       <th scope="col">Type</th>
-                      <th scope="col">Status</th>
                       <th scope="col">Uploaded on</th>
+                      <th scope="col">Uploaded by</th>
                       <th scope="col">Size</th>
-                      <th scope="col">Action</th>
+                      <th scope="col">
+                        <span className="visually-hidden">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3275,100 +3321,82 @@ export function TenderWorkspace({
                       visibleVersionDocuments.map((document) => (
                         <tr key={document.id}>
                           <td>
-                            <strong>{document.displayFilename}</strong>
-                            <small>
-                              SHA-256 {document.sha256.slice(0, 12)}...
-                            </small>
+                            <div className="tender-file-name">
+                              <span
+                                aria-hidden="true"
+                                className={`tender-file-name__icon tender-file-name__icon--${document.role.toLowerCase()}`}
+                              />
+                              <div>
+                                <strong>{document.displayFilename}</strong>
+                                {document.status === "READY" ? null : (
+                                  <small>
+                                    {documentStatusLabel(document)}
+                                    {isExpiredUpload(document)
+                                      ? " · Upload session expired"
+                                      : ""}
+                                  </small>
+                                )}
+                              </div>
+                            </div>
                           </td>
-                          <td>{humanizeEnum(document.role)}</td>
-                          <td>
-                            <span
-                              className={`status-badge status-badge--${documentStatusTone(document)}`}
-                            >
-                              {documentStatusLabel(document)}
-                            </span>
-                            {isExpiredUpload(document) ? (
-                              <small style={{ display: "block", marginTop: 4 }}>
-                                The upload session expired before this file
-                                finished. Re-upload it.
-                              </small>
-                            ) : null}
-                          </td>
+                          <td>{fileType(document.displayFilename)}</td>
                           <td>{formatShortDate(document.createdAt)}</td>
+                          <td className="workspace-table__muted">—</td>
                           <td>{formatFileSize(document.sizeBytes)}</td>
                           <td className="workspace-table__action">
-                            {isRemovableFailedUpload(document) ? (
-                              <Tooltip content="Remove failed upload">
-                                <IconButton
-                                  className="icon-button--danger-subtle"
-                                  label={`Remove failed upload ${document.displayFilename}`}
-                                  onClick={() =>
-                                    setPendingFileRemoval({
-                                      confirmLabel: "Remove file",
-                                      description:
-                                        "Remove this failed upload? You can upload the file again afterwards.",
-                                      documentId: document.id,
-                                      successMessage:
-                                        "Failed upload removed. The same file can now be uploaded again.",
-                                      title: "Remove failed upload",
-                                    })
-                                  }
-                                  type="button"
-                                >
-                                  <Trash2 aria-hidden="true" size={16} />
-                                </IconButton>
-                              </Tooltip>
-                            ) : isRemovableReadySource(document, {
-                                documentCount:
-                                  currentVersion?.documents.length ?? 0,
-                                isCurrentVersion: true,
-                              }) ? (
-                              <div className="tender-file-actions">
-                                <Tooltip content="Download file">
-                                  <IconButton
-                                    label={`Download ${document.displayFilename}`}
+                            <details className="row-action-menu">
+                              <summary
+                                aria-label={`Actions for ${document.displayFilename}`}
+                              >
+                                <MoreHorizontal aria-hidden="true" size={18} />
+                              </summary>
+                              <div>
+                                {document.status === "READY" ? (
+                                  <Button
+                                    aria-label={`Download ${document.displayFilename}`}
                                     onClick={() => void download(document.id)}
                                     type="button"
+                                    variant="quiet"
                                   >
-                                    <Download aria-hidden="true" size={16} />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip content="Remove tender file">
-                                  <IconButton
-                                    className="icon-button--danger-subtle"
-                                    label={`Remove tender file ${document.displayFilename}`}
+                                    <Download aria-hidden="true" size={15} />
+                                    Download
+                                  </Button>
+                                ) : null}
+                                {isRemovableFailedUpload(document) ||
+                                isRemovableReadySource(document, {
+                                  documentCount:
+                                    currentVersion?.documents.length ?? 0,
+                                  isCurrentVersion: true,
+                                }) ? (
+                                  <Button
+                                    aria-label={`${document.status === "READY" ? "Remove tender file" : "Remove failed upload"} ${document.displayFilename}`}
                                     onClick={() =>
                                       setPendingFileRemoval({
                                         confirmLabel: "Remove file",
                                         description:
-                                          "Removing a processed source may invalidate analysis, eligibility, draft, AI index, and review results derived from it.",
+                                          document.status === "READY"
+                                            ? "Removing a processed source may invalidate analysis, eligibility, draft, AI index, and review results derived from it."
+                                            : "Remove this failed upload? You can upload the file again afterwards.",
                                         documentId: document.id,
                                         successMessage:
-                                          "Tender file removed. You can upload the same file again.",
-                                        title: "Remove this tender file?",
+                                          document.status === "READY"
+                                            ? "Tender file removed. You can upload the same file again."
+                                            : "Failed upload removed. The same file can now be uploaded again.",
+                                        title:
+                                          document.status === "READY"
+                                            ? "Remove this tender file?"
+                                            : "Remove failed upload",
                                       })
                                     }
                                     type="button"
+                                    variant="quiet"
                                   >
-                                    <Trash2 aria-hidden="true" size={16} />
-                                  </IconButton>
-                                </Tooltip>
+                                    <Trash2 aria-hidden="true" size={15} />
+                                    Remove
+                                  </Button>
+                                ) : null}
                               </div>
-                            ) : document.status === "READY" ? (
-                              <Tooltip content="Download file">
-                                <IconButton
-                                  label={`Download ${document.displayFilename}`}
-                                  onClick={() => void download(document.id)}
-                                  type="button"
-                                >
-                                  <Download aria-hidden="true" size={16} />
-                                </IconButton>
-                              </Tooltip>
-                            ) : (
-                              <span style={{ color: "var(--text-subtle)" }}>
-                                -
-                              </span>
-                            )}
+                            </details>
                           </td>
                         </tr>
                       ))
@@ -3378,7 +3406,7 @@ export function TenderWorkspace({
               </div>
             </div>
             {historicalFileVersions.length > 0 ? (
-              <details className="disclosure">
+              <details className="disclosure tender-file-history">
                 <summary>
                   Previous source history
                   <small>
@@ -3415,6 +3443,7 @@ export function TenderWorkspace({
                 </Link>
                 .
               </p>
+              <small>Accepted: PDF, ZIP, XLSX, DOCX, and CSV.</small>
             </div>
           </section>
 
@@ -3528,168 +3557,176 @@ export function TenderWorkspace({
             </Modal>
           ) : null}
 
-          <div className="tender-two-column">
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h2>Processing</h2>
-                  <p>
-                    Tender processing stays visible here without implying work
-                    that has not happened.
-                  </p>
-                </div>
-              </div>
-              <div className="workspace-card">
-                {workspace.processingJobs.length === 0 ? (
-                  <div className="workspace-empty-row">
-                    <p>No source-processing jobs have started yet.</p>
+          <details className="disclosure tender-files__advanced">
+            <summary>Advanced file details</summary>
+            <div className="disclosure__body">
+              <div className="tender-two-column">
+                <section className="workspace-section">
+                  <div className="workspace-section__header">
+                    <div>
+                      <h2>Processing</h2>
+                      <p>
+                        Tender processing stays visible here without implying
+                        work that has not happened.
+                      </p>
+                    </div>
                   </div>
-                ) : (
-                  <div className="workspace-rows">
-                    {workspace.processingJobs.map((job) => (
-                      <article className="workspace-row" key={job.id}>
-                        <div className="workspace-row__title">
-                          <strong>
-                            {job.publicMessage === ""
-                              ? "Source-processing update"
-                              : job.publicMessage}
-                          </strong>
-                          <p>{humanizeEnum(job.state)}</p>
-                        </div>
-                        <span
-                          className={`status-badge status-badge--${statusTone(job.state)}`}
-                        >
-                          {humanizeEnum(job.state)}
-                        </span>
-                        <p className="workspace-row__supporting">
-                          {job.progressPercentage}%
-                        </p>
-                        <span className="workspace-row__deadline" />
-                        <span />
-                      </article>
-                    ))}
+                  <div className="workspace-card">
+                    {workspace.processingJobs.length === 0 ? (
+                      <div className="workspace-empty-row">
+                        <p>No source-processing jobs have started yet.</p>
+                      </div>
+                    ) : (
+                      <div className="workspace-rows">
+                        {workspace.processingJobs.map((job) => (
+                          <article className="workspace-row" key={job.id}>
+                            <div className="workspace-row__title">
+                              <strong>
+                                {job.publicMessage === ""
+                                  ? "Source-processing update"
+                                  : job.publicMessage}
+                              </strong>
+                              <p>{humanizeEnum(job.state)}</p>
+                            </div>
+                            <span
+                              className={`status-badge status-badge--${statusTone(job.state)}`}
+                            >
+                              {humanizeEnum(job.state)}
+                            </span>
+                            <p className="workspace-row__supporting">
+                              {job.progressPercentage}%
+                            </p>
+                            <span className="workspace-row__deadline" />
+                            <span />
+                          </article>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </section>
+                </section>
 
-            <section className="workspace-section">
-              <div className="workspace-section__header">
-                <div>
-                  <h2>Corrigenda</h2>
-                  <p>Corrigendum history remains versioned and distinct.</p>
-                </div>
-              </div>
-              <div className="workspace-card">
-                {workspace.corrigenda.length === 0 ? (
-                  <div className="workspace-empty-row">
-                    <p>No corrigenda have been recorded.</p>
+                <section className="workspace-section">
+                  <div className="workspace-section__header">
+                    <div>
+                      <h2>Corrigenda</h2>
+                      <p>Corrigendum history remains versioned and distinct.</p>
+                    </div>
                   </div>
-                ) : (
-                  <div className="workspace-rows">
-                    {workspace.corrigenda.map((corrigendum) => (
-                      <article className="workspace-row" key={corrigendum.id}>
-                        <div className="workspace-row__title">
-                          <strong>{corrigendum.identifier}</strong>
-                          <p>{corrigendum.description}</p>
-                        </div>
-                        <span className="status-badge status-badge--info">
-                          Corrigendum
-                        </span>
-                        <p className="workspace-row__supporting">
-                          {corrigendum.publicationDate === null
-                            ? "Publication date unavailable"
-                            : formatTimestamp(corrigendum.publicationDate)}
-                        </p>
-                        <span className="workspace-row__deadline" />
-                        <span />
-                      </article>
-                    ))}
+                  <div className="workspace-card">
+                    {workspace.corrigenda.length === 0 ? (
+                      <div className="workspace-empty-row">
+                        <p>No corrigenda have been recorded.</p>
+                      </div>
+                    ) : (
+                      <div className="workspace-rows">
+                        {workspace.corrigenda.map((corrigendum) => (
+                          <article
+                            className="workspace-row"
+                            key={corrigendum.id}
+                          >
+                            <div className="workspace-row__title">
+                              <strong>{corrigendum.identifier}</strong>
+                              <p>{corrigendum.description}</p>
+                            </div>
+                            <span className="status-badge status-badge--info">
+                              Corrigendum
+                            </span>
+                            <p className="workspace-row__supporting">
+                              {corrigendum.publicationDate === null
+                                ? "Publication date unavailable"
+                                : formatTimestamp(corrigendum.publicationDate)}
+                            </p>
+                            <span className="workspace-row__deadline" />
+                            <span />
+                          </article>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                )}
+                </section>
               </div>
-            </section>
-          </div>
+            </div>
+          </details>
         </div>
       ) : null}
 
       {activeSurface === "activity" ? (
-        <div className="tender-surface">
-          <section className="workspace-section">
-            <div className="workspace-section__header">
-              <div>
-                <h2>Activity</h2>
-                <p>
-                  A timeline of the work already recorded in this tender
-                  workspace.
-                </p>
-              </div>
+        <div className="tender-surface standalone-surface activity-page">
+          <header className="standalone-surface__header">
+            <div>
+              <button
+                className="tender-header__back"
+                onClick={() => navigateSurface("overview")}
+                type="button"
+              >
+                ← Back to Overview
+              </button>
+              <h1>Activity</h1>
+            </div>
+            <div className="standalone-surface__actions">
               <Button
-                onClick={() => setShowAuditSummary((value) => !value)}
+                onClick={() => navigateSurface("review")}
+                type="button"
                 variant="secondary"
               >
-                {showAuditSummary ? "Hide summary" : "Show summary"}
+                View audit summary
               </Button>
+              <Select
+                aria-label="Filter activities"
+                onChange={(event) => {
+                  setActivityFilter(event.target.value);
+                  setShowAllActivity(false);
+                }}
+                value={activityFilter}
+              >
+                <option value="ALL">All activities</option>
+                {activityCategories.map((category) => (
+                  <option key={category} value={category}>
+                    {humanizeEnum(category)}
+                  </option>
+                ))}
+              </Select>
             </div>
-            {showAuditSummary ? (
-              <div className="tender-summary-grid">
-                {activityCounts.length === 0 ? (
-                  <Card className="tender-summary-card">
-                    <strong>No summary available</strong>
-                    <p>
-                      No audit categories are currently exposed for this tender.
-                    </p>
-                  </Card>
-                ) : (
-                  activityCounts.map(([category, count]) => (
-                    <Card className="tender-summary-card" key={category}>
-                      <span className="tender-summary-card__label">
-                        {category}
-                      </span>
-                      <strong>{count}</strong>
-                      <p>
-                        {count === 1 ? "Entry" : "Entries"} currently visible in
-                        the activity stream.
-                      </p>
-                    </Card>
-                  ))
-                )}
-              </div>
-            ) : null}
+          </header>
+          <section className="workspace-section">
             <div className="workspace-card activity-timeline">
-              {activityItems.length === 0 ? (
+              {filteredActivityItems.length === 0 ? (
                 <div className="workspace-empty-row">
-                  <p>No tender activity is currently visible.</p>
+                  <p>No tender activity matches this view.</p>
                 </div>
               ) : (
-                <ol className="activity-list">
-                  {activityItems.map((item, index) => (
-                    <li
-                      className="activity-list__item"
-                      key={`${item.category}-${item.title}-${index}`}
-                    >
-                      <div className="activity-list__dot" aria-hidden="true" />
-                      <div className="activity-list__body">
-                        <div className="activity-list__meta">
-                          <span className="status-badge status-badge--info">
-                            {item.category}
-                          </span>
-                          {formatTimestamp(item.occurredAt) === "" ? null : (
-                            <small>{formatTimestamp(item.occurredAt)}</small>
-                          )}
+                <>
+                  <span className="activity-timeline__day">Today</span>
+                  <ol className="activity-list">
+                    {visibleActivityItems.map((item, index) => (
+                      <li
+                        className="activity-list__item"
+                        key={`${item.category}-${item.title}-${index}`}
+                      >
+                        <div
+                          className={`activity-list__dot status-dot--${statusTone(item.category)}`}
+                          aria-hidden="true"
+                        />
+                        <time>{formatActivityTime(item.occurredAt)}</time>
+                        <div className="activity-list__body">
+                          <strong>{item.title}</strong>
+                          <p>{item.description}</p>
                         </div>
-                        <strong>{item.title}</strong>
-                        <p>{item.description}</p>
-                        <Button
-                          onClick={() => navigateSurface(item.stage)}
-                          variant="quiet"
-                        >
-                          Open {surfaceLabels[item.stage]}
-                        </Button>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                      </li>
+                    ))}
+                  </ol>
+                  {filteredActivityItems.length > 7 ? (
+                    <Button
+                      onClick={() => setShowAllActivity((current) => !current)}
+                      type="button"
+                      variant="secondary"
+                    >
+                      {showAllActivity
+                        ? "Show recent activity"
+                        : "View full audit log"}
+                    </Button>
+                  ) : null}
+                </>
               )}
             </div>
           </section>
@@ -3709,8 +3746,7 @@ export function TenderWorkspace({
               </div>
             </div>
           </section>
-
-          <div className="review-columns">
+          <div className="review-columns review-columns--readiness">
             <div className="review-columns__side">
               <div className="tender-embedded-section tender-tools-panel">
                 {currentVersionId !== "" ? (
@@ -3778,35 +3814,46 @@ export function TenderWorkspace({
             </div>
           </div>
 
-          <div
-            className="workspace-card"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              padding: "14px 18px",
-            }}
-          >
-            <Button
-              onClick={() => navigateSurface("draft")}
-              variant="secondary"
-            >
-              Back to Draft
-            </Button>
-            <span
-              style={{ color: "var(--text-secondary)", fontSize: "0.78rem" }}
-            >
-              Final decisions and downloads remain gated by the readiness and
-              package controls above.
-            </span>
+          <div className="workspace-card review-export-bar">
+            <div>
+              <strong>Review &amp; Export</strong>
+              <p>
+                Resolve decision-required items, generate the controlled
+                package, complete approvals, then download.
+              </p>
+            </div>
+            <div className="inline-actions">
+              <Button
+                onClick={() => navigateSurface("draft")}
+                variant="secondary"
+              >
+                Back to Draft
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}
 
-      <Link className="workspace-floating-ai" href={askHref}>
-        <span aria-hidden="true">AI</span>
-        AI Assistant
-      </Link>
+      {activeSurface !== "ask" ? (
+        <ContextualAssistant
+          contextLabel={
+            activeSurface === "draft"
+              ? "Selected draft section"
+              : workspace.title
+          }
+          context={
+            activeSurface === "eligibility"
+              ? "this requirement"
+              : activeSurface === "draft"
+                ? "this section"
+                : "this tender"
+          }
+          openInChatHref={askHref}
+          organisationId={organisationId}
+          tenderId={tenderId}
+          {...(currentVersionId === "" ? {} : { versionId: currentVersionId })}
+        />
+      ) : null}
     </div>
   );
 }

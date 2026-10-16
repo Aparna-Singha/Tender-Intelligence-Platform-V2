@@ -2568,7 +2568,7 @@ model RagIndexRun {
   conversations           RagConversation[]
   answerRuns              RagAnswerRun[]
 
-  @@unique([organisationId, tenderId, sourceMode, sourceFingerprint])
+  @@index([organisationId, tenderId, sourceMode, sourceFingerprint], map: "rag_index_runs_source_fingerprint_idx")
   @@index([organisationId, tenderId, sourceMode, status, createdAt])
   @@map("rag_index_runs")
 }
@@ -2608,10 +2608,12 @@ model RagChunk {
 model RagConversation {
   id              String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organisationId  String                @map("organisation_id") @db.Uuid
-  tenderId        String                @map("tender_id") @db.Uuid
-  tenderVersionId String                @map("tender_version_id") @db.Uuid
-  indexRunId      String                @map("index_run_id") @db.Uuid
+  tenderId        String?               @map("tender_id") @db.Uuid
+  tenderVersionId String?               @map("tender_version_id") @db.Uuid
+  indexRunId      String?               @map("index_run_id") @db.Uuid
   sourceMode      RagSourceMode         @map("source_mode")
+  pinned          Boolean               @default(false)
+  context         String?               @db.VarChar(160)
   title           String                @db.VarChar(160)
   status          RagConversationStatus @default(ACTIVE)
   createdByUserId String                @map("created_by_user_id") @db.Uuid
@@ -2619,7 +2621,7 @@ model RagConversation {
   deletedAt       DateTime?             @map("deleted_at") @db.Timestamptz(3)
   createdAt       DateTime              @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt       DateTime              @updatedAt @map("updated_at") @db.Timestamptz(3)
-  indexRun        RagIndexRun           @relation(fields: [indexRunId], references: [id], onDelete: Restrict)
+  indexRun        RagIndexRun?          @relation(fields: [indexRunId], references: [id], onDelete: Restrict)
   messages        RagMessage[]
   answerRuns      RagAnswerRun[]
 
@@ -2630,8 +2632,9 @@ model RagConversation {
 model RagMessage {
   id                 String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organisationId     String          @map("organisation_id") @db.Uuid
-  tenderId           String          @map("tender_id") @db.Uuid
+  tenderId           String?         @map("tender_id") @db.Uuid
   conversationId     String          @map("conversation_id") @db.Uuid
+  clientKey          String?         @map("client_key") @db.VarChar(120)
   sequence           Int
   role               RagMessageRole
   content            String          @db.Text
@@ -2642,6 +2645,7 @@ model RagMessage {
   completedAnswerRun RagAnswerRun?   @relation("RagAnswerMessage")
 
   @@unique([conversationId, sequence])
+  @@unique([conversationId, clientKey])
   @@index([organisationId, tenderId, conversationId, createdAt])
   @@map("rag_messages")
 }

@@ -13,6 +13,52 @@ const environment = {
 };
 
 describe("Phase 9 tenant and prerequisite boundaries", () => {
+  it("retries a failed answer in place without adding another question", async () => {
+    const database = {
+      $transaction: vi.fn(
+        (callback: (transaction: unknown) => Promise<unknown>) =>
+          callback(database),
+      ),
+      ragAnswerCitation: { deleteMany: vi.fn() },
+      ragAnswerRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "answer-a",
+          status: "FAILED",
+          answerMessageId: null,
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      ragMessage: { delete: vi.fn() },
+    };
+    const jobs = { add: vi.fn() };
+    const service = new RagService(
+      database as never,
+      jobs as never,
+      environment as never,
+    );
+    await expect(
+      service.retryAnswer(
+        "organisation-a",
+        "tender-a",
+        "answer-a",
+        "request-a",
+      ),
+    ).resolves.toEqual({ id: "answer-a" });
+    expect(database.ragMessage.delete).not.toHaveBeenCalled();
+    expect(database.ragAnswerRun.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "QUEUED",
+          answerMessageId: null,
+        }),
+      }),
+    );
+    expect(jobs.add).toHaveBeenCalledWith(
+      "answer-tender-rag",
+      expect.objectContaining({ answerRunId: "answer-a" }),
+      expect.any(Object),
+    );
+  });
   it("does not reveal another organisation's answer", async () => {
     const database = {
       ragAnswerRun: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -66,6 +112,104 @@ describe("Phase 9 tenant and prerequisite boundaries", () => {
     expect(jobs.add).not.toHaveBeenCalled();
   });
 
+  it("reuses an equivalent current company-evidence index", async () => {
+    const currentIndex = { id: "index-a", status: "COMPLETE" };
+    const database = {
+      companyEvidenceFact: { findMany: vi.fn().mockResolvedValue([]) },
+      ragIndexRun: {
+        findFirst: vi.fn().mockResolvedValue(currentIndex),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      tenderVersion: {
+        findFirst: vi.fn().mockResolvedValue({
+          activeEarlyRiskRun: null,
+          activeEligibilityAssessmentRun: null,
+          activeExtractionRun: {
+            id: "extraction-a",
+            invalidatedAt: null,
+            sourceFingerprint: "source-a",
+            status: "COMPLETE",
+          },
+        }),
+      },
+    };
+    const jobs = { add: vi.fn() };
+    const service = new RagService(
+      database as never,
+      jobs as never,
+      environment as never,
+    );
+
+    await expect(
+      service.startIndex(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "TENDER_AND_APPROVED_COMPANY_EVIDENCE",
+        "client-a",
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual(currentIndex);
+    expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("casts the advisory-lock result to a Prisma-supported type", async () => {
+    const created = { id: "index-a", status: "QUEUED" };
+    const database = {
+      $queryRaw: vi.fn((query: { strings: readonly string[] }) => {
+        expect(query.strings.join("?")).toContain("::text AS acquired");
+        return Promise.resolve([{ acquired: "" }]);
+      }),
+      $transaction: vi.fn(
+        (callback: (transaction: unknown) => Promise<unknown>) =>
+          callback(database),
+      ),
+      auditEvent: { create: vi.fn() },
+      companyEvidenceFact: { findMany: vi.fn().mockResolvedValue([]) },
+      ragIndexRun: {
+        create: vi.fn().mockResolvedValue(created),
+        findFirst: vi.fn().mockResolvedValue(null),
+        findUnique: vi.fn().mockResolvedValue(null),
+      },
+      tenderVersion: {
+        findFirst: vi.fn().mockResolvedValue({
+          activeEarlyRiskRun: null,
+          activeEligibilityAssessmentRun: null,
+          activeExtractionRun: {
+            id: "extraction-a",
+            invalidatedAt: null,
+            sourceFingerprint: "source-a",
+            status: "COMPLETE",
+          },
+        }),
+      },
+    };
+    const jobs = { add: vi.fn() };
+    const service = new RagService(
+      database as never,
+      jobs as never,
+      environment as never,
+    );
+
+    await expect(
+      service.startIndex(
+        "organisation-a",
+        "tender-a",
+        "version-a",
+        "TENDER_AND_APPROVED_COMPANY_EVIDENCE",
+        "client-a",
+        "user-a",
+        "request-a",
+      ),
+    ).resolves.toEqual(created);
+    expect(jobs.add).toHaveBeenCalledWith(
+      "index-tender-rag",
+      expect.objectContaining({ indexRunId: "index-a" }),
+      expect.any(Object),
+    );
+  });
+
   it("does not create a conversation from another tenant's active index", async () => {
     const database = {
       ragIndexRun: { findFirst: vi.fn().mockResolvedValue(null) },
@@ -106,6 +250,7 @@ describe("Phase 9 tenant and prerequisite boundaries", () => {
     const createdRun = { id: "answer-a" };
     type TransactionCallback = (transaction: unknown) => Promise<unknown>;
     const database = {
+      $queryRaw: vi.fn(),
       $transaction: vi.fn((callback: TransactionCallback) =>
         callback(database),
       ),
@@ -114,6 +259,7 @@ describe("Phase 9 tenant and prerequisite boundaries", () => {
         findUnique: vi.fn().mockResolvedValue(null),
       },
       ragConversation: {
+        update: vi.fn(),
         findFirst: vi.fn().mockResolvedValue({
           id: "conversation-a",
           indexRun: { invalidatedAt: null, status: "COMPLETE" },

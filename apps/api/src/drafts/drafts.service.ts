@@ -450,8 +450,7 @@ export class DraftsService {
         requestId,
       },
       {
-        attempts: 2,
-        backoff: { delay: 2_000, type: "exponential" },
+        attempts: 1,
         jobId: `draft-generation-${run.id}`,
         removeOnComplete: 100,
       },
@@ -548,7 +547,7 @@ export class DraftsService {
           draftType: prior.draftType,
           evidenceSnapshotId: prior.evidenceSnapshotId,
           extractionRunId: prior.extractionRunId,
-          idempotencyKey: `${prior.idempotencyKey}:retry:${randomUUID()}`,
+          idempotencyKey: draftRetryIdempotencyKey(organisationId, tenderId),
           model: prior.model,
           organisationId,
           promptPolicyVersion: prior.promptPolicyVersion,
@@ -636,8 +635,7 @@ export class DraftsService {
         requestId,
       },
       {
-        attempts: 2,
-        backoff: { delay: 2_000, type: "exponential" },
+        attempts: 1,
         jobId: `draft-generation-${retried.id}`,
         removeOnComplete: 100,
       },
@@ -1701,6 +1699,14 @@ export class DraftsService {
       },
     });
   }
+}
+
+export function draftRetryIdempotencyKey(
+  organisationId: string,
+  tenderId: string,
+  nonce = randomUUID(),
+): string {
+  return `${organisationId}:${tenderId}:retry:${nonce}`;
 }
 
 function reviewStateForAction(

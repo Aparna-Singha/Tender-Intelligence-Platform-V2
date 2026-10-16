@@ -1,6 +1,7 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import { ContextualAssistant } from "./contextual-assistant";
+
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
@@ -12,13 +13,13 @@ import {
   Field,
   FormMessage,
   Input,
+  PageHeader,
   Select,
   Table,
   humanizeEnum,
 } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
-import { CompanyWorkspaceHeader } from "./company-workspace-nav";
 
 type SettingsSection =
   "organisation" | "people-access" | "security" | "preferences";
@@ -78,7 +79,7 @@ interface ResumeResponse {
 }
 
 const sectionLabels: Readonly<Record<SettingsSection, string>> = {
-  organisation: "Profile",
+  organisation: "Organisation",
   "people-access": "People & access",
   security: "Security",
   preferences: "Preferences",
@@ -195,7 +196,9 @@ export function SettingsWorkspace({
       section === "preferences"
     ) {
       setActiveSection(section);
+      return;
     }
+    setActiveSection("organisation");
   }, [searchParams]);
 
   const currentMembership = memberships.find(
@@ -291,7 +294,10 @@ export function SettingsWorkspace({
 
   return (
     <div className="workspace-page settings-page">
-      <CompanyWorkspaceHeader organisationId={organisationId} />
+      <PageHeader
+        description="Organisation and workspace configuration."
+        title="Settings"
+      />
 
       <div className="settings-layout">
         <aside className="workspace-card settings-rail">
@@ -305,17 +311,6 @@ export function SettingsWorkspace({
                   key={section}
                 >
                   <span>{sectionLabels[section]}</span>
-                  {section === "people-access" && members.length > 0 ? (
-                    <small>{members.length} member(s)</small>
-                  ) : section === "security" ? (
-                    <small>{activeSessions.length} active session(s)</small>
-                  ) : section === "organisation" && profile !== null ? (
-                    <small>
-                      {profile.progress.completed_steps.length}/8 sections ready
-                    </small>
-                  ) : section === "preferences" && profile !== null ? (
-                    <small>{humanizeEnum(profile.display_mode)}</small>
-                  ) : null}
                 </Link>
               ),
             )}
@@ -334,91 +329,66 @@ export function SettingsWorkspace({
 
           {activeSection === "organisation" && organisation !== null ? (
             <section className="workspace-section">
-              <Card className="settings-panel">
+              <Card className="settings-panel settings-organisation-panel">
                 <div className="section-header">
                   <div>
-                    <h2>Company profile</h2>
+                    <h2>Organisation</h2>
                     <p>
-                      Business details, registrations, experience, and workflow
-                      preferences remain grounded in the current structured
-                      profile flow.
+                      Manage the organisation information used across tenders.
+                    </p>
+                  </div>
+                </div>
+                <div className="settings-organisation-main">
+                  <div className="settings-organisation-fields">
+                    <label className="readonly-field">
+                      <span>Organisation name</span>
+                      <Input readOnly value={organisation.name} />
+                    </label>
+                    <label className="readonly-field">
+                      <span>Organisation type</span>
+                      <Input readOnly value={humanizeEnum(organisation.type)} />
+                    </label>
+                    <label className="readonly-field">
+                      <span>Primary business category</span>
+                      <Input
+                        readOnly
+                        value={listValue(profile?.values.business_models)}
+                      />
+                    </label>
+                  </div>
+                  <Link
+                    className="settings-people-callout"
+                    href={`/settings/${organisationId}?section=people-access`}
+                  >
+                    <strong>People &amp; access</strong>
+                    <span>
+                      Invite members and manage roles from this section.
+                    </span>
+                  </Link>
+                </div>
+                <div className="settings-organisation-profile">
+                  <div>
+                    <h3>Organisation profile</h3>
+                    <p>
+                      The full organisation profile and evidence-backed company
+                      details are maintained separately from account settings.
                     </p>
                   </div>
                   <Link
                     className="button button--secondary"
-                    href={`/settings/${organisationId}?section=preferences`}
-                  >
-                    View preferences
-                  </Link>
-                </div>
-                <div className="settings-form-grid">
-                  <label className="readonly-field">
-                    <span>Organisation name</span>
-                    <Input readOnly value={organisation.name} />
-                  </label>
-                  <label className="readonly-field">
-                    <span>Organisation type</span>
-                    <Input readOnly value={humanizeEnum(organisation.type)} />
-                  </label>
-                  <label className="readonly-field">
-                    <span>Registered location</span>
-                    <Input
-                      readOnly
-                      value={textValue(profile?.values.registered_location)}
-                    />
-                  </label>
-                  <label className="readonly-field">
-                    <span>Website</span>
-                    <Input
-                      readOnly
-                      value={textValue(profile?.values.website)}
-                    />
-                  </label>
-                  <label className="readonly-field">
-                    <span>Business models</span>
-                    <Input
-                      readOnly
-                      value={listValue(profile?.values.business_models)}
-                    />
-                  </label>
-                  <label className="readonly-field">
-                    <span>Years of experience</span>
-                    <Input
-                      readOnly
-                      value={textValue(profile?.values.years_experience)}
-                    />
-                  </label>
-                </div>
-                <div className="settings-note">
-                  Company profile progress:{" "}
-                  {profile === null
-                    ? "Unavailable"
-                    : `${profile.progress.completed_steps.length} of 8 steps complete`}
-                  . Editing still happens in the guided profile flow so the
-                  stored values remain consistent.
-                </div>
-                <div className="inline-actions">
-                  <Link
-                    className="button button--secondary"
                     href={`/onboarding/${organisationId}`}
                   >
-                    Edit company profile
-                  </Link>
-                  <Link
-                    className="button button--quiet"
-                    href={`/documents/${organisationId}`}
-                  >
-                    Open documents
+                    Open organisation profile
                   </Link>
                 </div>
-                <p className="settings-field-hint">
-                  Workspace created {formatTimestamp(organisation.createdAt)}.
-                  Current role:{" "}
-                  {currentRole === ""
-                    ? "Unavailable"
-                    : humanizeEnum(currentRole)}
-                  .
-                </p>
+                <div className="settings-save-row">
+                  <Button disabled type="button">
+                    Save changes
+                  </Button>
+                  <small>
+                    Organisation details are updated through the guided profile.
+                  </small>
+                </div>
               </Card>
             </section>
           ) : null}
@@ -616,9 +586,8 @@ export function SettingsWorkspace({
                   <div>
                     <h2>Security controls</h2>
                     <p>
-                      Account session visibility is available here. Broader
-                      workspace security controls are not part of the current
-                      product contract.
+                      Review organisation session activity here. More account
+                      security settings are available from your profile.
                     </p>
                   </div>
                   <Link className="button button--secondary" href="/account">
@@ -700,15 +669,11 @@ export function SettingsWorkspace({
         </div>
       </div>
 
-      <Link
-        className="workspace-floating-ai"
-        href={assistantHref(organisationId)}
-      >
-        <span>
-          <Sparkles aria-hidden="true" size={16} />
-        </span>
-        AI Assistant
-      </Link>
+      <ContextualAssistant
+        context="settings"
+        organisationId={organisationId}
+        openInChatHref={assistantHref(organisationId)}
+      />
     </div>
   );
 }

@@ -1,5 +1,5 @@
-export const EVIDENCE_COMPARISON_POLICY_VERSION = "deterministic-evidence-v1";
-export const EVIDENCE_NORMALISATION_POLICY_VERSION = "manual-cited-facts-v1";
+export const EVIDENCE_COMPARISON_POLICY_VERSION = "deterministic-evidence-v2";
+export const EVIDENCE_NORMALISATION_POLICY_VERSION = "cited-facts-v2";
 
 export const eligibilityStates = [
   "VERIFIED",
@@ -99,7 +99,11 @@ export function proposeEligibilityAssessment(
   if (requirement.threshold !== undefined) {
     const numeric = usable.filter(
       (item): item is ComparisonEvidence & { value: number } =>
-        typeof item.value === "number",
+        typeof item.value === "number" &&
+        item.documentVerified &&
+        (item.sourceKind === "TURNOVER" ||
+          (item.sourceKind === "MANUAL_DOCUMENT_FACT" &&
+            item.citationId !== undefined)),
     );
     if (numeric.length === 0)
       return review(
@@ -108,8 +112,10 @@ export function proposeEligibilityAssessment(
       );
     const compatible = numeric.filter(
       (item) =>
-        requirement.threshold?.unit === undefined ||
-        item.valueUnit === requirement.threshold.unit,
+        (requirement.threshold?.unit === undefined ||
+          item.valueUnit === requirement.threshold.unit) &&
+        (requirement.threshold?.currency === undefined ||
+          item.valueUnit === requirement.threshold.currency),
     );
     if (compatible.length === 0)
       return review(
@@ -158,16 +164,10 @@ export function proposeEligibilityAssessment(
     };
 
   if (usable.some((item) => item.sourceKind === "DOCUMENT_METADATA"))
-    return {
-      confidence: 0.45,
-      directEvidenceIndexes: [],
-      policyRule: "DOCUMENT_EXISTS_ONLY",
-      rationale:
-        "A relevant approved document exists, but its detailed scope is not established.",
-      state: "LIKELY_MET",
-      uncertainty:
-        "Document existence alone is not proof of detailed compliance.",
-    };
+    return review(
+      "DOCUMENT_EXISTS_ONLY",
+      "A relevant approved document exists, but its detailed scope is not established. Review extracted cited facts before deciding this requirement.",
+    );
 
   return review(
     "UNSUPPORTED_REQUIREMENT",

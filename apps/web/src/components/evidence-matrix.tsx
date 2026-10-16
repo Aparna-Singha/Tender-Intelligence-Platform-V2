@@ -62,8 +62,18 @@ interface CompanyDocumentDetails extends CompanyDocument {
 }
 interface EvidenceFact {
   currentVersion: {
-    citations: readonly { documentName: string; id: string }[];
+    citations: readonly {
+      boundedExcerpt: string;
+      documentName: string;
+      id: string;
+      pageNumber: number | null;
+    }[];
+    dateValue: string | null;
+    numberValue: string | null;
     reviewState: string;
+    scope: string | null;
+    textValue: string | null;
+    validUntil: string | null;
     versionNumber: number;
   } | null;
   factType: string;
@@ -100,6 +110,7 @@ export function EvidenceMatrix({
   currentAssessmentRunId = null,
   focusRequest = null,
   organisationId,
+  presentation = "full",
   tenderId,
   versionId,
 }: {
@@ -110,6 +121,7 @@ export function EvidenceMatrix({
     readonly token: number;
   } | null;
   readonly organisationId: string;
+  readonly presentation?: "focused" | "full";
   readonly tenderId: string;
   readonly versionId: string;
 }): JSX.Element {
@@ -188,11 +200,19 @@ export function EvidenceMatrix({
   }
   useEffect(() => {
     void loadRuns();
-    void loadDocuments();
-    void loadFacts();
+    if (presentation === "full") {
+      void loadDocuments();
+      void loadFacts();
+    }
     const timer = window.setInterval(() => void loadRuns(), 5000);
     return () => window.clearInterval(timer);
-  }, [currentAssessmentRunId, organisationId, tenderId, versionId]);
+  }, [
+    currentAssessmentRunId,
+    organisationId,
+    presentation,
+    tenderId,
+    versionId,
+  ]);
   useEffect(() => {
     void loadMatrix();
   }, [runId, state]);
@@ -354,6 +374,12 @@ export function EvidenceMatrix({
             run.invalidatedAt == null && run.id === currentAssessmentRunId,
         ) ?? null);
   const active = runs.find((run) => run.id === runId);
+  const focusedItems =
+    focusRequest?.assessmentId === undefined
+      ? (matrix?.items ?? [])
+      : (matrix?.items.filter(
+          (item) => item.id === focusRequest.assessmentId,
+        ) ?? []);
 
   useEffect(() => {
     if (focusRequest === null) return;
@@ -368,7 +394,7 @@ export function EvidenceMatrix({
           : `assessment-review-${focusRequest.assessmentId}`,
       );
       if (target instanceof HTMLElement) {
-        target.scrollIntoView({ block: "start" });
+        target.scrollIntoView?.({ block: "start" });
         target.focus();
       }
       return;
@@ -376,11 +402,121 @@ export function EvidenceMatrix({
     if (focusRequest.mode === "capture") {
       const target = document.getElementById("evidence-fact-type-input");
       if (target instanceof HTMLElement) {
-        target.scrollIntoView({ block: "start" });
+        target.scrollIntoView?.({ block: "start" });
         target.focus();
       }
     }
   }, [currentRun?.id, focusRequest, matrix, runId]);
+
+  if (presentation === "focused")
+    return (
+      <section aria-labelledby="focused-evidence-heading">
+        <h2 id="focused-evidence-heading">Review evidence</h2>
+        <p>
+          Review the current requirement, its cited sources, and the proposed
+          assessment before recording a decision.
+        </p>
+        <p aria-live="polite">{message}</p>
+        {focusedItems.length === 0 ? (
+          <p>Current evidence for this requirement is loading.</p>
+        ) : (
+          focusedItems.map((item) => (
+            <article
+              id={`assessment-review-${item.id}`}
+              key={item.id}
+              tabIndex={0}
+            >
+              <h3>{item.structuredRequirement.title}</h3>
+              <p>{item.structuredRequirement.normalizedStatement}</p>
+              <p>
+                <strong>Status:</strong> {humanizeEnum(item.currentState)}
+              </p>
+              <p>{item.proposedRationale}</p>
+              <h4>Source in tender</h4>
+              <blockquote>
+                <p>{item.tenderCitation.boundedExcerpt}</p>
+                <cite>
+                  {item.tenderCitation.documentName}
+                  {item.tenderCitation.pageNumber === null
+                    ? ""
+                    : `, page ${item.tenderCitation.pageNumber}`}
+                </cite>
+                <button
+                  onClick={() => void openTenderSource(item)}
+                  type="button"
+                >
+                  View tender source
+                </button>
+              </blockquote>
+              <h4>Current evidence</h4>
+              {item.evidenceLinks.length === 0 ? (
+                <p>No supporting company evidence is linked yet.</p>
+              ) : (
+                item.evidenceLinks.map((link, index) => (
+                  <blockquote key={`${item.id}:${index}`}>
+                    {link.evidenceCitation === null ? (
+                      <p>Linked evidence needs source review.</p>
+                    ) : (
+                      <>
+                        <p>{link.evidenceCitation.boundedExcerpt}</p>
+                        <cite>
+                          {link.evidenceCitation.documentName}
+                          {link.evidenceCitation.pageNumber === null
+                            ? ""
+                            : `, page ${link.evidenceCitation.pageNumber}`}
+                        </cite>
+                        <button
+                          onClick={() =>
+                            void openCompanySource(
+                              link.evidenceCitation?.documentId ?? "",
+                            )
+                          }
+                          type="button"
+                        >
+                          View company evidence
+                        </button>
+                      </>
+                    )}
+                  </blockquote>
+                ))
+              )}
+              <form onSubmit={(event) => void reviewAssessment(event, item.id)}>
+                <label>
+                  Review decision
+                  <select name="action" required>
+                    <option value="REQUEST_HUMAN_REVIEW">
+                      Request human review
+                    </option>
+                    <option value="ACCEPT_PROPOSAL">Accept proposal</option>
+                    <option value="MARK_LIKELY_MET">Mark likely met</option>
+                    <option value="MARK_MISSING">Mark missing</option>
+                    <option value="MARK_CONFLICT">Mark conflict</option>
+                    <option value="MARK_VERIFIED">Mark verified</option>
+                    <option value="MARK_NOT_APPLICABLE">
+                      Mark not applicable
+                    </option>
+                    <option value="RESOLVE_CONFLICT">
+                      Send conflict for human review
+                    </option>
+                    <option value="REOPEN">Reopen</option>
+                  </select>
+                </label>
+                <label>
+                  Rationale
+                  <textarea
+                    minLength={10}
+                    maxLength={2000}
+                    name="rationale"
+                    required
+                  />
+                </label>
+                <button type="submit">Save review</button>
+              </form>
+            </article>
+          ))
+        )}
+      </section>
+    );
 
   return (
     <section aria-labelledby="matrix-heading" id="evidence-matrix-panel">
@@ -392,9 +528,10 @@ export function EvidenceMatrix({
       <details>
         <summary>Why evidence matters</summary>
         <p>
-          Document existence alone may not prove detailed compliance. OCR and
-          automatic company-document fact extraction are unavailable, so use
-          reviewed, manually captured facts with exact source locations.
+          Document existence alone may not prove detailed compliance. Review
+          automatically extracted facts and their exact source locations before
+          accepting them. Manually capture a bounded fact only when extraction
+          did not find the required evidence.
         </p>
       </details>
       <button onClick={() => void start()} type="button">
@@ -447,9 +584,16 @@ export function EvidenceMatrix({
         <button type="submit">Save for reviewer confirmation</button>
       </form>
       <h3>Company evidence facts</h3>
-      {facts.length === 0 && <p>No manually captured evidence facts.</p>}
+      {facts.length === 0 && (
+        <p>No extracted or manually captured evidence facts.</p>
+      )}
       {facts.map((fact) => (
-        <article key={fact.id}>
+        <article
+          className={
+            fact.factType.endsWith("_CONFLICT") ? "warning" : undefined
+          }
+          key={fact.id}
+        >
           <h4>{fact.factType.replaceAll("_", " ")}</h4>
           <p>
             Version {fact.currentVersion?.versionNumber ?? "—"} ·{" "}
@@ -461,8 +605,38 @@ export function EvidenceMatrix({
             Citations: {fact.currentVersion?.citations.length ?? 0}
             {fact.invalidatedAt === null ? "" : " · INVALIDATED"}
           </p>
+          {fact.currentVersion !== null && (
+            <>
+              <p>
+                <strong>Extracted value:</strong>{" "}
+                {fact.currentVersion.textValue ??
+                  fact.currentVersion.numberValue ??
+                  fact.currentVersion.dateValue ??
+                  "Not available"}
+              </p>
+              {fact.currentVersion.scope !== null && (
+                <p>{fact.currentVersion.scope}</p>
+              )}
+              {fact.currentVersion.validUntil !== null && (
+                <p>
+                  Valid until:{" "}
+                  {new Date(
+                    fact.currentVersion.validUntil,
+                  ).toLocaleDateString()}
+                </p>
+              )}
+            </>
+          )}
           {fact.currentVersion?.citations.map((citation) => (
-            <p key={citation.id}>{citation.documentName}</p>
+            <blockquote key={citation.id}>
+              <p>{citation.boundedExcerpt}</p>
+              <cite>
+                {citation.documentName}
+                {citation.pageNumber === null
+                  ? ""
+                  : `, page ${citation.pageNumber}`}
+              </cite>
+            </blockquote>
           ))}
           {fact.invalidatedAt === null && (
             <form onSubmit={(event) => void reviewFact(event, fact.id)}>
@@ -470,7 +644,9 @@ export function EvidenceMatrix({
                 Evidence review action
                 <select name="action" required>
                   <option value="REQUEST_HUMAN_REVIEW">Request review</option>
-                  <option value="ACCEPT">Accept cited fact</option>
+                  {!fact.factType.endsWith("_CONFLICT") && (
+                    <option value="ACCEPT">Accept cited fact</option>
+                  )}
                   <option value="REJECT">Reject</option>
                   <option value="INVALIDATE">Invalidate</option>
                 </select>

@@ -1,5 +1,5 @@
 export const PARSER_POLICY_VERSION = "deterministic-v1";
-export const STRUCTURING_POLICY_VERSION = "rules-v1";
+export const STRUCTURING_POLICY_VERSION = "rules-v4";
 
 export type SourceFormat = "CSV" | "DOCX" | "PDF" | "XLSX" | "ZIP_MEMBER";
 export type Confidence = "HIGH" | "MEDIUM" | "LOW" | "HUMAN_REVIEW_REQUIRED";
@@ -150,11 +150,19 @@ export interface ExtractedFieldCandidate {
 export interface RequirementCandidate {
   readonly anchor: SourceAnchor;
   readonly category: string;
+  readonly conditionText?: string;
   readonly confidence: Confidence;
   readonly findingState: "FOUND" | "AMBIGUOUS" | "HUMAN_REVIEW_REQUIRED";
   readonly normalizedStatement: string;
   readonly obligation: "MANDATORY" | "OPTIONAL" | "CONDITIONAL" | "UNSPECIFIED";
   readonly sourceWording: string;
+  readonly threshold?: {
+    readonly currency?: string;
+    readonly numericValue: number;
+    readonly operator: string;
+    readonly textValue: string;
+    readonly unit?: string;
+  };
   readonly title: string;
 }
 
@@ -184,8 +192,11 @@ const sectionRules: readonly [RegExp, string][] = [
 
 const requirementRules: readonly [RegExp, string][] = [
   [/\b(turnover)\b/iu, "ANNUAL_TURNOVER"],
-  [/\b(experience|similar work|past performance)\b/iu, "EXPERIENCE"],
-  [/\b(certification|iso certificate)\b/iu, "CERTIFICATION"],
+  [
+    /\b(experience|similar work|past performance|purchase order|po\s*\+\s*invoice)\b/iu,
+    "EXPERIENCE",
+  ],
+  [/\b(certification|iso(?:\s*9001)?(?:\s+certificate)?)\b/iu, "CERTIFICATION"],
   [/\b(licen[cs]e)\b/iu, "LICENCE"],
   [/\b(oem|manufacturer authori[sz]ation)\b/iu, "OEM_AUTHORISATION"],
   [/\b(emd|bid security)\b/iu, "EMD"],
@@ -228,36 +239,124 @@ export function extractDeterministicRequirements(
   anchorFor: (block: ParsedBlock) => SourceAnchor,
 ): readonly RequirementCandidate[] {
   return blocks.flatMap((block) => {
-    if (
-      !/\b(must|shall|required|should|may need to|is to be)\b/iu.test(
-        block.text,
-      )
-    )
-      return [];
-    const category =
-      requirementRules.find(([pattern]) => pattern.test(block.text))?.[1] ??
-      "OTHER";
-    const obligation = /\b(must|shall|required)\b/iu.test(block.text)
-      ? "MANDATORY"
-      : /\b(if|where applicable|subject to|unless)\b/iu.test(block.text)
-        ? "CONDITIONAL"
-        : "OPTIONAL";
-    const ambiguous = /\b(may|normally|generally|as applicable)\b/iu.test(
-      block.text,
+    const sentenceCandidates = block.text
+      .split(/(?<=[.!?])\s+(?=[A-Z0-9])/u)
+      .map((sentence) => sentence.trim())
+      .filter(isRequirementCandidateText);
+    const requirementTexts =
+      sentenceCandidates.length > 1
+        ? sentenceCandidates
+        : isRequirementCandidateText(block.text)
+          ? [block.text.trim()]
+          : [];
+    return requirementTexts.map((requirementText) =>
+      extractRequirementCandidate(block, requirementText, anchorFor(block)),
     );
-    return [
-      {
-        anchor: anchorFor(block),
-        category,
-        confidence: ambiguous ? "LOW" : block.confidence,
-        findingState: ambiguous ? "AMBIGUOUS" : "FOUND",
-        normalizedStatement: block.text.trim().slice(0, 4000),
-        obligation,
-        sourceWording: block.text.slice(0, 8000),
-        title: `${category.replaceAll("_", " ")} requirement`.slice(0, 300),
-      },
-    ];
   });
+}
+
+function isRequirementCandidateText(value: string): boolean {
+  const text = value.trim();
+  const structuredRequirement =
+    /^(?:experience|turnover|quality|oem authori[sz]ation)\s*:/iu.test(text);
+  const labelledRequirement =
+    /^(?:mandatory|optional|conditional)\s+requirement\s*:/iu.test(text);
+  const documentTableRequirement =
+    /\b(?:gst registration|udyam\/?msme|incorporation certificate|po\s*\+\s*invoice|turnover certificate|iso\s*9001|oem authori[sz]ation|declarations?)\b.*\b(?:mandatory|conditional|evidence|if claiming|unless)\b/iu.test(
+      text,
+    );
+  const conditionalRequirement =
+    /\b(?:relaxation|only when|only if|provided that)\b/iu.test(text);
+  const bindingDeliveryRequirement =
+    /\bdelivery(?:\s+(?:period|schedule))?\s+(?:is|will be|shall be|must be|required(?:\s+within|\s+in|\s+by)?)\b/iu.test(
+      text,
+    );
+  return (
+    structuredRequirement ||
+    labelledRequirement ||
+    documentTableRequirement ||
+    conditionalRequirement ||
+    bindingDeliveryRequirement ||
+    /\b(must|shall|required|mandatory|should|may need to|is to be)\b/iu.test(
+      text,
+    )
+  );
+}
+
+function extractRequirementCandidate(
+  block: ParsedBlock,
+  requirementText: string,
+  anchor: SourceAnchor,
+): RequirementCandidate {
+  const structuredRequirement =
+    /^(?:experience|turnover|quality|oem authori[sz]ation)\s*:/iu.test(
+      requirementText,
+    );
+  const category =
+    requirementRules.find(([pattern]) => pattern.test(requirementText))?.[1] ??
+    "OTHER";
+  const conditional =
+    /\b(if|conditional|where applicable|subject to|unless|only when|only if|provided that)\b/iu.test(
+      requirementText,
+    );
+  const explicitlyOptional = /^optional\s+requirement\s*:/iu.test(
+    requirementText,
+  );
+  const bindingDeliveryRequirement =
+    /\bdelivery(?:\s+(?:period|schedule))?\s+(?:is|will be|shall be|must be|required(?:\s+within|\s+in|\s+by)?)\b/iu.test(
+      requirementText,
+    );
+  const obligation = conditional
+    ? "CONDITIONAL"
+    : explicitlyOptional
+      ? "OPTIONAL"
+      : /\b(must|shall|required|mandatory)\b/iu.test(requirementText) ||
+          bindingDeliveryRequirement ||
+          structuredRequirement
+        ? "MANDATORY"
+        : "OPTIONAL";
+  const ambiguous = /\b(may|normally|generally|as applicable)\b/iu.test(
+    requirementText,
+  );
+  const threshold = extractRequirementThreshold(requirementText);
+  return {
+    anchor,
+    category,
+    confidence: ambiguous ? "LOW" : block.confidence,
+    ...(conditional ? { conditionText: requirementText } : {}),
+    findingState: ambiguous ? "AMBIGUOUS" : "FOUND",
+    normalizedStatement: requirementText.slice(0, 4000),
+    obligation,
+    sourceWording: requirementText.slice(0, 8000),
+    ...(threshold === null ? {} : { threshold }),
+    title: `${category.replaceAll("_", " ")} requirement`.slice(0, 300),
+  };
+}
+
+function extractRequirementThreshold(
+  value: string,
+): NonNullable<RequirementCandidate["threshold"]> | null {
+  const match =
+    /\b(at least|more than|greater than|not less than|minimum(?: of)?|up to|at most|less than)\s+(?:(INR|₹)\s*)?([\d,]+(?:\.\d+)?)\b/iu.exec(
+      value,
+    );
+  if (match?.[1] === undefined || match[3] === undefined) return null;
+  const numericValue = Number(match[3].replaceAll(",", ""));
+  if (!Number.isFinite(numericValue)) return null;
+  const phrase = match[1].toLowerCase();
+  const operator = /up to|at most|less than/u.test(phrase)
+    ? phrase === "less than"
+      ? "<"
+      : "<="
+    : /more than|greater than/u.test(phrase)
+      ? ">"
+      : ">=";
+  return {
+    ...(match[2] === undefined ? {} : { currency: "INR" }),
+    numericValue,
+    operator,
+    textValue: match[0],
+  };
 }
 
 export function extractDeterministicFields(
@@ -267,7 +366,16 @@ export function extractDeterministicFields(
   const patterns: readonly [string, RegExp][] = [
     [
       "SUBMISSION_DEADLINE",
-      /\b(?:submission|bid)\s+(?:deadline|end\s+date(?:\/time)?)\s*[:-]?\s*([^\n.;]{4,100})/iu,
+      /\b(?:submission|bid)\s+(?:deadline|end(?:\s+date(?:\/time)?)?)\s*[:-]?\s*([^\n.;]{4,100})/iu,
+    ],
+    ["BUYER_NAME", /\bbuyer\s*[:-]\s*([^\n.;]{2,300})/iu],
+    [
+      "PROCUREMENT_TITLE",
+      /\b(?:procurement|tender title)\s*[:-]\s*([^\n.;]{2,300})/iu,
+    ],
+    [
+      "ESTIMATED_VALUE",
+      /\b(?:estimated|indicative|tender)\s+value\s*[:-]\s*([^\n.;]{2,100})/iu,
     ],
     ["EMD_WORDING", /\b(?:emd|bid security)\s*[:-]\s*([^\n.;]{2,200})/iu],
     [
@@ -279,33 +387,107 @@ export function extractDeterministicFields(
       /\b(?:minimum\s+)?experience\s*[:-]\s*([^\n.;]{2,200})/iu,
     ],
   ];
-  return blocks.flatMap((block) =>
-    patterns.flatMap(([fieldType, pattern]) => {
+  const adjacentLabels: readonly [string, RegExp][] = [
+    [
+      "SUBMISSION_DEADLINE",
+      /^(?:(?:original|revised)\s+)?(?:submission|bid)\s+(?:deadline|end(?:\s+date(?:\/time)?)?)$/iu,
+    ],
+    ["BUYER_NAME", /^buyer$/iu],
+    ["PROCUREMENT_TITLE", /^(?:procurement|tender title)$/iu],
+    ["ESTIMATED_VALUE", /^(?:estimated|indicative|tender)\s+value$/iu],
+    ["EMD_WORDING", /^(?:emd|bid security)$/iu],
+    [
+      "PERFORMANCE_SECURITY",
+      /^(?:performance security|performance bank guarantee|pbg)$/iu,
+    ],
+    ["DELIVERY_PERIOD", /^(?:delivery|delivery period)$/iu],
+  ];
+  const extracted: ExtractedFieldCandidate[] = [];
+  blocks.forEach((block, index) => {
+    patterns.forEach(([fieldType, pattern]) => {
       const match = pattern.exec(block.text);
-      if (match?.[1] === undefined) return [];
+      if (match?.[1] === undefined) return;
       const normalizedTextValue = match[1].trim();
       const normalizedDateValue =
         fieldType === "SUBMISSION_DEADLINE"
           ? normalizeTenderCalendarDate(normalizedTextValue)
           : null;
-      return [
-        {
-          anchor: anchorFor(block),
-          confidence: block.confidence,
-          fieldType,
-          findingState: "FOUND",
-          ...(normalizedDateValue === null ? {} : { normalizedDateValue }),
-          normalizedTextValue,
-          sourceWording: block.text,
-        },
-      ];
-    }),
+      if (fieldType === "SUBMISSION_DEADLINE" && normalizedDateValue === null)
+        return;
+      extracted.push({
+        anchor: anchorFor(block),
+        confidence: block.confidence,
+        fieldType,
+        findingState: "FOUND",
+        ...(normalizedDateValue === null ? {} : { normalizedDateValue }),
+        normalizedTextValue,
+        sourceWording: block.text,
+      });
+    });
+    const next = blocks[index + 1];
+    if (next === undefined) return;
+    adjacentLabels.forEach(([fieldType, labelPattern]) => {
+      if (!labelPattern.test(block.text.trim())) return;
+      const normalizedTextValue = next.text.trim();
+      const normalizedDateValue =
+        fieldType === "SUBMISSION_DEADLINE"
+          ? normalizeTenderCalendarDate(normalizedTextValue)
+          : null;
+      if (fieldType === "SUBMISSION_DEADLINE" && normalizedDateValue === null)
+        return;
+      extracted.push({
+        anchor: anchorFor(next),
+        confidence: next.confidence,
+        fieldType,
+        findingState: "FOUND",
+        ...(normalizedDateValue === null ? {} : { normalizedDateValue }),
+        normalizedTextValue,
+        sourceWording: next.text,
+      });
+    });
+  });
+  return extracted.filter(
+    (candidate, index, all) =>
+      all.findIndex(
+        (other) =>
+          other.fieldType === candidate.fieldType &&
+          other.normalizedTextValue === candidate.normalizedTextValue &&
+          other.anchor.documentId === candidate.anchor.documentId,
+      ) === index,
   );
 }
 
 const INDIA_TIMEZONE_OFFSET_MINUTES = 330;
 const TENDER_DATE_TIME_PATTERN =
   /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})(?:\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM)?)?$/iu;
+const TENDER_TEXT_DATE_TIME_PATTERN =
+  /^(\d{1,2})\s+([A-Z]+)\s+(\d{2,4})(?:,?\s+(\d{1,2})(?::(\d{2}))(?::(\d{2}))?\s*(AM|PM|IST)?)?$/iu;
+const MONTH_BY_NAME: Readonly<Record<string, number>> = {
+  APR: 4,
+  APRIL: 4,
+  AUG: 8,
+  AUGUST: 8,
+  DEC: 12,
+  DECEMBER: 12,
+  FEB: 2,
+  FEBRUARY: 2,
+  JAN: 1,
+  JANUARY: 1,
+  JUL: 7,
+  JULY: 7,
+  JUN: 6,
+  JUNE: 6,
+  MAR: 3,
+  MARCH: 3,
+  MAY: 5,
+  NOV: 11,
+  NOVEMBER: 11,
+  OCT: 10,
+  OCTOBER: 10,
+  SEP: 9,
+  SEPT: 9,
+  SEPTEMBER: 9,
+};
 
 interface ParsedTenderDateTimeParts {
   readonly day: number;
@@ -346,16 +528,22 @@ function parseTenderDateTimeParts(
   value: string,
 ): ParsedTenderDateTimeParts | null {
   const normalized = value.replace(/\s+/g, " ").trim();
-  const match = TENDER_DATE_TIME_PATTERN.exec(normalized);
+  const numericMatch = TENDER_DATE_TIME_PATTERN.exec(normalized);
+  const textMatch = TENDER_TEXT_DATE_TIME_PATTERN.exec(normalized);
+  const match = numericMatch ?? textMatch;
   if (match === null) return null;
   const day = Number(match[1]);
-  const month = Number(match[2]);
+  const month =
+    numericMatch === null
+      ? (MONTH_BY_NAME[match[2]?.toUpperCase() ?? ""] ?? Number.NaN)
+      : Number(match[2]);
   const rawYear = Number(match[3]);
   const year = match[3]?.length === 2 ? 2000 + rawYear : rawYear;
   let hour = Number(match[4] ?? "0");
   const minute = Number(match[5] ?? "0");
   const second = Number(match[6] ?? "0");
-  const meridiem = match[7]?.toUpperCase() ?? null;
+  const suffix = match[7]?.toUpperCase() ?? null;
+  const meridiem = suffix === "IST" ? null : suffix;
   if (
     !Number.isInteger(day) ||
     !Number.isInteger(month) ||

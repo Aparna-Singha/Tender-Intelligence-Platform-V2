@@ -2,6 +2,7 @@ import { HttpException, HttpStatus, type ArgumentsHost } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 
 import { ApiExceptionFilter } from "../src/common/api-exception.filter.js";
+import { DocumentUploadError } from "../src/documents/document-upload.error.js";
 import { FinalReadinessError } from "../src/final-readiness/final-readiness.error.js";
 
 interface MockHost {
@@ -129,6 +130,28 @@ describe("ApiExceptionFilter", () => {
       error: {
         code: "FINAL_READINESS_RUN_STALE",
         message: "The final-readiness run is no longer current.",
+      },
+      request_id: "request-123",
+    });
+  });
+
+  it("preserves the bounded duplicate-document conflict without exposing identifiers", () => {
+    const { host, send, status } = createHost();
+
+    new ApiExceptionFilter().catch(
+      new DocumentUploadError(
+        "DOCUMENT_DUPLICATE",
+        "This exact document has already been uploaded.",
+        HttpStatus.CONFLICT,
+      ),
+      host,
+    );
+
+    expect(status).toHaveBeenCalledWith(HttpStatus.CONFLICT);
+    expect(send).toHaveBeenCalledWith({
+      error: {
+        code: "DOCUMENT_DUPLICATE",
+        message: "This exact document has already been uploaded.",
       },
       request_id: "request-123",
     });

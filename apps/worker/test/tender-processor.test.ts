@@ -121,7 +121,7 @@ describe("tender worker authority guard", () => {
       organisationId: "organisation-a",
       requestId: "request-a",
       tenderId: "tender-a",
-      triggerId: "version-current",
+      triggerId: "document-a",
       triggerType: "SOURCE_READY",
       userId: "user-a",
     });

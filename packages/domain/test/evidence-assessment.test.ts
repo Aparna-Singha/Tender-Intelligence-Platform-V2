@@ -71,6 +71,7 @@ describe("controlled evidence comparison", () => {
       ],
     );
     expect(proposal.policyRule).toBe("DOCUMENT_EXISTS_ONLY");
+    expect(proposal.state).toBe("HUMAN_REVIEW_REQUIRED");
     expect(proposal.directEvidenceIndexes).toEqual([]);
   });
 

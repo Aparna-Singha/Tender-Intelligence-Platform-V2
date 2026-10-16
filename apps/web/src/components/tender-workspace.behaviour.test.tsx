@@ -182,7 +182,15 @@ vi.mock("./rag-chatbot", () => ({
   RagChatbot: () => <div>Ask module mounted</div>,
 }));
 vi.mock("./draft-workspace", () => ({
-  DraftWorkspace: () => <div>Draft module mounted</div>,
+  DraftWorkspace: (props: { onOpenReview?: () => void }) => (
+    <div>
+      <h2>Your proposal draft</h2>
+      <div>Draft module mounted</div>
+      <button onClick={props.onOpenReview} type="button">
+        Review &amp; Export
+      </button>
+    </div>
+  ),
 }));
 vi.mock("./final-readiness-workspace", () => ({
   FinalReadinessWorkspace: () => <div>Readiness module mounted</div>,
@@ -209,6 +217,55 @@ beforeEach(() => {
 });
 
 describe("tender workspace stages", () => {
+  it("defaults a missing stage to Overview while retaining explicit and invalid stage handling", async () => {
+    const view = render(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
+
+    search = new URLSearchParams("stage=overview");
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
+
+    search = new URLSearchParams("stage=eligibility");
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Eligibility review" }),
+    ).toBeInTheDocument();
+
+    search = new URLSearchParams("stage=draft");
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Your proposal draft" }),
+    ).toBeInTheDocument();
+
+    search = new URLSearchParams("stage=ask");
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "AI Chat" }),
+    ).toBeInTheDocument();
+
+    search = new URLSearchParams("stage=invalid");
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Assessment summary" }),
+    ).toBeInTheDocument();
+  });
+
   it("queues a fresh support reload after an in-flight authoritative refresh finishes", async () => {
     vi.useFakeTimers();
     try {
@@ -273,7 +330,7 @@ describe("tender workspace stages", () => {
       screen.getByRole("button", { name: "Overview" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /Requirements/i }),
+      screen.getByRole("button", { name: "Eligibility" }),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Draft" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "AI Chat" })).toBeInTheDocument();
@@ -283,7 +340,7 @@ describe("tender workspace stages", () => {
     expect(
       screen.getByRole("button", { name: "Activity" }),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Requirements/i }));
+    await user.click(screen.getByRole("button", { name: "Eligibility" }));
     await waitFor(() =>
       expect(push).toHaveBeenCalledWith(
         "/tenders/org-1/tender-1?stage=eligibility",
@@ -295,11 +352,13 @@ describe("tender workspace stages", () => {
     search = new URLSearchParams("stage=evidence");
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
     await screen.findByRole("heading", { name: /Requirements/i });
-    expect(screen.getByText("Audit & evidence")).toBeInTheDocument();
-    expect(screen.getByText("Evidence module mounted")).toBeInTheDocument();
+    expect(screen.queryByText("Audit & evidence")).not.toBeInTheDocument();
     expect(
-      screen.getByText("Checklist history module mounted"),
-    ).toBeInTheDocument();
+      screen.queryByText("Evidence module mounted"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Checklist history module mounted"),
+    ).not.toBeInTheDocument();
   });
 
   it("maps legacy source routes into tender files", async () => {
@@ -358,14 +417,12 @@ describe("tender workspace stages", () => {
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
     );
     expect(
-      await screen.findByRole("heading", { name: "Draft" }),
+      await screen.findByRole("heading", { name: "Your proposal draft" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "What matters now" }),
     ).not.toBeInTheDocument();
-    expect(
-      await screen.findByText("Drafting is currently blocked"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Draft module mounted")).toBeInTheDocument();
     expect(
       screen.queryByText("Readiness module mounted"),
     ).not.toBeInTheDocument();
@@ -376,6 +433,53 @@ describe("tender workspace stages", () => {
     expect(
       await screen.findByRole("heading", { name: "Final Review" }),
     ).toBeInTheDocument();
+  });
+
+  it("keeps final readiness out of the draft route and opens it only from Review & Export", async () => {
+    search = new URLSearchParams("stage=draft");
+    push.mockImplementation((href: string) => {
+      search = new URLSearchParams(href.split("?")[1] ?? "");
+    });
+    const view = render(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+
+    expect(
+      await screen.findByRole("heading", { name: "Your proposal draft" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Draft module mounted")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Readiness module mounted"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Export module mounted")).not.toBeInTheDocument();
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Review & Export" }));
+    expect(push).toHaveBeenCalledWith("/tenders/org-1/tender-1?stage=review");
+
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByText("Readiness module mounted"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Export module mounted")).toBeInTheDocument();
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Back to Draft" }));
+    expect(push).toHaveBeenCalledWith("/tenders/org-1/tender-1?stage=draft");
+
+    view.rerender(
+      <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Your proposal draft" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Readiness module mounted"),
+    ).not.toBeInTheDocument();
   });
 
   it("retains the safe overview fallback for an unsupported stage", async () => {
@@ -489,7 +593,7 @@ describe("tender workspace stages", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a direct failed-upload trash action, confirms removal, and keeps ready-row actions direct", async () => {
+  it("keeps file actions in compact row menus and confirms failed-upload removal", async () => {
     const user = userEvent.setup();
     let workspaceState = structuredClone(failedUploadWorkspace);
 
@@ -537,33 +641,19 @@ describe("tender workspace stages", () => {
       await screen.findByRole("heading", { name: "Tender Files" }),
     ).toBeInTheDocument();
     expect(screen.getByText("GeM-Bidding-9646270.pdf")).toBeInTheDocument();
-    expect(screen.getByText("Upload failed")).toBeInTheDocument();
+    expect(screen.getByText(/Upload failed/)).toBeInTheDocument();
     expect(
-      screen.getByRole("button", {
-        name: "Remove failed upload GeM-Bidding-9646270.pdf",
-      }),
+      screen.getByLabelText("Actions for GeM-Bidding-9646270.pdf"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("button", {
-        name: "Actions for GeM-Bidding-9646270.pdf",
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "Download Ready-source.pdf" }),
+      screen.getByLabelText("Actions for Ready-source.pdf"),
     ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", {
-        name: "Remove failed upload Ready-source.pdf",
-      }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", {
-        name: "Actions for Ready-source.pdf",
-      }),
-    ).not.toBeInTheDocument();
     expect(screen.queryByLabelText("Tender version")).not.toBeInTheDocument();
     expect(screen.getByText("Previous source history")).toBeInTheDocument();
 
+    await user.click(
+      screen.getByLabelText("Actions for GeM-Bidding-9646270.pdf"),
+    );
     await user.click(
       screen.getByRole("button", {
         name: "Remove failed upload GeM-Bidding-9646270.pdf",
@@ -596,7 +686,7 @@ describe("tender workspace stages", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows a direct ready-file trash action for a current single-source row and removes it after confirmation", async () => {
+  it("removes a current ready source from its compact row menu after confirmation", async () => {
     const user = userEvent.setup();
     let workspaceState = {
       ...baseWorkspace,
@@ -665,14 +755,12 @@ describe("tender workspace stages", () => {
     expect(
       await screen.findByRole("heading", { name: "Tender Files" }),
     ).toBeInTheDocument();
+    await user.click(
+      screen.getByLabelText("Actions for GeM-Bidding-9646270.pdf"),
+    );
     expect(
       screen.getByRole("button", {
         name: "Download GeM-Bidding-9646270.pdf",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "Remove tender file GeM-Bidding-9646270.pdf",
       }),
     ).toBeInTheDocument();
 
@@ -1043,7 +1131,9 @@ describe("tender workspace stages", () => {
     expect(
       await screen.findByRole("heading", { name: /Requirements/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Review pursuit decision/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/will start after you choose Continue/i),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Missing items and actions" }),
     ).not.toBeInTheDocument();
@@ -1638,20 +1728,22 @@ describe("tender workspace stages", () => {
     expect(
       await screen.findByRole("heading", { name: /Requirements/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText("Eligibility is starting")).toBeInTheDocument();
+    expect(
+      screen.getByText("Eligibility review not started"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /will start automatically for the latest Continue decision/i,
+      ),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("heading", { name: "Missing items and actions" }),
     ).not.toBeInTheDocument();
     expect(
       screen.queryByText("Historical assessment complete"),
     ).not.toBeInTheDocument();
-    expect(screen.getByText("Audit & evidence")).toBeInTheDocument();
-    expect(captureActionChecklistProps).toHaveBeenCalledWith(
-      expect.objectContaining({
-        currentAssessmentRunId: null,
-        presentation: "history",
-      }),
-    );
+    expect(screen.queryByText("Audit & evidence")).not.toBeInTheDocument();
+    expect(captureActionChecklistProps).not.toHaveBeenCalled();
   });
 
   it("does not lead the review surface with empty blocker metrics when no current final review exists", async () => {
@@ -1862,7 +1954,18 @@ describe("tender workspace stages", () => {
           items: [
             {
               currentState: "HUMAN_REVIEW_REQUIRED",
-              evidenceLinks: [],
+              evidenceLinks: [
+                {
+                  evidenceCitation: {
+                    boundedExcerpt: "Delivery capability is documented.",
+                    documentId: "company-document-1",
+                    documentName: "Company delivery evidence.pdf",
+                    pageNumber: 1,
+                    validationStatus: "VALID",
+                  },
+                  linkType: "DIRECT_SUPPORT",
+                },
+              ],
               id: "requirement-1",
               proposedConfidence: "MEDIUM",
               proposedRationale: "A reviewer must confirm the interpretation.",
@@ -1901,17 +2004,35 @@ describe("tender workspace stages", () => {
 
     render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
 
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/tenders/tender-1/versions/version-1/checklists",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
     await user.click(
-      await screen.findByRole("button", { name: "Review requirement" }),
+      await screen.findByRole("button", { name: "Review evidence" }),
     );
 
     expect(
-      screen.getByText("Audit & evidence").closest("details"),
-    ).toHaveAttribute("open");
+      screen.getByRole("dialog", { name: "Review evidence" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Audit & evidence")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Missing items and actions"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("No current action list yet"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Refresh action list")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Open company documents"),
+    ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(captureEvidenceMatrixProps).toHaveBeenLastCalledWith(
         expect.objectContaining({
           currentAssessmentRunId: "assessment-1",
+          presentation: "focused",
         }),
       ),
     );
@@ -1931,7 +2052,7 @@ describe("tender workspace stages", () => {
     );
   });
 
-  it("keeps requirement-linked actions in the selected requirement and reserves other actions for unmatched checklist work", async () => {
+  it("keeps requirement actions contextual while hiding checklist administration", async () => {
     search = new URLSearchParams("stage=eligibility");
     apiRequest.mockImplementation((path: string): unknown => {
       if (path === "/organisations/org-1/tenders/tender-1") {
@@ -2147,7 +2268,7 @@ describe("tender workspace stages", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("Other requirement").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("button", { name: "Review requirement" }),
+      screen.getByRole("button", { name: "Add evidence" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -2160,12 +2281,10 @@ describe("tender workspace stages", () => {
       ),
     ).not.toBeInTheDocument();
     expect(screen.queryByText("0 Other actions")).not.toBeInTheDocument();
-    expect(screen.getByText("Checklist module mounted")).toBeInTheDocument();
-    const auditDetails = screen
-      .getByText("Audit & evidence")
-      .closest("details");
-    expect(auditDetails).not.toBeNull();
-    expect(auditDetails).not.toHaveAttribute("open");
+    expect(
+      screen.queryByText("Checklist module mounted"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Audit & evidence")).not.toBeInTheDocument();
     expect(screen.queryByText(/Phase 7/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/policy-v1/i)).not.toBeInTheDocument();
     const detailCard = screen
@@ -2178,37 +2297,18 @@ describe("tender workspace stages", () => {
       throw new Error("Expected requirement detail card container.");
     }
     expect(
-      within(detailCard).queryByRole("heading", {
+      within(detailCard).getByRole("heading", {
         name: "Requirement",
       }),
-    ).not.toBeInTheDocument();
-    expect(
-      within(detailCard).getByRole("heading", {
-        name: "Status",
-      }),
     ).toBeInTheDocument();
-    expect(
-      within(detailCard).getAllByText("Human review required"),
-    ).toHaveLength(1);
-    const missingItemsSection = screen
-      .getByRole("heading", {
-        name: "Missing items",
-      })
-      .closest(".workspace-section");
-    expect(missingItemsSection).not.toBeNull();
-    if (!(missingItemsSection instanceof HTMLElement)) {
-      throw new Error("Expected missing items section.");
-    }
-    expect(missingItemsSection).toHaveTextContent(
-      /2\s*actions\s+need\s+attention/i,
+    expect(detailCard.querySelector(".status-badge")).toHaveTextContent(
+      /review|evidence/i,
     );
     expect(
-      within(detailCard).getByRole("heading", {
-        name: "Primary action",
-      }),
-    ).toBeInTheDocument();
+      screen.queryByRole("heading", { name: "Missing items" }),
+    ).not.toBeInTheDocument();
     const companyEvidenceHeading = within(detailCard).getByRole("heading", {
-      name: "Company evidence",
+      name: "Your evidence",
     });
     const companyEvidenceSection = companyEvidenceHeading.closest("section");
     expect(companyEvidenceSection).not.toBeNull();
@@ -2216,24 +2316,11 @@ describe("tender workspace stages", () => {
       throw new Error("Expected company evidence section.");
     }
     expect(
-      within(companyEvidenceSection).queryByRole("button", {
-        name: "Upload tender file",
+      within(companyEvidenceSection).getByRole("link", {
+        name: "Upload document",
       }),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
 
-    const fullChecklistCall = captureActionChecklistProps.mock.calls
-      .map(
-        ([props]) =>
-          props as {
-            presentation?: "full" | "history";
-            visibleItemIds?: string[];
-          },
-      )
-      .find((props) => props.presentation !== "history");
-    expect(fullChecklistCall).toEqual(
-      expect.objectContaining({
-        visibleItemIds: ["item-other"],
-      }),
-    );
+    expect(captureActionChecklistProps).not.toHaveBeenCalled();
   });
 });

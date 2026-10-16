@@ -20,6 +20,7 @@ import type {
   DraftGenerationGateway,
   EmbeddingGateway,
   GeneratedDraftClaim,
+  GeneratedDraftPlaceholder,
   GeneratedDraftSection,
 } from "./ai-provider.js";
 import { ProviderResponseError } from "./ai-provider.js";
@@ -151,6 +152,18 @@ export class DraftGenerationProcessor {
             .slice(0, 2_000);
     if (instructions !== null && isUnsafeDraftInstruction(instructions))
       throw new Error("UNSAFE_DRAFT_INSTRUCTION");
+    const requiredInputContext = await this.requiredInputContext(
+      run.organisationId,
+      run.tenderId,
+      run.extractionRunId,
+    );
+    const requiredPlaceholders = requiredInputContext.placeholders;
+    const placeholderSectionKey =
+      sections.find(({ key }) => /clarification|input|deviation/iu.test(key))
+        ?.key ?? sections.at(-1)?.key;
+    const companyEvidenceSectionKey = sections.find(({ allowedClaimClasses }) =>
+      allowedClaimClasses.includes("APPROVED_COMPANY_FACT"),
+    )?.key;
 
     const planningStarted = Date.now();
     await this.checkpoint(run.id, "PLANNING", 20, signal);
@@ -170,8 +183,17 @@ export class DraftGenerationProcessor {
         signal,
       );
       const retrievalStarted = Date.now();
+      const retrievalQuery = [
+        plan.heading,
+        plan.formattingGuidance,
+        plan.key === companyEvidenceSectionKey
+          ? requiredInputContext.retrievalText
+          : "",
+      ]
+        .filter((value) => value.length > 0)
+        .join(" ");
       const queryVector = await this.embeddings.embedQuery(
-        `${plan.heading} ${plan.formattingGuidance}`,
+        retrievalQuery,
         signal,
       );
       const allowedClasses = sourceClassesForMode(
@@ -184,6 +206,11 @@ export class DraftGenerationProcessor {
       const snapshottedChunkIds = run.inputSnapshot.sources
         .filter(({ sourceKind }) => sourceKind === "RAG_CHUNK")
         .map(({ sourceRecordId }) => sourceRecordId);
+      const reservedCompanyContextLimit =
+        plan.key === companyEvidenceSectionKey &&
+        allowedClasses.includes("COMPANY_EVIDENCE")
+          ? Math.ceil((DRAFT_MAX_CONTEXTS_PER_SECTION * 3) / 4)
+          : 0;
       const chunks =
         allowedClasses.length === 0 || snapshottedChunkIds.length === 0
           ? []
@@ -192,7 +219,7 @@ export class DraftGenerationProcessor {
         WITH authorised AS (
           SELECT "id","content","content_checksum","document_name","page_number",
             "clause_label","source_class","source_record_id","extraction_citation_id",
-            ts_rank_cd("search_vector", plainto_tsquery('english', ${plan.heading})) AS lexical_score,
+            ts_rank_cd("search_vector", plainto_tsquery('english', ${retrievalQuery})) AS lexical_score,
             1 - ("embedding" <=> ${`[${queryVector.join(",")}]`}::vector) AS vector_score
            FROM "rag_chunks"
            WHERE "organisation_id" = ${run.organisationId}::uuid
@@ -209,14 +236,32 @@ export class DraftGenerationProcessor {
             rank() OVER (ORDER BY lexical_score DESC, "id") AS lexical_rank,
             rank() OVER (ORDER BY vector_score DESC, "id") AS vector_rank
           FROM authorised
-          ORDER BY GREATEST(lexical_score, vector_score) DESC
-          LIMIT 40
+        ), scored AS (
+          SELECT *,
+            ((1.0/(60+lexical_rank)) + (1.0/(60+vector_rank))) AS reciprocal_rank_score
+          FROM ranked
+        ), reserved_company AS (
+          SELECT *, true AS reserved
+          FROM scored
+          WHERE "source_class"::text = 'COMPANY_EVIDENCE'
+          ORDER BY reciprocal_rank_score DESC, "id"
+          LIMIT ${reservedCompanyContextLimit}
+        ), general_context AS (
+          SELECT *, false AS reserved
+          FROM scored
+          WHERE "id" NOT IN (SELECT "id" FROM reserved_company)
+          ORDER BY reciprocal_rank_score DESC, "id"
+          LIMIT ${DRAFT_MAX_CONTEXTS_PER_SECTION}
         )
         SELECT "id" AS "chunk_id","content","content_checksum","document_name",
           "page_number","clause_label","source_class"::text,"source_record_id",
           "extraction_citation_id"
-         FROM ranked
-         ORDER BY ((1.0/(60+lexical_rank)) + (1.0/(60+vector_rank))) DESC, "id"
+         FROM (
+           SELECT * FROM reserved_company
+           UNION ALL
+           SELECT * FROM general_context
+         ) AS balanced_context
+         ORDER BY reserved DESC, reciprocal_rank_score DESC, "id"
          LIMIT ${DRAFT_MAX_CONTEXTS_PER_SECTION}`,
             );
       retrievalLatencyMs += Date.now() - retrievalStarted;
@@ -227,8 +272,9 @@ export class DraftGenerationProcessor {
         signal,
       );
       const generationStarted = Date.now();
-      const generated = await this.generator.generateDraftSection(
+      const providerGenerated = await this.generator.generateDraftSection(
         {
+          allowedClaimClasses: plan.allowedClaimClasses,
           formattingGuidance: plan.formattingGuidance,
           heading: plan.heading,
           instructions,
@@ -241,16 +287,48 @@ export class DraftGenerationProcessor {
         })),
         signal,
       );
+      const sourceGrounded = groundSourceBoundParaphrases(
+        providerGenerated,
+        chunks,
+      );
+      const reviewGrounded = normalizeReviewOnlyClaims(sourceGrounded);
+      const evidenceGrounded = withRetrievedApprovedCompanyFacts(
+        reviewGrounded,
+        plan,
+        chunks,
+      );
+      const placeholderGrounded =
+        plan.key === placeholderSectionKey
+          ? withRequiredPlaceholders(evidenceGrounded, requiredPlaceholders)
+          : evidenceGrounded;
+      const generated =
+        withoutResolvedCompanyFactPlaceholders(placeholderGrounded);
       generationLatencyMs += Date.now() - generationStarted;
       this.validateGeneratedSection(generated, plan, chunks);
       generatedSections.push({ chunks, generated, plan });
     }
 
+    const groundedCompanyFactTypes = new Set(
+      generatedSections.flatMap(({ generated }) =>
+        generated.claims
+          .filter(({ claimClass }) => claimClass === "APPROVED_COMPANY_FACT")
+          .map(({ claim }) => claim.split(":", 1)[0]?.trim())
+          .filter((factType): factType is string => factType !== undefined),
+      ),
+    );
+    const reconciledSections = generatedSections.map((section) => ({
+      ...section,
+      generated: withoutResolvedCompanyFactPlaceholders(
+        section.generated,
+        groundedCompanyFactTypes,
+      ),
+    }));
+
     const validationStarted = Date.now();
     await this.checkpoint(run.id, "VALIDATING", 90, signal);
     const counts = await this.persist(
       run,
-      generatedSections,
+      reconciledSections,
       planningStarted - started,
       retrievalLatencyMs,
       generationLatencyMs,
@@ -294,6 +372,98 @@ export class DraftGenerationProcessor {
     });
   }
 
+  private async requiredInputContext(
+    organisationId: string,
+    tenderId: string,
+    extractionRunId: string,
+  ): Promise<{
+    readonly placeholders: readonly GeneratedDraftPlaceholder[];
+    readonly retrievalText: string;
+  }> {
+    const [requirements, acceptedFacts, reviewedInputs] = await Promise.all([
+      this.database.structuredRequirement.findMany({
+        select: { normalizedStatement: true, sourceWording: true },
+        where: {
+          extractionRunId,
+          reviewState: { not: "REJECTED" },
+          supersededBy: { none: {} },
+        },
+      }),
+      this.database.companyEvidenceFact.findMany({
+        select: { factType: true },
+        where: {
+          currentVersion: { reviewState: "ACCEPTED" },
+          invalidatedAt: null,
+          organisationId,
+        },
+      }),
+      this.database.draftHumanInput.findMany({
+        select: { inputClass: true, value: true },
+        where: {
+          invalidatedAt: null,
+          organisationId,
+          reviewState: "APPROVED",
+          tenderId,
+        },
+      }),
+    ]);
+    const tenderText = requirements
+      .map(
+        ({ normalizedStatement, sourceWording }) =>
+          `${normalizedStatement} ${sourceWording}`,
+      )
+      .join("\n");
+    const authority = new Set(
+      acceptedFacts.map(({ factType }) => factType.toUpperCase()),
+    );
+    const humanAuthority = reviewedInputs
+      .map(({ inputClass, value }) => `${inputClass} ${value}`)
+      .join("\n");
+    const placeholders: GeneratedDraftPlaceholder[] = [];
+    if (
+      /\b(?:datasheets?|point-by-point compliance|quoted product|offered model)\b/iu.test(
+        tenderText,
+      ) &&
+      !["OFFERED_MODEL", "TECHNICAL_COMPLIANCE"].some((fact) =>
+        authority.has(fact),
+      )
+    )
+      placeholders.push({
+        explanation:
+          "The tender requests product-specific technical support, but the exact offered model and datasheet are not present in approved sources.",
+        marker:
+          "[[REVIEW REQUIRED: confirm the exact offered model and attach its datasheet]]",
+        type: "TECHNICAL_INPUT_REQUIRED",
+      });
+    if (
+      /\bwarranty\b/iu.test(tenderText) &&
+      !authority.has("WARRANTY_COMMITMENT") &&
+      !/\bwarranty\b/iu.test(humanAuthority)
+    )
+      placeholders.push({
+        explanation:
+          "The tender specifies a warranty requirement, but no reviewed company warranty commitment is available.",
+        marker: "[[REVIEW REQUIRED: confirm the warranty-support commitment]]",
+        type: "UNSUPPORTED_COMMITMENT",
+      });
+    if (
+      /\bdelivery\b/iu.test(tenderText) &&
+      !authority.has("DELIVERY_COMMITMENT") &&
+      !/\bdelivery\b/iu.test(humanAuthority)
+    )
+      placeholders.push({
+        explanation:
+          "The tender specifies delivery timing, but no reviewed delivery commitment or responsible contact is available.",
+        marker:
+          "[[REVIEW REQUIRED: confirm the delivery commitment and responsible contact]]",
+        type: "UNSUPPORTED_COMMITMENT",
+      });
+    return {
+      placeholders,
+      retrievalText: tenderText.slice(0, 8_000),
+    };
+  }
+
   private validateGeneratedSection(
     generated: GeneratedDraftSection,
     plan: ControlledTemplateSection,
@@ -333,8 +503,11 @@ export class DraftGenerationProcessor {
         )
       )
         throw new Error("COMPANY_FACT_CLAIM_MISMATCH");
-      assertGeneratedClaimSourceAuthority(claim, chunks);
-      if (!generated.content.includes(claim.claim))
+      const citedChunks = claim.handles.map(
+        (handle) => chunks[Number(handle.slice(1)) - 1],
+      );
+      assertGeneratedClaimSourceAuthority(claim, citedChunks);
+      if (!normalizedTextIncludes(generated.content, claim.claim))
         throw new Error("DRAFT_CLAIM_TEXT_NOT_IN_SECTION");
     }
     for (const placeholder of generated.placeholders)
@@ -725,6 +898,301 @@ export function companyFactClaimBindsToAuthority(
   );
 }
 
+export function withRequiredPlaceholders(
+  generated: GeneratedDraftSection,
+  required: readonly GeneratedDraftPlaceholder[],
+): GeneratedDraftSection {
+  const existingMarkers = new Set(
+    generated.placeholders.map(({ marker }) => marker),
+  );
+  const additions = required.filter(
+    ({ marker }) =>
+      !existingMarkers.has(marker) && !generated.content.includes(marker),
+  );
+  if (additions.length === 0) return generated;
+  return {
+    ...generated,
+    content: [
+      generated.content.trim(),
+      ...additions.map(({ marker }) => marker),
+    ]
+      .filter((part) => part.length > 0)
+      .join("\n\n"),
+    placeholders: [...generated.placeholders, ...additions],
+  };
+}
+
+export function groundSourceBoundParaphrases(
+  generated: GeneratedDraftSection,
+  chunks: readonly Pick<RetrievedDraftChunk, "content" | "source_class">[],
+): GeneratedDraftSection {
+  const addedPlaceholders: GeneratedDraftPlaceholder[] = [];
+  let changed = false;
+  const claims = generated.claims.flatMap((claim) => {
+    const allowedSourceClasses = authoritySourceClassesForClaim(
+      claim.claimClass,
+    );
+    if (allowedSourceClasses === null) return [claim];
+    const validHandles = claim.handles.filter((handle) => {
+      const chunk = chunks[Number(handle.slice(1)) - 1];
+      return (
+        chunk !== undefined && allowedSourceClasses.has(chunk.source_class)
+      );
+    });
+    if (validHandles.length === 0) {
+      const description = claim.claim
+        .replaceAll("[[", "")
+        .replaceAll("]]", "")
+        .replace(/\s+/gu, " ")
+        .trim()
+        .slice(0, 180);
+      addedPlaceholders.push({
+        explanation:
+          "The provider statement did not cite an authoritative source class and requires human verification.",
+        marker: `[[REVIEW REQUIRED: verify source support for ${description || "the unsupported provider statement"}]]`,
+        type: "HUMAN_REVIEW_REQUIRED",
+      });
+      changed = true;
+      return [];
+    }
+    const cited = validHandles.map(
+      (handle) => chunks[Number(handle.slice(1)) - 1]!,
+    );
+    const authorityBound =
+      validHandles.length === claim.handles.length
+        ? claim
+        : { ...claim, handles: validHandles };
+    if (authorityBound !== claim) changed = true;
+    if (
+      cited.some((chunk) =>
+        normalizeClaimSourceText(chunk.content).includes(
+          normalizeClaimSourceText(claim.claim),
+        ),
+      )
+    )
+      return [authorityBound];
+    const exact = bestExactSourceSentence(claim.claim, cited);
+    if (exact === null) return [authorityBound];
+    changed = true;
+    return [{ ...authorityBound, claim: exact }];
+  });
+  if (!changed) return generated;
+  const placeholders = [...generated.placeholders, ...addedPlaceholders];
+  return {
+    ...generated,
+    claims,
+    content: [
+      ...claims.map(({ claim }) => claim),
+      ...placeholders.map(({ marker }) => marker),
+    ].join("\n\n"),
+    placeholders,
+  };
+}
+
+function authoritySourceClassesForClaim(
+  claimClass: DraftClaimClass,
+): ReadonlySet<string> | null {
+  switch (claimClass) {
+    case "TENDER_SOURCE_STATEMENT":
+      return tenderAuthoritySourceClasses;
+    case "DERIVED_ASSESSMENT_REFERENCE":
+      return assessmentAuthoritySourceClasses;
+    case "RISK_OR_CHECKLIST_WARNING":
+      return riskChecklistAuthoritySourceClasses;
+    default:
+      return null;
+  }
+}
+
+export function withRetrievedApprovedCompanyFacts(
+  generated: GeneratedDraftSection,
+  plan: Pick<ControlledTemplateSection, "allowedClaimClasses">,
+  chunks: readonly Pick<RetrievedDraftChunk, "content" | "source_class">[],
+): GeneratedDraftSection {
+  if (!plan.allowedClaimClasses.includes("APPROVED_COMPANY_FACT"))
+    return generated;
+  // Provider-authored company prose is not authority. Rebuild this claim class
+  // exclusively from the canonical statements embedded in retrieved, accepted
+  // COMPANY_EVIDENCE chunks so paraphrases can neither fail closed unnecessarily
+  // nor survive as unsupported company assertions.
+  const providerCompanyClaims = generated.claims.filter(
+    ({ claimClass }) => claimClass === "APPROVED_COMPANY_FACT",
+  );
+  const nonCompanyClaims = generated.claims.filter(
+    ({ claimClass }) => claimClass !== "APPROVED_COMPANY_FACT",
+  );
+  const grouped = new Map<string, string[]>();
+  for (const [index, chunk] of chunks.entries()) {
+    if (chunk.source_class !== "COMPANY_EVIDENCE") continue;
+    const statement = companyEvidenceStatementFromSourceText(chunk.content);
+    if (statement.length === 0 || statement.length > 2_000) continue;
+    grouped.set(statement, [
+      ...(grouped.get(statement) ?? []),
+      `D${index + 1}`,
+    ]);
+  }
+  const companyClaims: GeneratedDraftClaim[] = [...grouped.entries()].map(
+    ([claim, handles]) => ({
+      claim,
+      claimClass: "APPROVED_COMPANY_FACT",
+      handles,
+      material: true,
+    }),
+  );
+  const claims = [...nonCompanyClaims, ...companyClaims];
+  let retainedContent = generated.content;
+  if (providerCompanyClaims.length > 0) {
+    retainedContent = normalizeClaimSourceText(retainedContent);
+    for (const { claim } of [...providerCompanyClaims].sort(
+      (left, right) => right.claim.length - left.claim.length,
+    ))
+      retainedContent = retainedContent.replaceAll(
+        normalizeClaimSourceText(claim),
+        " ",
+      );
+  }
+  return {
+    ...generated,
+    claims,
+    content: [
+      retainedContent.trim(),
+      ...companyClaims.map(({ claim }) => claim),
+    ]
+      .filter((part) => part.length > 0)
+      .join("\n\n"),
+  };
+}
+
+export function normalizeReviewOnlyClaims(
+  generated: GeneratedDraftSection,
+): GeneratedDraftSection {
+  const invalidReviewClaims = generated.claims.filter(
+    ({ claim, claimClass }) =>
+      ["INFERENCE_REQUIRING_REVIEW", "PLACEHOLDER"].includes(claimClass) &&
+      !claim.startsWith("[[REVIEW REQUIRED:"),
+  );
+  if (invalidReviewClaims.length === 0) return generated;
+  const converted = invalidReviewClaims.map(({ claim }) => {
+    const description = claim
+      .replaceAll("[[", "")
+      .replaceAll("]]", "")
+      .replace(/\s+/gu, " ")
+      .trim()
+      .slice(0, 180);
+    return {
+      explanation:
+        "The provider identified this as review-only content without authoritative support.",
+      marker: `[[REVIEW REQUIRED: ${description || "confirm unsupported draft input"}]]`,
+      type: "HUMAN_REVIEW_REQUIRED" as const,
+    };
+  });
+  const invalid = new Set(invalidReviewClaims);
+  const claims = generated.claims.filter((claim) => !invalid.has(claim));
+  const placeholders = [...generated.placeholders, ...converted];
+  return {
+    ...generated,
+    claims,
+    content: [
+      ...claims.map(({ claim }) => claim),
+      ...placeholders.map(({ marker }) => marker),
+    ].join("\n\n"),
+    placeholders,
+  };
+}
+
+const companyFactPlaceholderPatterns: Readonly<
+  Record<string, readonly RegExp[]>
+> = {
+  COMPLETED_EXPERIENCE_ORDER_VALUE: [
+    /\b(?:past|prior|completed|qualifying)\s+experience\b/iu,
+  ],
+  GST_REGISTRATION: [/\bgst(?:in|\s+registration)?\b/iu],
+  ISO_9001_CERTIFICATION: [/\biso(?:\s+9001)?\b/iu],
+  OEM_AUTHORISATION: [/\boem\s+authori[sz]ation\b/iu],
+  TURNOVER_3_YEAR_AVERAGE: [/\bturnover\b/iu],
+  UDYAM_REGISTRATION: [/\budyam\b/iu],
+};
+
+export function withoutResolvedCompanyFactPlaceholders(
+  generated: GeneratedDraftSection,
+  groundedCompanyFactTypes: ReadonlySet<string> = new Set(),
+): GeneratedDraftSection {
+  const acceptedFactTypes = new Set([
+    ...groundedCompanyFactTypes,
+    ...generated.claims
+      .filter(({ claimClass }) => claimClass === "APPROVED_COMPANY_FACT")
+      .map(({ claim }) => claim.split(":", 1)[0]?.trim())
+      .filter((factType): factType is string => factType !== undefined),
+  ]);
+  const removed = generated.placeholders.filter((placeholder) => {
+    const text = `${placeholder.marker} ${placeholder.explanation}`;
+    return [...acceptedFactTypes].some((factType) =>
+      (companyFactPlaceholderPatterns[factType] ?? []).some((pattern) =>
+        pattern.test(text),
+      ),
+    );
+  });
+  if (removed.length === 0) return generated;
+  let content = generated.content;
+  for (const { marker } of removed) content = content.replaceAll(marker, " ");
+  return {
+    ...generated,
+    content: content.replace(/\s*\n\s*\n\s*/gu, "\n\n").trim(),
+    placeholders: generated.placeholders.filter(
+      (placeholder) => !removed.includes(placeholder),
+    ),
+  };
+}
+
+function bestExactSourceSentence(
+  proposed: string,
+  chunks: readonly Pick<RetrievedDraftChunk, "content">[],
+): string | null {
+  const proposedTerms = meaningfulTerms(proposed);
+  if (proposedTerms.size === 0) return null;
+  const candidates = chunks.flatMap(({ content }) =>
+    normalizeClaimSourceText(content)
+      .split(/(?<=[.!?])\s+|\s*\n\s*/gu)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0 && value.length <= 2_000),
+  );
+  let best: { readonly score: number; readonly value: string } | null = null;
+  for (const candidate of candidates) {
+    const terms = meaningfulTerms(candidate);
+    const score = [...proposedTerms].filter((term) => terms.has(term)).length;
+    if (
+      score >= 2 &&
+      (best === null ||
+        score > best.score ||
+        (score === best.score && candidate.length < best.value.length))
+    )
+      best = { score, value: candidate };
+  }
+  return best?.value ?? null;
+}
+
+function meaningfulTerms(value: string): ReadonlySet<string> {
+  const ignored = new Set([
+    "and",
+    "are",
+    "for",
+    "from",
+    "has",
+    "must",
+    "that",
+    "the",
+    "this",
+    "was",
+    "with",
+  ]);
+  return new Set(
+    normalizeClaimSourceText(value)
+      .toLocaleLowerCase("en-IN")
+      .split(/[^\p{L}\p{N}]+/gu)
+      .filter((term) => term.length >= 3 && !ignored.has(term)),
+  );
+}
+
 function assertGeneratedClaimSourceAuthority(
   claim: GeneratedDraftClaim,
   chunks: readonly (RetrievedDraftChunk | undefined)[],
@@ -779,11 +1247,13 @@ function assertExactSourceBoundClaim(
   )
     throw new Error("DRAFT_CLAIM_SOURCE_CLASS_INVALID");
   if (
-    !validChunks.some(
-      (chunk) =>
-        normalizeClaimSourceText(claim.claim) ===
-        normalizeClaimSourceText(chunk.content),
-    )
+    !validChunks.some((chunk) => {
+      const normalizedClaim = normalizeClaimSourceText(claim.claim);
+      return (
+        normalizedClaim.length > 0 &&
+        normalizeClaimSourceText(chunk.content).includes(normalizedClaim)
+      );
+    })
   )
     throw new Error("DRAFT_CLAIM_SOURCE_TEXT_MISMATCH");
 }
@@ -808,12 +1278,23 @@ function companyEvidenceStatementFromSourceText(value: string): string {
 function visibleDraftContentIsAccountedFor(
   generated: GeneratedDraftSection,
 ): boolean {
-  let remainder = generated.content;
-  for (const claim of generated.claims)
-    remainder = remainder.replaceAll(claim.claim, " ");
-  for (const placeholder of generated.placeholders)
-    remainder = remainder.replaceAll(placeholder.marker, " ");
+  let remainder = normalizeClaimSourceText(generated.content);
+  const accounted = [
+    ...generated.claims.map(({ claim }) => normalizeClaimSourceText(claim)),
+    ...generated.placeholders.map(({ marker }) =>
+      normalizeClaimSourceText(marker),
+    ),
+  ].sort((left, right) => right.length - left.length);
+  for (const text of accounted) remainder = remainder.replaceAll(text, " ");
   return normalizeUnclaimedContent(remainder) === "";
+}
+
+function normalizedTextIncludes(content: string, expected: string): boolean {
+  const normalizedExpected = normalizeClaimSourceText(expected);
+  return (
+    normalizedExpected.length > 0 &&
+    normalizeClaimSourceText(content).includes(normalizedExpected)
+  );
 }
 
 function normalizeUnclaimedContent(value: string): string {

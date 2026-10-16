@@ -1,430 +1,244 @@
 "use client";
 
-import {
-  Bot,
-  FileCheck2,
-  Files,
-  LayoutDashboard,
-  MessageSquare,
-  Sparkles,
-} from "lucide-react";
+import { MoreHorizontal, Pin, PinOff, Trash2 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
-import { Badge, Button, Card, EmptyState, Textarea } from "@tender/ui";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useEffect, useState, type JSX } from "react";
+import { Button, Input } from "@tender/ui";
 import { apiRequest, formatApiError } from "../lib/api";
-import { assistantHref } from "../lib/assistant";
-import { describeTender, type TenderSummary } from "./tender-presentation";
-
-interface AssistantAction {
-  readonly href: string;
-  readonly label: string;
-  readonly supportingText: string;
-}
-
-interface AssistantMessage {
-  readonly actions?: readonly AssistantAction[];
-  readonly id: string;
-  readonly role: "assistant" | "user";
-  readonly text: string;
-}
-
-const starterPrompts = [
-  "Where should I upload this file?",
-  "What can I do from here without tender evidence?",
-  "How do I get to tender AI Chat?",
-] as const;
-
-function initialAssistantMessage(organisationId: string): AssistantMessage {
-  return {
-    actions: [
-      {
-        href: "/dashboard",
-        label: "Open dashboard",
-        supportingText: "See current work across the organisation.",
-      },
-      {
-        href: `/documents/${organisationId}`,
-        label: "Open company documents",
-        supportingText: "Upload reusable company evidence.",
-      },
-      {
-        href: `/tenders/${organisationId}`,
-        label: "Browse tenders",
-        supportingText:
-          "Pick the exact tender before asking evidence questions.",
-      },
-    ],
-    id: "assistant-intro",
-    role: "assistant",
-    text: "I can help with workspace navigation, company information, and what to do next. For questions about a specific tender, open that tender's AI Chat.",
-  };
-}
-
-function buildAssistantReply(
-  organisationId: string,
-  prompt: string,
-  tenders: readonly TenderSummary[],
-): AssistantMessage {
-  const normalized = prompt.trim().toLowerCase();
-  const tenderChatActions = tenders.slice(0, 3).map((tender) => ({
-    href: `/tenders/${organisationId}/${tender.id}?stage=ask`,
-    label: tender.title,
-    supportingText: "Open tender AI Chat",
-  }));
-
-  if (
-    normalized.includes("upload") ||
-    normalized.includes("file") ||
-    normalized.includes("document")
-  ) {
-    return {
-      actions: [
-        {
-          href: `/documents/${organisationId}`,
-          label: "Company documents",
-          supportingText: "Reusable certificates and company evidence.",
-        },
-        {
-          href: `/tenders/${organisationId}`,
-          label: "Tender Files",
-          supportingText: "Source documents stay inside the tender workspace.",
-        },
-      ],
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: "Use Company documents for reusable company evidence and Tender Files inside the exact tender for source uploads. Tender analysis starts from the tender workspace after you upload the right source there.",
-    };
-  }
-
-  if (
-    normalized.includes("eligibility") ||
-    normalized.includes("requirement") ||
-    normalized.includes("checklist")
-  ) {
-    return {
-      actions: [
-        {
-          href: `/tenders/${organisationId}`,
-          label: "Browse tenders",
-          supportingText: "Open the relevant tender before reviewing evidence.",
-        },
-      ],
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: "Eligibility stays inside each tender. Open the relevant tender first, then use Overview and Eligibility to review requirements, cited evidence, and any conflict or human-review state.",
-    };
-  }
-
-  if (
-    normalized.includes("draft") ||
-    normalized.includes("proposal") ||
-    normalized.includes("response")
-  ) {
-    return {
-      actions: [
-        {
-          href: `/tenders/${organisationId}`,
-          label: "Open tender workspaces",
-          supportingText:
-            "Drafting stays inside each tender after real prerequisites are met.",
-        },
-      ],
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: "Drafting is still tender-scoped. Open the specific tender to check whether analysis, decision, and eligibility prerequisites are satisfied before drafting becomes available.",
-    };
-  }
-
-  if (
-    normalized.includes("chat") ||
-    normalized.includes("ask") ||
-    normalized.includes("rag") ||
-    normalized.includes("citation")
-  ) {
-    return {
-      actions:
-        tenderChatActions.length === 0
-          ? [
-              {
-                href: `/tenders/${organisationId}`,
-                label: "Create or open a tender",
-                supportingText:
-                  "Tender AI Chat appears inside a tender workspace.",
-              },
-            ]
-          : tenderChatActions,
-      id: crypto.randomUUID(),
-      role: "assistant",
-      text: "Tender questions belong in tender AI Chat, where answers stay tied to one tender and its cited sources. This workspace assistant does not answer tender-content questions without that tender scope.",
-    };
-  }
-
-  return {
-    actions: [
-      {
-        href: assistantHref(organisationId),
-        label: "Stay here",
-        supportingText: "Use this assistant for workspace guidance only.",
-      },
-      {
-        href: "/dashboard",
-        label: "Open dashboard",
-        supportingText: "See current priorities and active workflow state.",
-      },
-      {
-        href: `/tenders/${organisationId}`,
-        label: "Browse tenders",
-        supportingText: "Choose the exact tender before using tender AI Chat.",
-      },
-    ],
-    id: crypto.randomUUID(),
-    role: "assistant",
-    text: "I can help with workspace navigation, upload guidance, and where to continue next. For tender-specific questions, open the relevant tender's AI Chat.",
-  };
-}
+import { RagChatbot } from "./rag-chatbot";
+import {
+  WorkspaceConversation,
+  type SavedConversation,
+} from "./workspace-conversation";
+import type { TenderSummary } from "./tender-presentation";
 
 export function AssistantWorkspace({
   organisationId,
 }: {
   readonly organisationId: string;
 }): JSX.Element {
-  const [message, setMessage] = useState("Loading workspace context...");
-  const [draft, setDraft] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const params = useSearchParams();
+  const router = useRouter();
+  const selected = params.get("conversation") ?? "new";
+  const [chats, setChats] = useState<readonly SavedConversation[]>([]);
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
-  const [messages, setMessages] = useState<readonly AssistantMessage[]>([
-    initialAssistantMessage(organisationId),
-  ]);
-
+  const [search, setSearch] = useState("");
+  const [error, setError] = useState("");
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const base = `/organisations/${organisationId}/conversations`;
+  async function refresh(): Promise<void> {
+    try {
+      setChats(await apiRequest<readonly SavedConversation[]>(base));
+      setError("");
+    } catch (caught) {
+      setError(formatApiError(caught, "Chats could not be loaded."));
+    }
+  }
   useEffect(() => {
+    void refresh();
     void apiRequest<readonly TenderSummary[]>(
       `/organisations/${organisationId}/tenders`,
     )
-      .then((loaded) => {
-        setTenders(loaded);
-        setMessage("");
-      })
-      .catch((caught) =>
-        setMessage(
-          formatApiError(
-            caught,
-            "Assistant context could not be loaded right now.",
-          ),
-        ),
-      );
-  }, [organisationId]);
-
-  const recentDrafts = useMemo(
-    () =>
-      tenders.filter((tender) => describeTender(tender).isDraft).slice(0, 3),
-    [tenders],
+      .then(setTenders)
+      .catch(() => setError("Tender projects could not be loaded."));
+    const listener = (): void => {
+      void refresh();
+    };
+    window.addEventListener("conversations-changed", listener);
+    const timer = window.setInterval(listener, 5000);
+    return () => {
+      window.removeEventListener("conversations-changed", listener);
+      window.clearInterval(timer);
+    };
+  }, [base]);
+  const active = chats.find((chat) => chat.id === selected);
+  const titleFor = (chat: SavedConversation): string =>
+    chat.title ?? "Untitled conversation";
+  const tenderTitle = (id: string | null): string =>
+    tenders.find((tender) => tender.id === id)?.title ?? "Workspace";
+  const filtered = chats.filter((chat) =>
+    `${titleFor(chat)} ${tenderTitle(chat.tenderId)}`
+      .toLowerCase()
+      .includes(search.toLowerCase()),
   );
-
-  const recentTenderChats = useMemo(() => tenders.slice(0, 4), [tenders]);
-
-  function submit(event: FormEvent<HTMLFormElement>): void {
-    event.preventDefault();
-    const prompt = draft.trim();
-    if (prompt === "" || submitting) return;
-    setSubmitting(true);
-    setMessages((current) => [
-      ...current,
-      { id: crypto.randomUUID(), role: "user", text: prompt },
-      buildAssistantReply(organisationId, prompt, tenders),
-    ]);
-    setDraft("");
-    setSubmitting(false);
+  function select(id: string): void {
+    router.replace(
+      `/assistant/${organisationId}?conversation=${encodeURIComponent(id)}`,
+      { scroll: false },
+    );
   }
-
-  function usePrompt(prompt: string): void {
-    setDraft(prompt);
+  async function pin(chat: SavedConversation): Promise<void> {
+    try {
+      await apiRequest(`${base}/${chat.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pinned: !chat.pinned }),
+      });
+      await refresh();
+      setOpenMenuId(null);
+    } catch (caught) {
+      setError(formatApiError(caught, "Pin could not be saved."));
+    }
   }
-
-  return (
-    <div className="workspace-page">
-      <header className="workspace-page__header">
-        <div>
-          <h1>Workspace Assistant</h1>
-          <p>
-            Get help navigating your workspace, managing company information,
-            and deciding what to do next.
-          </p>
+  async function remove(chat: SavedConversation): Promise<void> {
+    try {
+      await apiRequest(`${base}/${chat.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: true }),
+      });
+      setOpenMenuId(null);
+      if (selected === chat.id) select("new");
+      await refresh();
+    } catch (caught) {
+      setError(formatApiError(caught, "Chat could not be deleted."));
+    }
+  }
+  function row(chat: SavedConversation, section: string): JSX.Element {
+    const title = titleFor(chat);
+    const menuKey = `${section}:${chat.id}`;
+    const menuOpen = openMenuId === menuKey;
+    return (
+      <div
+        className={`chat-rail__item ${selected === chat.id ? "chat-rail__item--active" : ""}`}
+        key={menuKey}
+      >
+        <button
+          type="button"
+          className="chat-rail__item-button"
+          onClick={() => select(chat.id)}
+        >
+          <span className="chat-rail__item-title">{title}</span>
+        </button>
+        <div
+          className="chat-rail__item-menu"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) {
+              setOpenMenuId(null);
+            }
+          }}
+        >
+          <button
+            aria-expanded={menuOpen}
+            aria-haspopup="menu"
+            aria-label={`Actions for ${title}`}
+            className="chat-rail__menu-trigger"
+            onClick={() => setOpenMenuId(menuOpen ? null : menuKey)}
+            type="button"
+          >
+            <MoreHorizontal aria-hidden="true" size={17} />
+          </button>
+          {menuOpen ? (
+            <div
+              aria-label={`Actions for ${title}`}
+              className="chat-rail__menu-popover"
+              role="menu"
+            >
+              <button
+                onClick={() => void pin(chat)}
+                role="menuitem"
+                type="button"
+              >
+                {chat.pinned ? (
+                  <PinOff aria-hidden="true" size={15} />
+                ) : (
+                  <Pin aria-hidden="true" size={15} />
+                )}
+                {chat.pinned ? "Unpin" : "Pin"}
+              </button>
+              <button
+                className="chat-rail__delete-action"
+                onClick={() => void remove(chat)}
+                role="menuitem"
+                type="button"
+              >
+                <Trash2 aria-hidden="true" size={15} />
+                Delete
+              </button>
+            </div>
+          ) : null}
         </div>
+      </div>
+    );
+  }
+  return (
+    <div className="workspace-page assistant-page">
+      <header className="workspace-page__header">
+        <h1>AI Chat</h1>
       </header>
-
       <div className="workspace-card chat-workspace assistant-workspace">
-        <aside className="chat-rail">
-          <div className="chat-rail__identity">
-            <span className="workspace-sidebar__brand-mark" aria-hidden="true">
-              AI
-            </span>
-            <div>
-              <strong>AI Assistant</strong>
-              <small>Workspace guidance only</small>
-            </div>
-          </div>
-
-          <div className="chat-rail__group">
-            <div className="chat-rail__group-header">
-              <strong>Quick prompts</strong>
-              <small>Get help without opening a tender first.</small>
-            </div>
-            <div className="chat-rail__shortcuts">
-              {starterPrompts.map((prompt) => (
-                <button
-                  className="chat-rail__shortcut"
-                  key={prompt}
-                  onClick={() => usePrompt(prompt)}
-                  type="button"
-                >
-                  <Sparkles aria-hidden="true" size={14} />
-                  <span>{prompt}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="chat-rail__group">
-            <div className="chat-rail__group-header">
-              <strong>Tender chats</strong>
-              <small>Open a tender before asking evidence questions.</small>
-            </div>
-            <div className="chat-rail__list">
-              {recentTenderChats.length === 0 ? (
-                <span className="chat-rail__shortcut chat-rail__shortcut--disabled">
-                  <MessageSquare aria-hidden="true" size={14} />
-                  <span>No tender chats yet</span>
-                </span>
-              ) : (
-                recentTenderChats.map((tender) => (
-                  <Link
-                    className="chat-rail__shortcut"
-                    href={`/tenders/${organisationId}/${tender.id}?stage=ask`}
-                    key={tender.id}
-                  >
-                    <MessageSquare aria-hidden="true" size={14} />
-                    <span>{tender.title}</span>
+        <aside className="chat-rail" aria-label="Conversations">
+          <Button onClick={() => select("new")} variant="secondary">
+            + New chat
+          </Button>
+          <Input
+            aria-label="Search chats"
+            placeholder="Search chats"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+          {error ? <p role="alert">{error}</p> : null}
+          <div className="chat-rail__scroll">
+            <section className="chat-rail__group" aria-label="Workspace">
+              <strong className="chat-rail__group-header">Workspace</strong>
+              {filtered
+                .filter((chat) => chat.tenderId === null)
+                .map((chat) => row(chat, "workspace"))}
+            </section>
+            <section className="chat-rail__group" aria-label="Projects">
+              <strong className="chat-rail__group-header">Projects</strong>
+              {tenders.map((tender) => (
+                <div className="chat-rail__project" key={tender.id}>
+                  <Link href={`/tenders/${organisationId}/${tender.id}`}>
+                    {tender.title}
                   </Link>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="chat-rail__footer">
-            <Link className="chat-rail__shortcut" href="/dashboard">
-              <LayoutDashboard aria-hidden="true" size={14} />
-              <span>Open dashboard</span>
-            </Link>
-            <Link
-              className="chat-rail__shortcut"
-              href={`/documents/${organisationId}`}
-            >
-              <FileCheck2 aria-hidden="true" size={14} />
-              <span>Open company documents</span>
-            </Link>
-            <Link
-              className="chat-rail__shortcut"
-              href={`/tenders/${organisationId}`}
-            >
-              <Files aria-hidden="true" size={14} />
-              <span>Browse tenders</span>
-            </Link>
+                  {filtered
+                    .filter((chat) => chat.tenderId === tender.id)
+                    .map((chat) => row(chat, `project:${tender.id}`))}
+                </div>
+              ))}
+            </section>
+            <section className="chat-rail__group" aria-label="Pinned">
+              <strong className="chat-rail__group-header">Pinned</strong>
+              {filtered
+                .filter((chat) => chat.pinned)
+                .map((chat) => row(chat, "pinned"))}
+            </section>
+            <section className="chat-rail__group" aria-label="Recent">
+              <strong className="chat-rail__group-header">Recent</strong>
+              {filtered.map((chat) => row(chat, "recent"))}
+              {!filtered.length ? <p>No saved conversations yet.</p> : null}
+            </section>
           </div>
         </aside>
-
-        <section className="chat-canvas">
-          <div className="chat-canvas__header">
-            <div>
-              <span className="chat-canvas__context">
-                <Bot aria-hidden="true" size={14} />
-                <strong>How this assistant helps</strong>
-              </span>
-              <h2>Workspace assistant</h2>
-              <p className="chat-canvas__status-note">
-                This assistant helps you navigate the product. For questions
-                about a specific tender, open that tender's AI Chat.
-              </p>
-            </div>
-            <Badge tone="warning">Tender AI Chat stays tender-specific</Badge>
-          </div>
-
-          <div className="chat-canvas__status-row">
-            <span className="chat-canvas__status-note" aria-live="polite">
-              {message === "" ? "Ready for workspace guidance." : message}
-            </span>
-            <span className="chat-canvas__status-note">
-              Recent drafts: {recentDrafts.length}
-            </span>
-          </div>
-
-          <div className="chat-canvas__messages">
-            {messages.length === 0 ? (
-              <Card>
-                <EmptyState
-                  description="Ask for workspace guidance, upload routing, or where to continue next."
-                  title="No assistant messages yet"
-                />
-              </Card>
-            ) : (
-              messages.map((entry) => (
-                <article
-                  className={`chat-message chat-message--${entry.role === "user" ? "user" : "assistant"}`}
-                  key={entry.id}
-                >
-                  <div className="chat-message__meta">
-                    <strong>
-                      {entry.role === "user" ? "You" : "AI Assistant"}
-                    </strong>
-                    <small>
-                      {entry.role === "user"
-                        ? "Your prompt"
-                        : "Workspace guidance"}
-                    </small>
-                  </div>
-                  <p>{entry.text}</p>
-                  {entry.actions?.length ? (
-                    <div className="assistant-actions">
-                      {entry.actions.map((action) => (
-                        <Link
-                          className="assistant-actions__link"
-                          href={action.href}
-                          key={`${entry.id}-${action.href}`}
-                        >
-                          <span>{action.label}</span>
-                          <small>{action.supportingText}</small>
-                        </Link>
-                      ))}
-                    </div>
-                  ) : null}
-                </article>
-              ))
-            )}
-          </div>
-
-          <form
-            className="chat-composer"
-            onSubmit={(event) => void submit(event)}
-          >
-            <label className="chat-composer__field">
-              <span className="visually-hidden">Ask the AI Assistant</span>
-              <Textarea
-                aria-label="Ask the AI Assistant"
-                onChange={(event) => setDraft(event.target.value)}
-                placeholder="Ask for workspace guidance, upload routing, or the next safe place to continue."
-                rows={4}
-                value={draft}
-              />
-            </label>
-            <div className="chat-composer__actions">
-              <span className="chat-canvas__status-note">
-                Tender-grounded answers remain in tender AI Chat.
-              </span>
-              <Button loading={submitting} type="submit">
-                Get guidance
-              </Button>
-            </div>
-          </form>
-        </section>
+        {selected !== "new" && active === undefined ? (
+          <section className="chat-canvas">
+            <p role="status">Loading conversation...</p>
+          </section>
+        ) : active?.tenderId && active.tenderVersionId ? (
+          <RagChatbot
+            key={selected}
+            organisationId={organisationId}
+            tenderId={active.tenderId}
+            versionId={active.tenderVersionId}
+            tenderTitle={tenderTitle(active.tenderId)}
+            initialConversationId={selected}
+            embedded
+            onConversationChange={(id) => {
+              void refresh();
+              select(id);
+            }}
+          />
+        ) : (
+          <WorkspaceConversation
+            key={`${organisationId}:${selected}`}
+            organisationId={organisationId}
+            {...(selected === "new" ? {} : { initialConversationId: selected })}
+            onConversationChange={(id) => {
+              void refresh();
+              select(id);
+            }}
+          />
+        )}
       </div>
     </div>
   );
