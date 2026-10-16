@@ -8,6 +8,7 @@ import {
 import type { ApiErrorResponse } from "@tender/contracts";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { FinalReadinessError } from "../final-readiness/final-readiness.error.js";
+import { DocumentUploadError } from "../documents/document-upload.error.js";
 
 const publicErrors: Readonly<
   Record<number, { readonly code: string; readonly message: string }>
@@ -62,7 +63,8 @@ export class ApiExceptionFilter implements ExceptionFilter {
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
     const safeError =
-      exception instanceof FinalReadinessError
+      exception instanceof FinalReadinessError ||
+      exception instanceof DocumentUploadError
         ? { code: exception.publicCode, message: exception.message }
         : (publicErrors[status] ?? {
             code: "INTERNAL_SERVER_ERROR",

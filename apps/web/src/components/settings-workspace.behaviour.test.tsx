@@ -101,15 +101,51 @@ describe("settings workspace", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("keeps preferences navigation URL-addressable from the company profile surface", async () => {
+  it("keeps people and access navigation URL-addressable from organisation settings", async () => {
     searchParams.set("section", "organisation");
     mockSettingsLoad("OWNER");
     render(<SettingsWorkspace organisationId="org-1" />);
     expect(
-      await screen.findByRole("heading", { name: "Company profile" }),
+      await screen.findByRole("heading", { name: "Organisation" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "View preferences" }),
+      screen.getAllByRole("link", { name: /People & access/ })[0],
+    ).toHaveAttribute("href", "/settings/org-1?section=people-access");
+    expect(
+      screen.getByRole("link", { name: "Open organisation profile" }),
+    ).toHaveAttribute("href", "/onboarding/org-1");
+    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+  });
+
+  it("opens Organisation when no subsection is requested", async () => {
+    searchParams.delete("section");
+    mockSettingsLoad("OWNER");
+    render(<SettingsWorkspace organisationId="org-1" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Organisation" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Active sessions")).not.toBeInTheDocument();
+  });
+
+  it("shows security content only for the explicit security subsection", async () => {
+    searchParams.set("section", "security");
+    mockSettingsLoad("OWNER");
+    render(<SettingsWorkspace organisationId="org-1" />);
+
+    expect(
+      await screen.findByRole("heading", { name: "Security controls" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Active sessions")).toBeInTheDocument();
+  });
+
+  it("keeps preferences navigation URL-addressable", async () => {
+    searchParams.set("section", "organisation");
+    mockSettingsLoad("OWNER");
+    render(<SettingsWorkspace organisationId="org-1" />);
+
+    expect(
+      await screen.findByRole("link", { name: "Preferences" }),
     ).toHaveAttribute("href", "/settings/org-1?section=preferences");
   });
 });

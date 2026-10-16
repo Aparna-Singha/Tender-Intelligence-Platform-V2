@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  HttpStatus,
   Inject,
   Injectable,
   Logger,
@@ -35,6 +36,7 @@ import {
   PRISMA_CLIENT,
   S3_CLIENT,
 } from "../infrastructure.tokens.js";
+import { DocumentUploadError } from "./document-upload.error.js";
 
 @Injectable()
 export class DocumentsService {
@@ -128,14 +130,23 @@ export class DocumentsService {
       where: { deletedAt: null, organisationId },
     });
     if (count >= MAX_DOCUMENTS_PER_ORGANISATION)
-      throw new ConflictException("Document limit reached");
+      throw new DocumentUploadError(
+        "DOCUMENT_LIMIT_REACHED",
+        "The organisation document limit has been reached.",
+        HttpStatus.CONFLICT,
+      );
     const duplicate = await this.database.documentVersion.findFirst({
       where: {
         document: { deletedAt: null, organisationId },
         sha256: input.checksum_sha256,
       },
     });
-    if (duplicate !== null) throw new ConflictException("Duplicate document");
+    if (duplicate !== null)
+      throw new DocumentUploadError(
+        "DOCUMENT_DUPLICATE",
+        "This exact document has already been uploaded.",
+        HttpStatus.CONFLICT,
+      );
     if (input.document_id !== undefined) {
       const existing = await this.database.document.findFirst({
         where: { deletedAt: null, id: input.document_id, organisationId },

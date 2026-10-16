@@ -10,6 +10,38 @@ const environment = {
 } as never;
 
 describe("document vault authorisation", () => {
+  it("rejects an exact duplicate with a bounded public conflict", async () => {
+    const database = {
+      document: { count: vi.fn().mockResolvedValue(1) },
+      documentVersion: {
+        findFirst: vi.fn().mockResolvedValue({ id: "version-a" }),
+      },
+    };
+    const service = new DocumentsService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    await expect(
+      service.createUploadSession(
+        "organisation-a",
+        "user-a",
+        {
+          category: "GST",
+          checksum_sha256: "a".repeat(64),
+          filename: "duplicate.pdf",
+          mime_type: "application/pdf",
+          size_bytes: 100,
+        },
+        "request-a",
+      ),
+    ).rejects.toMatchObject({
+      publicCode: "DOCUMENT_DUPLICATE",
+    });
+  });
+
   it("does not sign a cross-tenant download", async () => {
     const database = {
       document: { findFirst: vi.fn().mockResolvedValue(null) },

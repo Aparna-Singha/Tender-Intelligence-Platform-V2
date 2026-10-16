@@ -178,313 +178,319 @@ export class ExtractionProcessor {
     let fieldCount = 0;
     let citationFailures = 0;
     let issueCount = 0;
-    await this.database.$transaction(async (transaction) => {
-      for (const source of parsedSources) {
-        signal?.throwIfAborted();
-        const runDocument = await transaction.extractionRunDocument.create({
-          data: {
-            detectedFormat: source.parsed.format,
-            extractionRunId: runId,
-            parserConfiguration: {
-              active_content_execution: false,
-              external_fetch: false,
-              ocr: parserOcrConfiguration(source.parsed.units),
-            },
-            parserName: source.parsed.parserName,
-            parserVersion: source.parsed.parserVersion,
-            sourceChecksum: source.document.sha256,
-            status: "COMPLETE",
-            tenderDocumentId: source.document.id,
-            warningCount: source.parsed.issues.length,
-          },
-        });
-        documentsProcessed += 1;
-        for (const unit of source.parsed.units) {
-          const storedUnit = await transaction.extractedUnit.create({
+    await this.database.$transaction(
+      async (transaction) => {
+        for (const source of parsedSources) {
+          signal?.throwIfAborted();
+          const runDocument = await transaction.extractionRunDocument.create({
             data: {
-              archiveMemberPath: unit.archiveMemberPath ?? null,
-              characterCount: unit.characterCount,
-              extractionRunDocumentId: runDocument.id,
+              detectedFormat: source.parsed.format,
               extractionRunId: runId,
-              label: unit.label ?? null,
-              language: unit.language ?? null,
-              ocrConfidence: unit.ocrConfidence ?? null,
-              ocrStatus: unit.ocrStatus,
-              parserConfidence: unit.confidence,
-              unitIndex: unit.unitIndex,
-              unitType: unit.unitType,
+              parserConfiguration: {
+                active_content_execution: false,
+                external_fetch: false,
+                ocr: parserOcrConfiguration(source.parsed.units),
+              },
+              parserName: source.parsed.parserName,
+              parserVersion: source.parsed.parserVersion,
+              sourceChecksum: source.document.sha256,
+              status: "COMPLETE",
+              tenderDocumentId: source.document.id,
+              warningCount: source.parsed.issues.length,
             },
           });
-          unitsProcessed += 1;
-          if (
-            unit.ocrStatus === "OCR_UNAVAILABLE" ||
-            unit.ocrStatus === "OCR_FAILED"
-          )
-            ocrUnavailable += 1;
-          const blockIds = new Map<number, string>();
-          for (const block of unit.blocks) {
-            const storedBlock = await transaction.extractedBlock.create({
+          documentsProcessed += 1;
+          for (const unit of source.parsed.units) {
+            const storedUnit = await transaction.extractedUnit.create({
               data: {
-                blockType: block.type,
-                confidence: block.confidence,
-                ...(block.coordinates === undefined
-                  ? {}
-                  : { coordinates: { ...block.coordinates } }),
-                extractedUnitId: storedUnit.id,
+                archiveMemberPath: unit.archiveMemberPath ?? null,
+                characterCount: unit.characterCount,
                 extractionRunDocumentId: runDocument.id,
                 extractionRunId: runId,
-                headingLevel: block.headingLevel ?? null,
+                label: unit.label ?? null,
                 language: unit.language ?? null,
-                normalizedText: block.text,
-                readingOrder: block.readingOrder,
-                sourceEndOffset: block.sourceEndOffset,
-                sourceStartOffset: block.sourceStartOffset,
-                warnings: [...block.warnings],
+                ocrConfidence: unit.ocrConfidence ?? null,
+                ocrStatus: unit.ocrStatus,
+                parserConfidence: unit.confidence,
+                unitIndex: unit.unitIndex,
+                unitType: unit.unitType,
               },
             });
-            blockIds.set(block.readingOrder, storedBlock.id);
+            unitsProcessed += 1;
             if (
-              block.confidence === "LOW" ||
-              block.confidence === "HUMAN_REVIEW_REQUIRED"
+              unit.ocrStatus === "OCR_UNAVAILABLE" ||
+              unit.ocrStatus === "OCR_FAILED"
             )
-              lowConfidenceItems += 1;
-            if (block.table !== undefined) {
-              const table = await transaction.extractedTable.create({
+              ocrUnavailable += 1;
+            const blockIds = new Map<number, string>();
+            for (const block of unit.blocks) {
+              const storedBlock = await transaction.extractedBlock.create({
                 data: {
-                  columnCount: block.table.columnCount,
+                  blockType: block.type,
                   confidence: block.confidence,
-                  extractedBlockId: storedBlock.id,
+                  ...(block.coordinates === undefined
+                    ? {}
+                    : { coordinates: { ...block.coordinates } }),
+                  extractedUnitId: storedUnit.id,
+                  extractionRunDocumentId: runDocument.id,
                   extractionRunId: runId,
-                  rowCount: block.table.rowCount,
+                  headingLevel: block.headingLevel ?? null,
+                  language: unit.language ?? null,
+                  normalizedText: block.text,
+                  readingOrder: block.readingOrder,
+                  sourceEndOffset: block.sourceEndOffset,
+                  sourceStartOffset: block.sourceStartOffset,
+                  warnings: [...block.warnings],
                 },
               });
-              if (block.table.cells.length > 0)
-                await transaction.extractedTableCell.createMany({
-                  data: block.table.cells.map((cell) => ({
-                    cellReference: cell.cellReference ?? null,
-                    columnIndex: cell.columnIndex,
-                    columnSpan: cell.columnSpan ?? 1,
-                    displayedValue: cell.displayedValue,
-                    extractedTableId: table.id,
-                    formulaText: cell.formulaText ?? null,
-                    rowIndex: cell.rowIndex,
-                    rowSpan: cell.rowSpan ?? 1,
-                  })),
+              blockIds.set(block.readingOrder, storedBlock.id);
+              if (
+                block.confidence === "LOW" ||
+                block.confidence === "HUMAN_REVIEW_REQUIRED"
+              )
+                lowConfidenceItems += 1;
+              if (block.table !== undefined) {
+                const table = await transaction.extractedTable.create({
+                  data: {
+                    columnCount: block.table.columnCount,
+                    confidence: block.confidence,
+                    extractedBlockId: storedBlock.id,
+                    extractionRunId: runId,
+                    rowCount: block.table.rowCount,
+                  },
                 });
+                if (block.table.cells.length > 0)
+                  await transaction.extractedTableCell.createMany({
+                    data: block.table.cells.map((cell) => ({
+                      cellReference: cell.cellReference ?? null,
+                      columnIndex: cell.columnIndex,
+                      columnSpan: cell.columnSpan ?? 1,
+                      displayedValue: cell.displayedValue,
+                      extractedTableId: table.id,
+                      formulaText: cell.formulaText ?? null,
+                      rowIndex: cell.rowIndex,
+                      rowSpan: cell.rowSpan ?? 1,
+                    })),
+                  });
+              }
+            }
+            for (const section of classifySections(unit.blocks))
+              await transaction.classifiedSection.create({
+                data: {
+                  category: section.category,
+                  classificationState: section.state,
+                  confidence: section.confidence,
+                  endReadingOrder: section.endReadingOrder,
+                  extractionRunId: runId,
+                  startReadingOrder: section.startReadingOrder,
+                  title: section.title,
+                },
+              });
+            const anchorFor = (block: ParsedBlock): SourceAnchor => ({
+              ...(unit.archiveMemberPath === undefined
+                ? {}
+                : { archiveMemberPath: unit.archiveMemberPath }),
+              blockReadingOrder: block.readingOrder,
+              documentId: source.document.id,
+              documentName: source.document.displayFilename,
+              endOffset: block.sourceEndOffset,
+              excerpt: block.text.slice(0, 900),
+              ...(unit.unitType === "PAGE"
+                ? { pageNumber: unit.unitIndex }
+                : {}),
+              ...(unit.unitType === "SHEET" && unit.label !== undefined
+                ? { sheetName: unit.label }
+                : {}),
+              sourceChecksum: source.document.sha256,
+              startOffset: block.sourceStartOffset,
+              unitIndex: unit.unitIndex,
+            });
+            await this.storeFields(
+              transaction,
+              runId,
+              runDocument.id,
+              storedUnit.id,
+              blockIds,
+              unit.blocks,
+              anchorFor,
+              () => {
+                fieldCount += 1;
+              },
+              () => {
+                citationFailures += 1;
+              },
+            );
+            await this.storeRequirements(
+              transaction,
+              runId,
+              runDocument.id,
+              storedUnit.id,
+              blockIds,
+              unit.blocks,
+              anchorFor,
+              () => {
+                requirementCount += 1;
+              },
+              () => {
+                citationFailures += 1;
+              },
+            );
+            for (const issue of source.parsed.issues.filter(
+              (candidate) =>
+                candidate.unitIndex === undefined ||
+                candidate.unitIndex === unit.unitIndex,
+            )) {
+              await transaction.extractionIssue.create({
+                data: {
+                  extractedUnitId: storedUnit.id,
+                  extractionRunId: runId,
+                  issueType: issue.issueType,
+                  requiresHumanReview: issue.requiresHumanReview,
+                  safeMessage: issue.safeMessage,
+                  severity: issue.severity,
+                  sourceDocumentId: source.document.id,
+                },
+              });
+              issueCount += 1;
             }
           }
-          for (const section of classifySections(unit.blocks))
-            await transaction.classifiedSection.create({
-              data: {
-                category: section.category,
-                classificationState: section.state,
-                confidence: section.confidence,
-                endReadingOrder: section.endReadingOrder,
-                extractionRunId: runId,
-                startReadingOrder: section.startReadingOrder,
-                title: section.title,
-              },
-            });
-          const anchorFor = (block: ParsedBlock): SourceAnchor => ({
-            ...(unit.archiveMemberPath === undefined
-              ? {}
-              : { archiveMemberPath: unit.archiveMemberPath }),
-            blockReadingOrder: block.readingOrder,
-            documentId: source.document.id,
-            documentName: source.document.displayFilename,
-            endOffset: block.sourceEndOffset,
-            excerpt: block.text.slice(0, 900),
-            ...(unit.unitType === "PAGE" ? { pageNumber: unit.unitIndex } : {}),
-            ...(unit.unitType === "SHEET" && unit.label !== undefined
-              ? { sheetName: unit.label }
-              : {}),
-            sourceChecksum: source.document.sha256,
-            startOffset: block.sourceStartOffset,
-            unitIndex: unit.unitIndex,
-          });
-          await this.storeFields(
-            transaction,
-            runId,
-            runDocument.id,
-            storedUnit.id,
-            blockIds,
-            unit.blocks,
-            anchorFor,
-            () => {
-              fieldCount += 1;
-            },
-            () => {
-              citationFailures += 1;
-            },
-          );
-          await this.storeRequirements(
-            transaction,
-            runId,
-            runDocument.id,
-            storedUnit.id,
-            blockIds,
-            unit.blocks,
-            anchorFor,
-            () => {
-              requirementCount += 1;
-            },
-            () => {
-              citationFailures += 1;
-            },
-          );
-          for (const issue of source.parsed.issues.filter(
-            (candidate) =>
-              candidate.unitIndex === undefined ||
-              candidate.unitIndex === unit.unitIndex,
-          )) {
-            await transaction.extractionIssue.create({
-              data: {
-                extractedUnitId: storedUnit.id,
-                extractionRunId: runId,
-                issueType: issue.issueType,
-                requiresHumanReview: issue.requiresHumanReview,
-                safeMessage: issue.safeMessage,
-                severity: issue.severity,
-                sourceDocumentId: source.document.id,
-              },
-            });
-            issueCount += 1;
-          }
         }
-      }
-      if (citationFailures > 0)
-        throw new ParserFailure("CITATION_VALIDATION_FAILED");
-      if (await this.cancelled(runId))
-        throw new ParserFailure("CANCELLED_DURING_COMMIT");
-      await transaction.extractionRun.update({
-        data: {
-          completedAt: new Date(),
-          currentStage: "COMPLETE",
-          eventSequence: { increment: 1 },
-          progressPercentage: 100,
-          publicMessage: "Extraction complete; review source-grounded results",
-          qualitySummary: {
-            citation_failures: citationFailures,
-            documents_processed: documentsProcessed,
-            fields_extracted: fieldCount,
-            low_confidence_items: lowConfidenceItems,
-            ocr_pages_unavailable: ocrUnavailable,
-            ocr_pages_attempted: parsedSources.reduce(
-              (total, source) =>
-                total +
-                source.parsed.units.filter((unit) =>
-                  [
-                    "OCR_FAILED",
-                    "OCR_PERFORMED",
-                    "HUMAN_REVIEW_REQUIRED",
-                  ].includes(unit.ocrStatus),
-                ).length,
-              0,
-            ),
-            ocr_pages_succeeded: parsedSources.reduce(
-              (total, source) =>
-                total +
-                source.parsed.units.filter(
-                  (unit) =>
-                    unit.ocrStatus === "OCR_PERFORMED" ||
-                    unit.ocrStatus === "HUMAN_REVIEW_REQUIRED",
-                ).length,
-              0,
-            ),
-            requirements_extracted: requirementCount,
-            unresolved_issues: issueCount,
-            units_processed: unitsProcessed,
+        if (citationFailures > 0)
+          throw new ParserFailure("CITATION_VALIDATION_FAILED");
+        if (await this.cancelled(runId))
+          throw new ParserFailure("CANCELLED_DURING_COMMIT");
+        await transaction.extractionRun.update({
+          data: {
+            completedAt: new Date(),
+            currentStage: "COMPLETE",
+            eventSequence: { increment: 1 },
+            progressPercentage: 100,
+            publicMessage:
+              "Extraction complete; review source-grounded results",
+            qualitySummary: {
+              citation_failures: citationFailures,
+              documents_processed: documentsProcessed,
+              fields_extracted: fieldCount,
+              low_confidence_items: lowConfidenceItems,
+              ocr_pages_unavailable: ocrUnavailable,
+              ocr_pages_attempted: parsedSources.reduce(
+                (total, source) =>
+                  total +
+                  source.parsed.units.filter((unit) =>
+                    [
+                      "OCR_FAILED",
+                      "OCR_PERFORMED",
+                      "HUMAN_REVIEW_REQUIRED",
+                    ].includes(unit.ocrStatus),
+                  ).length,
+                0,
+              ),
+              ocr_pages_succeeded: parsedSources.reduce(
+                (total, source) =>
+                  total +
+                  source.parsed.units.filter(
+                    (unit) =>
+                      unit.ocrStatus === "OCR_PERFORMED" ||
+                      unit.ocrStatus === "HUMAN_REVIEW_REQUIRED",
+                  ).length,
+                0,
+              ),
+              requirements_extracted: requirementCount,
+              unresolved_issues: issueCount,
+              units_processed: unitsProcessed,
+            },
+            status: "COMPLETE",
           },
-          status: "COMPLETE",
-        },
-        where: { id: runId },
-      });
-      const staleRuns = await transaction.riskAnalysisRun.findMany({
-        select: { id: true },
-        where: {
-          extractionRunId: { not: runId },
-          gateType: "EARLY",
-          status: { in: ["QUEUED", "ANALYSING", "VALIDATING", "COMPLETE"] },
-          tenderVersionId,
-        },
-      });
-      if (staleRuns.length > 0) {
-        const staleIds = staleRuns.map((run) => run.id);
-        await transaction.riskAnalysisRun.updateMany({
+          where: { id: runId },
+        });
+        const staleRuns = await transaction.riskAnalysisRun.findMany({
+          select: { id: true },
+          where: {
+            extractionRunId: { not: runId },
+            gateType: "EARLY",
+            status: { in: ["QUEUED", "ANALYSING", "VALIDATING", "COMPLETE"] },
+            tenderVersionId,
+          },
+        });
+        if (staleRuns.length > 0) {
+          const staleIds = staleRuns.map((run) => run.id);
+          await transaction.riskAnalysisRun.updateMany({
+            data: {
+              currentStage: "INVALIDATED",
+              invalidatedAt: new Date(),
+              publicMessage:
+                "A newer extraction requires a fresh early risk analysis",
+              status: "INVALIDATED",
+            },
+            where: { id: { in: staleIds } },
+          });
+          await transaction.riskFinding.updateMany({
+            data: { findingStatus: "INVALIDATED", invalidatedAt: new Date() },
+            where: { riskAnalysisRunId: { in: staleIds } },
+          });
+          await transaction.earlyPursuitDecision.updateMany({
+            data: { supersededAt: new Date() },
+            where: { riskAnalysisRunId: { in: staleIds }, supersededAt: null },
+          });
+        }
+        await transaction.tenderVersion.update({
+          data: {
+            activeEarlyRiskRunId: null,
+            activeEligibilityAssessmentRunId: null,
+            activeExtractionRunId: runId,
+          },
+          where: { id: tenderVersionId },
+        });
+        const assessmentInvalidatedAt = new Date();
+        await transaction.eligibilityAssessmentRun.updateMany({
           data: {
             currentStage: "INVALIDATED",
-            invalidatedAt: new Date(),
+            invalidatedAt: assessmentInvalidatedAt,
             publicMessage:
-              "A newer extraction requires a fresh early risk analysis",
+              "A newer extraction requires fresh evidence comparison",
             status: "INVALIDATED",
           },
-          where: { id: { in: staleIds } },
-        });
-        await transaction.riskFinding.updateMany({
-          data: { findingStatus: "INVALIDATED", invalidatedAt: new Date() },
-          where: { riskAnalysisRunId: { in: staleIds } },
-        });
-        await transaction.earlyPursuitDecision.updateMany({
-          data: { supersededAt: new Date() },
-          where: { riskAnalysisRunId: { in: staleIds }, supersededAt: null },
-        });
-      }
-      await transaction.tenderVersion.update({
-        data: {
-          activeEarlyRiskRunId: null,
-          activeEligibilityAssessmentRunId: null,
-          activeExtractionRunId: runId,
-        },
-        where: { id: tenderVersionId },
-      });
-      const assessmentInvalidatedAt = new Date();
-      await transaction.eligibilityAssessmentRun.updateMany({
-        data: {
-          currentStage: "INVALIDATED",
-          invalidatedAt: assessmentInvalidatedAt,
-          publicMessage:
-            "A newer extraction requires fresh evidence comparison",
-          status: "INVALIDATED",
-        },
-        where: {
-          extractionRunId: { not: runId },
-          status: {
-            in: [
-              "QUEUED",
-              "SNAPSHOTTING",
-              "MATCHING",
-              "VALIDATING",
-              "COMPLETE",
-            ],
+          where: {
+            extractionRunId: { not: runId },
+            status: {
+              in: [
+                "QUEUED",
+                "SNAPSHOTTING",
+                "MATCHING",
+                "VALIDATING",
+                "COMPLETE",
+              ],
+            },
+            tenderVersionId,
           },
-          tenderVersionId,
-        },
-      });
-      await transaction.eligibilityAssessment.updateMany({
-        data: { invalidatedAt: assessmentInvalidatedAt },
-        where: {
-          assessmentRun: { extractionRunId: { not: runId }, tenderVersionId },
-          invalidatedAt: null,
-        },
-      });
-      await transaction.checklistGenerationRun.updateMany({
-        data: {
-          activatedAt: null,
-          currentStage: "INVALIDATED",
-          invalidatedAt: assessmentInvalidatedAt,
-          publicMessage: "A newer extraction requires a fresh checklist",
-          status: "INVALIDATED",
-        },
-        where: { invalidatedAt: null, tenderVersionId },
-      });
-      await transaction.checklistItem.updateMany({
-        data: {
-          invalidatedAt: assessmentInvalidatedAt,
-          status: "INVALIDATED",
-        },
-        where: { invalidatedAt: null, tenderVersionId },
-      });
-    });
+        });
+        await transaction.eligibilityAssessment.updateMany({
+          data: { invalidatedAt: assessmentInvalidatedAt },
+          where: {
+            assessmentRun: { extractionRunId: { not: runId }, tenderVersionId },
+            invalidatedAt: null,
+          },
+        });
+        await transaction.checklistGenerationRun.updateMany({
+          data: {
+            activatedAt: null,
+            currentStage: "INVALIDATED",
+            invalidatedAt: assessmentInvalidatedAt,
+            publicMessage: "A newer extraction requires a fresh checklist",
+            status: "INVALIDATED",
+          },
+          where: { invalidatedAt: null, tenderVersionId },
+        });
+        await transaction.checklistItem.updateMany({
+          data: {
+            invalidatedAt: assessmentInvalidatedAt,
+            status: "INVALIDATED",
+          },
+          where: { invalidatedAt: null, tenderVersionId },
+        });
+      },
+      { maxWait: 10_000, timeout: 120_000 },
+    );
   }
 
   private async storeFields(
@@ -552,12 +558,18 @@ export class ExtractionProcessor {
       const record = await transaction.structuredRequirement.create({
         data: {
           category: requirement.category,
+          conditionText: requirement.conditionText ?? null,
           confidence: requirement.confidence,
           extractionRunId: runId,
           findingState: requirement.findingState,
           normalizedStatement: requirement.normalizedStatement,
           obligation: requirement.obligation,
           sourceWording: requirement.sourceWording,
+          currency: requirement.threshold?.currency ?? null,
+          thresholdNumericValue: requirement.threshold?.numericValue ?? null,
+          thresholdOperator: requirement.threshold?.operator ?? null,
+          thresholdTextValue: requirement.threshold?.textValue ?? null,
+          unit: requirement.threshold?.unit ?? null,
           title: requirement.title,
         },
       });

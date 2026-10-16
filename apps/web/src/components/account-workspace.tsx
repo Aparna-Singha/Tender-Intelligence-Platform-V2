@@ -1,7 +1,8 @@
 "use client";
 
+import { ContextualAssistant } from "./contextual-assistant";
+
 import { Sparkles } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type JSX } from "react";
 import {
@@ -66,6 +67,7 @@ export function AccountWorkspace(): JSX.Element {
   const [sessions, setSessions] = useState<readonly SessionSummary[]>([]);
   const [status, setStatus] = useState("Loading account...");
   const [busy, setBusy] = useState("");
+  const [showSessions, setShowSessions] = useState(false);
 
   async function load(): Promise<void> {
     try {
@@ -160,7 +162,7 @@ export function AccountWorkspace(): JSX.Element {
   return (
     <div className="workspace-page account-page">
       <PageHeader
-        description="Personal account information and session controls."
+        description="Personal account and session controls."
         title="Account"
       />
 
@@ -174,7 +176,7 @@ export function AccountWorkspace(): JSX.Element {
       ) : null}
 
       <div className="account-layout">
-        <Card className="settings-panel">
+        <Card className="account-hero">
           <div className="account-identity">
             <div className="account-identity__summary">
               <span aria-hidden="true" className="account-avatar">
@@ -183,11 +185,15 @@ export function AccountWorkspace(): JSX.Element {
               <div>
                 <strong>{session?.user.display_name ?? "Unavailable"}</strong>
                 <small>
-                  {activeMembership?.organisation.name ??
-                    "No organisation selected"}
+                  {activeMembership === null
+                    ? "No organisation selected"
+                    : `${humanizeEnum(activeMembership.role)} \u00b7 ${activeMembership.organisation.name}`}
                 </small>
               </div>
             </div>
+            <Button disabled type="button" variant="secondary">
+              Edit profile
+            </Button>
           </div>
         </Card>
 
@@ -196,16 +202,12 @@ export function AccountWorkspace(): JSX.Element {
             <div className="section-header">
               <div>
                 <h2>Personal information</h2>
-                <p>
-                  Identity details are visible here. Direct account profile
-                  mutation is not supported by the current frontend/API
-                  contract.
-                </p>
+                <p>Your name, email, and account role.</p>
               </div>
             </div>
             <div className="settings-form-grid">
               <label className="readonly-field">
-                <span>Display name</span>
+                <span>Name</span>
                 <Input
                   readOnly
                   value={session?.user.display_name ?? "Unavailable"}
@@ -216,17 +218,7 @@ export function AccountWorkspace(): JSX.Element {
                 <Input readOnly value={session?.user.email ?? "Unavailable"} />
               </label>
               <label className="readonly-field">
-                <span>Current organisation</span>
-                <Input
-                  readOnly
-                  value={
-                    activeMembership?.organisation.name ??
-                    "No organisation selected"
-                  }
-                />
-              </label>
-              <label className="readonly-field">
-                <span>Current role</span>
+                <span>Role</span>
                 <Input
                   readOnly
                   value={
@@ -237,25 +229,28 @@ export function AccountWorkspace(): JSX.Element {
                 />
               </label>
             </div>
+            <div className="account-profile-actions">
+              <Button disabled type="button">
+                Save changes
+              </Button>
+              <small>
+                Personal details are managed by your sign-in provider.
+              </small>
+            </div>
           </Card>
 
           <Card className="settings-panel">
             <div className="section-header">
               <div>
                 <h2>Security &amp; sessions</h2>
-                <p>
-                  Session revocation and sign-out use the existing
-                  authentication flow.
-                </p>
+                <p>Manage the active session on this device.</p>
               </div>
             </div>
             <div className="account-session-summary">
               <div className="account-session-summary__row">
                 <div>
                   <strong>Active session</strong>
-                  <small>
-                    {activeSessions.length} authenticated session(s)
-                  </small>
+                  <small>Current browser session</small>
                 </div>
                 <Badge tone="success">Current</Badge>
               </div>
@@ -263,22 +258,12 @@ export function AccountWorkspace(): JSX.Element {
                 <div>
                   <strong>Password &amp; security</strong>
                   <small>
-                    Password reset and deeper account security controls stay
-                    under the existing auth flow.
+                    Manage your password and active sessions using supported
+                    account security controls.
                   </small>
                 </div>
-              </div>
-              <div className="account-session-summary__row">
-                <div>
-                  <strong>Manage sessions</strong>
-                  <small>Review current and historical sessions below.</small>
-                </div>
                 <Button
-                  onClick={() =>
-                    document
-                      .getElementById("account-sessions")
-                      ?.scrollIntoView({ behavior: "smooth" })
-                  }
+                  onClick={() => setShowSessions(true)}
                   variant="secondary"
                 >
                   Manage sessions
@@ -287,11 +272,12 @@ export function AccountWorkspace(): JSX.Element {
               <div className="account-session-summary__row">
                 <div>
                   <strong>Sign out</strong>
-                  <small>End the current session on this device.</small>
+                  <small>Sign out of this browser session.</small>
                 </div>
                 <Button
                   loading={busy === "logout"}
                   onClick={() => void logout()}
+                  variant="secondary"
                 >
                   Log out
                 </Button>
@@ -301,103 +287,106 @@ export function AccountWorkspace(): JSX.Element {
         </div>
       </div>
 
-      <section className="workspace-section" id="account-sessions">
-        <Card className="settings-panel">
-          <div className="section-header">
-            <div>
-              <h2>Sessions</h2>
-              <p>
-                Review current and historical sessions, revoke other devices, or
-                log out using the existing authentication flow.
-              </p>
+      {showSessions ? (
+        <section
+          className="workspace-section account-sessions-panel"
+          id="account-sessions"
+        >
+          <Card className="settings-panel">
+            <div className="section-header">
+              <div>
+                <h2>Sessions</h2>
+                <p>
+                  Review current and historical sessions, revoke other devices,
+                  or log out using the existing authentication flow.
+                </p>
+              </div>
+              <Button
+                disabled={otherActiveSessions.length === 0}
+                loading={busy === "revoke-others"}
+                onClick={() => void revokeOtherSessions()}
+                variant="secondary"
+              >
+                Revoke other sessions
+              </Button>
             </div>
-            <Button
-              disabled={otherActiveSessions.length === 0}
-              loading={busy === "revoke-others"}
-              onClick={() => void revokeOtherSessions()}
-              variant="secondary"
-            >
-              Revoke other sessions
-            </Button>
-          </div>
-          <Table>
-            <thead>
-              <tr>
-                <th>Session</th>
-                <th>Created</th>
-                <th>Last seen</th>
-                <th>Expires</th>
-                <th>Status</th>
-                <th>
-                  <span className="visually-hidden">Action</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {sessions.map((item) => (
-                <tr key={item.id}>
-                  <td>
-                    <strong>
-                      {item.current ? "Current session" : "Account session"}
-                    </strong>
-                    <div className="settings-table-meta">{item.id}</div>
-                  </td>
-                  <td>{formatTimestamp(item.createdAt)}</td>
-                  <td>{formatTimestamp(item.lastSeenAt)}</td>
-                  <td>{formatTimestamp(item.expiresAt)}</td>
-                  <td>
-                    <Badge
-                      tone={item.revokedAt === null ? "success" : "neutral"}
-                    >
-                      {item.revokedAt === null
-                        ? item.current
-                          ? "Current"
-                          : "Active"
-                        : "Revoked"}
-                    </Badge>
-                  </td>
-                  <td>
-                    {item.revokedAt !== null ? (
-                      <span className="settings-table-meta">No action</span>
-                    ) : item.current ? (
-                      <Button
-                        loading={busy === item.id}
-                        onClick={() => void logout()}
-                        variant="quiet"
-                      >
-                        Log out
-                      </Button>
-                    ) : (
-                      <Button
-                        loading={busy === item.id}
-                        onClick={() => void revoke(item.id, false)}
-                        variant="quiet"
-                      >
-                        Revoke
-                      </Button>
-                    )}
-                  </td>
+            <Table>
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Created</th>
+                  <th>Last seen</th>
+                  <th>Expires</th>
+                  <th>Status</th>
+                  <th>
+                    <span className="visually-hidden">Action</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </Table>
-        </Card>
-      </section>
+              </thead>
+              <tbody>
+                {sessions.map((item) => (
+                  <tr key={item.id}>
+                    <td>
+                      <strong>
+                        {item.current ? "Current session" : "Signed-in device"}
+                      </strong>
+                    </td>
+                    <td>{formatTimestamp(item.createdAt)}</td>
+                    <td>{formatTimestamp(item.lastSeenAt)}</td>
+                    <td>{formatTimestamp(item.expiresAt)}</td>
+                    <td>
+                      <Badge
+                        tone={item.revokedAt === null ? "success" : "neutral"}
+                      >
+                        {item.revokedAt === null
+                          ? item.current
+                            ? "Current"
+                            : "Active"
+                          : "Revoked"}
+                      </Badge>
+                    </td>
+                    <td>
+                      {item.revokedAt !== null ? (
+                        <span className="settings-table-meta">No action</span>
+                      ) : item.current ? (
+                        <Button
+                          loading={busy === item.id}
+                          onClick={() => void logout()}
+                          variant="quiet"
+                        >
+                          Log out
+                        </Button>
+                      ) : (
+                        <Button
+                          loading={busy === item.id}
+                          onClick={() => void revoke(item.id, false)}
+                          variant="quiet"
+                        >
+                          Revoke
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+          </Card>
+        </section>
+      ) : null}
 
       {assistantLink === null ? (
         <button className="workspace-floating-ai" disabled type="button">
           <span>
             <Sparkles aria-hidden="true" size={16} />
           </span>
-          AI Assistant
+          Ask about my account
         </button>
       ) : (
-        <Link className="workspace-floating-ai" href={assistantLink}>
-          <span>
-            <Sparkles aria-hidden="true" size={16} />
-          </span>
-          AI Assistant
-        </Link>
+        <ContextualAssistant
+          context="my account"
+          organisationId={activeMembership!.organisation.id}
+          openInChatHref={assistantLink}
+        />
       )}
     </div>
   );

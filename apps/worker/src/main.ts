@@ -54,6 +54,7 @@ import {
 } from "./checklist-generation-processor.js";
 import {
   GeminiGateway,
+  ProviderResponseError,
   type AnswerGateway,
   type DraftGenerationGateway,
   type EmbeddingGateway,
@@ -326,7 +327,26 @@ async function bootstrap(): Promise<void> {
       );
     }
     logger.error(
-      { errorType: error.name, jobId: job?.id, jobName: job?.name },
+      {
+        errorType: error.name,
+        jobId: job?.id,
+        jobName: job?.name,
+        ...(error instanceof ProviderResponseError
+          ? {
+              providerFailureCode: error.code,
+              providerAttempts: error.diagnostics?.attempts,
+              providerModel: error.diagnostics?.model,
+              providerNetworkCode: error.diagnostics?.networkCode,
+              providerOperation: error.diagnostics?.operation,
+              providerRequestId: error.diagnostics?.requestId,
+              providerRetryAfter: error.diagnostics?.retryAfter,
+              providerRetryable: error.diagnostics?.retryable,
+              providerSafeReason: error.safeReason,
+              providerUpstreamCode: error.diagnostics?.upstreamCode,
+              providerUpstreamStatus: error.diagnostics?.upstreamStatus,
+            }
+          : {}),
+      },
       "Document job failed",
     );
     if (

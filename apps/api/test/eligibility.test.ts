@@ -275,6 +275,7 @@ describe("company evidence source boundary", () => {
             id: "fact-version-a",
             reviewState: "PENDING",
           },
+          factType: "GST_REGISTRATION",
           id: "fact-a",
         }),
       },
@@ -282,6 +283,7 @@ describe("company evidence source boundary", () => {
       eligibilityAssessmentRun: {
         updateMany: eligibilityAssessmentRunUpdateMany,
       },
+      ragIndexRun: { updateMany: vi.fn().mockResolvedValue({ count: 0 }) },
     };
     const service = new EligibilityService(database as never, {} as never);
 

@@ -1,6 +1,8 @@
 "use client";
 
-import { Plus, Search, SlidersHorizontal, Sparkles, X } from "lucide-react";
+import { ContextualAssistant } from "./contextual-assistant";
+
+import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
 import {
@@ -17,7 +19,6 @@ import { apiRequest, formatApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
 import {
   describeTender,
-  formatDeadline,
   formatDeadlineCountdown,
   type TenderSummary,
 } from "./tender-presentation";
@@ -56,6 +57,7 @@ export function TenderCentre({
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
   const [sortMode, setSortMode] = useState<SortMode>("DEADLINE");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
@@ -107,7 +109,9 @@ export function TenderCentre({
         },
       );
       form.reset();
-      window.location.assign(`/tenders/${organisationId}/${created.tender_id}`);
+      window.location.assign(
+        `/tenders/${organisationId}/${created.tender_id}?stage=overview`,
+      );
     } catch (caught) {
       setError(
         formatApiError(caught, "Tender workspace could not be created."),
@@ -154,7 +158,7 @@ export function TenderCentre({
   const aiChatHref = assistantHref(organisationId);
 
   return (
-    <div className="workspace-page">
+    <div className="workspace-page tender-centre-page">
       <header className="workspace-page__header">
         <div>
           <h1>Tenders</h1>
@@ -162,7 +166,7 @@ export function TenderCentre({
         </div>
         <Button onClick={() => setOpen(true)}>
           <Plus aria-hidden="true" size={18} />
-          Add tender
+          Analyse new tender
         </Button>
       </header>
 
@@ -202,25 +206,18 @@ export function TenderCentre({
             value={search}
           />
         </label>
-        <label className="workspace-toolbar__control">
+        <Button
+          aria-controls="tender-filter-panel"
+          aria-expanded={filtersOpen}
+          onClick={() => setFiltersOpen((current) => !current)}
+          type="button"
+          variant="secondary"
+        >
           <SlidersHorizontal aria-hidden="true" size={16} />
-          <span className="visually-hidden">Filter tenders</span>
-          <Select
-            aria-label="Filter tenders"
-            onChange={(event) =>
-              setStatusFilter(event.target.value as StatusFilter)
-            }
-            value={statusFilter}
-          >
-            <option value="ALL">All statuses</option>
-            <option value="ACTIVE">Active</option>
-            <option value="NEEDS_ATTENTION">Needs attention</option>
-            <option value="DRAFTS">Drafts</option>
-            <option value="ON_HOLD">On hold</option>
-          </Select>
-        </label>
+          Filters
+        </Button>
         <label className="workspace-toolbar__control">
-          <span className="workspace-toolbar__label">Sort</span>
+          <span className="workspace-toolbar__label">Sort:</span>
           <Select
             aria-label="Sort tenders"
             onChange={(event) => setSortMode(event.target.value as SortMode)}
@@ -231,6 +228,40 @@ export function TenderCentre({
           </Select>
         </label>
       </div>
+
+      {filtersOpen ? (
+        <div
+          className="workspace-card tender-filter-panel"
+          id="tender-filter-panel"
+        >
+          <Field label="Status">
+            <Select
+              aria-label="Filter tenders by status"
+              onChange={(event) =>
+                setStatusFilter(event.target.value as StatusFilter)
+              }
+              value={statusFilter}
+            >
+              <option value="ALL">All tenders</option>
+              <option value="ACTIVE">Active</option>
+              <option value="NEEDS_ATTENTION">Needs attention</option>
+              <option value="DRAFTS">Drafts</option>
+              <option value="ON_HOLD">On hold</option>
+            </Select>
+          </Field>
+          <Button
+            onClick={() => {
+              setSearch("");
+              setStatusFilter("ALL");
+              setSortMode("DEADLINE");
+            }}
+            type="button"
+            variant="quiet"
+          >
+            Clear filters
+          </Button>
+        </div>
+      ) : null}
 
       {message !== "" ? <p aria-live="polite">{message}</p> : null}
 
@@ -257,13 +288,16 @@ export function TenderCentre({
                   <th scope="col">Status</th>
                   <th scope="col">Next action</th>
                   <th scope="col">Deadline</th>
-                  <th scope="col">Action</th>
+                  <th scope="col">Owner</th>
+                  <th scope="col">
+                    <span className="visually-hidden">Action</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {visibleTenders.length === 0 ? (
                   <tr>
-                    <td className="workspace-table__empty" colSpan={5}>
+                    <td className="workspace-table__empty" colSpan={6}>
                       No tenders match the current filters.
                     </td>
                   </tr>
@@ -274,7 +308,6 @@ export function TenderCentre({
                       <tr key={tender.id}>
                         <td>
                           <strong>{tender.title}</strong>
-                          <small>{tender.buyer}</small>
                         </td>
                         <td>
                           <span
@@ -283,19 +316,17 @@ export function TenderCentre({
                             {presentation.statusLabel}
                           </span>
                         </td>
-                        <td>{presentation.supportingLabel}</td>
+                        <td>{presentation.actionLabel}</td>
                         <td>
                           <strong>
                             {formatDeadlineCountdown(tender.submissionDeadline)}
                           </strong>
-                          <small>
-                            {formatDeadline(tender.submissionDeadline)}
-                          </small>
                         </td>
+                        <td className="workspace-table__muted">—</td>
                         <td>
                           <Link
                             className="button button--secondary workspace-table__action"
-                            href={`/tenders/${organisationId}/${tender.id}`}
+                            href={`/tenders/${organisationId}/${tender.id}?stage=overview`}
                           >
                             {presentation.actionLabel}
                           </Link>
@@ -380,12 +411,11 @@ export function TenderCentre({
         </Modal>
       ) : null}
 
-      <Link className="workspace-floating-ai" href={aiChatHref}>
-        <span>
-          <Sparkles aria-hidden="true" size={16} />
-        </span>
-        AI Assistant
-      </Link>
+      <ContextualAssistant
+        context="my tenders"
+        organisationId={organisationId}
+        openInChatHref={aiChatHref}
+      />
     </div>
   );
 }

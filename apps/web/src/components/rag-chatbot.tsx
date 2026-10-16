@@ -1,39 +1,38 @@
 "use client";
 
+import { Archive, MoreHorizontal, Plus, Search, Trash2 } from "lucide-react";
 import {
-  Archive,
-  FileText,
-  Home,
-  MessageSquare,
-  Plus,
-  Search,
-  Settings,
-  Star,
-  Trash2,
-  UserRound,
-} from "lucide-react";
-import Link from "next/link";
-import {
+  Fragment,
   useDeferredValue,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
   type JSX,
 } from "react";
 import {
-  Alert,
   Badge,
   Button,
-  Card,
   EmptyState,
-  IconButton,
   Input,
   Select,
   Textarea,
   humanizeEnum,
 } from "@tender/ui";
-import { apiRequest, formatApiError } from "../lib/api";
+import { apiRequest, PublicApiError } from "../lib/api";
+
+function chatError(error: unknown, fallback: string): string {
+  if (error instanceof PublicApiError) {
+    if (error.status === 409)
+      return "Tender search has changed. Prepare the current sources and start a new chat.";
+    if (error.status === 403)
+      return "You don't have permission to perform this chat action.";
+    if (error.status === 401)
+      return "Your session has expired. Please sign in again.";
+  }
+  return fallback;
+}
 
 type SourceMode =
   | "FULL_AUTHORISED_TENDER_CONTEXT"
@@ -42,6 +41,8 @@ type SourceMode =
   | "TENDER_ONLY";
 
 interface RagIndex {
+  readonly tenderVersionId?: string;
+  readonly invalidatedAt?: string | null;
   readonly id: string;
   readonly progressPercentage: number;
   readonly sourceMode: SourceMode;
@@ -49,10 +50,13 @@ interface RagIndex {
 }
 
 interface Conversation {
+  readonly indexRunId?: string;
+  readonly tenderVersionId?: string;
   readonly archivedAt?: string | null;
   readonly id: string;
   readonly sourceMode: SourceMode;
   readonly status?: string;
+  readonly pinned?: boolean;
   readonly title: string;
   readonly updatedAt?: string;
 }
@@ -72,8 +76,11 @@ interface Citation {
 }
 
 interface AnswerRun {
+  readonly answerMessageId?: string | null;
   readonly citations: readonly Citation[];
+  readonly failureCode?: string | null;
   readonly id: string;
+  readonly questionMessageId?: string;
   readonly status: string;
 }
 
@@ -105,7 +112,7 @@ function normalizeConversations(value: unknown): readonly Conversation[] {
       isRecord(item) &&
       typeof item.id === "string" &&
       typeof item.sourceMode === "string" &&
-      typeof item.title === "string",
+      (typeof item.title === "string" || item.title === null),
   );
 }
 
@@ -136,57 +143,281 @@ function normalizeConversationDetail(
     : [];
   return {
     ...value,
+    title: deriveConversationTitle(value.title || "Untitled conversation"),
     answerRuns,
     messages,
   };
 }
 
-function buildConversationTitle(question: string): string {
-  const trimmed = question.trim();
-  if (trimmed === "") return "New tender conversation";
-  return trimmed.length <= 64
-    ? trimmed
-    : `${trimmed.slice(0, 61).trimEnd()}...`;
+const DIAGNOSTIC_TITLE_SUFFIX = /\s+(?:[?!.,]\s*)?check\s+\d{10,}\s*$/i;
+
+function withoutDiagnosticSuffix(value: string): string {
+  return value.replace(DIAGNOSTIC_TITLE_SUFFIX, "").trim();
 }
 
-function formatTimestamp(value: string | undefined): string {
-  if (value === undefined || value === "") return "Updated recently";
-  return new Date(value).toLocaleString();
-}
-
-function pinStorageKey(tenderId: string): string {
-  return `tender-intelligence:pinned-chats:${tenderId}`;
-}
-
-function readPinnedIds(tenderId: string): readonly string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = window.localStorage.getItem(pinStorageKey(tenderId));
-    const parsed: unknown = raw === null ? [] : JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? parsed.filter((item): item is string => typeof item === "string")
-      : [];
-  } catch {
-    return [];
+export function deriveConversationTitle(question: string): string {
+  const cleaned = withoutDiagnosticSuffix(question.trim());
+  if (cleaned === "") return "New tender conversation";
+  const normalized = cleaned.toLowerCase();
+  if (
+    normalized.includes("past experience") &&
+    normalized.includes("require")
+  ) {
+    return "Past experience requirement";
   }
+  if (normalized.startsWith("tender scope")) return "Tender scope";
+  if (normalized.includes("evidence") && normalized.includes("missing")) {
+    return "Missing tender evidence";
+  }
+  if (normalized.includes("performance security")) {
+    return "Performance security clause";
+  }
+  if (normalized.includes("drafting team") && normalized.includes("prepare")) {
+    return "Draft preparation next steps";
+  }
+  return cleaned.length <= 60
+    ? cleaned
+    : `${cleaned.slice(0, 57).trimEnd()}...`;
+}
+
+function ConversationRow({
+  conversation,
+  deleteConversation,
+  isActive,
+  isMenuOpen,
+  onOpen,
+  onToggleMenu,
+  onTogglePin,
+}: {
+  readonly conversation: Conversation;
+  readonly deleteConversation: (conversationId: string) => Promise<void>;
+  readonly isActive: boolean;
+  readonly isMenuOpen: boolean;
+  readonly onOpen: () => void;
+  readonly onToggleMenu: () => void;
+  readonly onTogglePin: () => void;
+}): JSX.Element {
+  return (
+    <div
+      className={`chat-rail__item ${isActive ? "chat-rail__item--active" : ""}`}
+    >
+      <button className="chat-rail__item-button" onClick={onOpen} type="button">
+        <span className="chat-rail__item-title" title={conversation.title}>
+          {conversation.title}
+        </span>
+      </button>
+      <div className="chat-rail__item-menu">
+        <button
+          aria-expanded={isMenuOpen}
+          aria-haspopup="menu"
+          aria-label={`Actions for ${conversation.title}`}
+          className="chat-rail__menu-trigger"
+          onClick={onToggleMenu}
+          type="button"
+        >
+          <MoreHorizontal aria-hidden="true" size={16} />
+        </button>
+        {isMenuOpen ? (
+          <div className="chat-rail__menu-popover">
+            <Button type="button" variant="quiet" onClick={onTogglePin}>
+              {conversation.pinned ? "Unpin" : "Pin"}
+            </Button>
+            <Button
+              type="button"
+              variant="quiet"
+              onClick={() => void deleteConversation(conversation.id)}
+            >
+              <Trash2 aria-hidden="true" size={14} />
+              Delete
+            </Button>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+type AssistantResponseState =
+  | "answered"
+  | "failed"
+  | "insufficient_evidence"
+  | "loading"
+  | "review_required";
+
+function assistantResponseState(status: string): AssistantResponseState {
+  if (["COMPLETE", "COMPLETED"].includes(status)) return "answered";
+  if (status === "INSUFFICIENT_EVIDENCE") return "insufficient_evidence";
+  if (status === "HUMAN_REVIEW_REQUIRED") return "review_required";
+  if (
+    ["QUEUED", "RETRIEVING", "GENERATING", "VERIFYING_CITATIONS"].includes(
+      status,
+    )
+  ) {
+    return "loading";
+  }
+  return "failed";
+}
+
+function ChatCitations({ run }: { readonly run: AnswerRun }): JSX.Element {
+  if (run.citations.length === 0) return <></>;
+  return (
+    <div className="chat-citation-list">
+      {run.citations.map((citation) => (
+        <div
+          className="chat-citation-card"
+          key={`${run.id}:${citation.handle}`}
+          title={citation.excerpt}
+        >
+          <strong>{citation.documentName}</strong>
+          <small>
+            {citation.pageNumber === null
+              ? "Page unavailable"
+              : `p. ${citation.pageNumber}`}
+            {citation.clauseLabel === null ? "" : ` · ${citation.clauseLabel}`}
+          </small>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AssistantResponse({
+  answer,
+  onRetry,
+  onShowSuggestions,
+  run,
+  tenderFilesHref,
+}: {
+  readonly answer?: string;
+  readonly onRetry: () => void;
+  readonly onShowSuggestions: () => void;
+  readonly run: AnswerRun;
+  readonly tenderFilesHref: string;
+}): JSX.Element {
+  const state = assistantResponseState(run.status);
+  if (state === "loading") {
+    const copy = ["QUEUED", "RETRIEVING"].includes(run.status)
+      ? "Searching authorised tender sources…"
+      : "Preparing grounded answer…";
+    return (
+      <article
+        aria-live="polite"
+        className="chat-message chat-message--assistant chat-response-card chat-response-card--loading"
+      >
+        <strong>Tender Intelligence</strong>
+        <p>{copy}</p>
+      </article>
+    );
+  }
+  if (state === "insufficient_evidence") {
+    return (
+      <article className="chat-message chat-message--assistant chat-response-card chat-response-card--insufficient">
+        <strong>Tender Intelligence</strong>
+        <p>
+          I couldn’t find enough authorised evidence in the current tender
+          sources to answer that confidently.
+        </p>
+        <p className="chat-response-card__hint">
+          Try a broader wording, review the tender files, or choose a suggested
+          question.
+        </p>
+        <div className="chat-response-card__actions">
+          <Button onClick={onRetry} type="button" variant="secondary">
+            Retry
+          </Button>
+          <a className="button button--quiet" href={tenderFilesHref}>
+            Open tender files
+          </a>
+          <Button onClick={onShowSuggestions} type="button" variant="quiet">
+            Try suggested prompts
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  if (state === "review_required") {
+    return (
+      <article className="chat-message chat-message--assistant chat-response-card chat-response-card--review">
+        <strong>Tender Intelligence</strong>
+        <p>
+          {answer ??
+            "The tender evidence raises a point that requires human review."}
+        </p>
+        <ChatCitations run={run} />
+      </article>
+    );
+  }
+  if (state === "failed") {
+    const providerUnavailable = [
+      "AI_PROVIDER_UNAVAILABLE",
+      "PROVIDER_AUTH_FAILED",
+      "PROVIDER_DEPENDENCY_UNAVAILABLE",
+      "PROVIDER_MODEL_UNAVAILABLE",
+      "PROVIDER_NETWORK_ERROR",
+      "PROVIDER_QUOTA_EXHAUSTED",
+      "PROVIDER_RATE_LIMITED",
+      "PROVIDER_SERVICE_UNAVAILABLE",
+      "PROVIDER_TIMEOUT",
+    ].includes(run.failureCode ?? "");
+    return (
+      <article className="chat-message chat-message--assistant chat-response-card chat-response-card--failed">
+        <strong>Tender Intelligence</strong>
+        <p>
+          {providerUnavailable
+            ? "The AI service was temporarily unavailable. Your question and tender evidence are saved."
+            : "We couldn’t generate a response."}
+        </p>
+        <div className="chat-response-card__actions">
+          <Button onClick={onRetry} type="button" variant="secondary">
+            Retry
+          </Button>
+        </div>
+      </article>
+    );
+  }
+  return (
+    <article className="chat-message chat-message--assistant">
+      <div className="chat-message__meta">
+        <strong>Tender Intelligence</strong>
+      </div>
+      <p>{answer}</p>
+      <ChatCitations run={run} />
+    </article>
+  );
 }
 
 export function RagChatbot({
   organisationId,
+  initialConversationId,
   tenderId,
   tenderTitle,
   versionId,
+  compact = false,
+  embedded = false,
+  streamlined = false,
+  onConversationChange,
 }: {
   readonly organisationId: string;
+  readonly initialConversationId?: string;
   readonly tenderId: string;
   readonly tenderTitle?: string;
   readonly versionId: string;
+  readonly compact?: boolean;
+  readonly embedded?: boolean;
+  readonly streamlined?: boolean;
+  readonly onConversationChange?: (id: string) => void;
 }): JSX.Element {
+  const [readinessLoaded, setReadinessLoaded] = useState(false);
+  const [sendConflict, setSendConflict] = useState(false);
   const [indexes, setIndexes] = useState<readonly RagIndex[]>([]);
   const [conversations, setConversations] = useState<readonly Conversation[]>(
     [],
   );
-  const [selectedConversation, setSelectedConversation] = useState("");
+  const [selectedConversation, setSelectedConversation] = useState(
+    initialConversationId === "new" ? "" : (initialConversationId ?? ""),
+  );
+  const activeSelection = useRef(selectedConversation);
+  activeSelection.current = selectedConversation;
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
   const [mode, setMode] = useState<SourceMode>("TENDER_ONLY");
   const [status, setStatus] = useState("Loading chatbot status...");
@@ -194,31 +425,21 @@ export function RagChatbot({
   const [searchQuery, setSearchQuery] = useState("");
   const deferredSearch = useDeferredValue(searchQuery);
   const [busyAction, setBusyAction] = useState("");
-  const [draftTitle, setDraftTitle] = useState("");
-  const [pinnedIds, setPinnedIds] = useState<readonly string[]>(() =>
-    readPinnedIds(tenderId),
-  );
+  const [indexFailure, setIndexFailure] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState("");
 
   const base = `/organisations/${organisationId}/tenders/${tenderId}`;
+  const tenderFilesHref = `/tenders/${organisationId}/${tenderId}?stage=files`;
 
   useEffect(() => {
-    setPinnedIds(readPinnedIds(tenderId));
-  }, [tenderId]);
-
-  function togglePinned(conversationId: string): void {
-    setPinnedIds((current) => {
-      const next = current.includes(conversationId)
-        ? current.filter((id) => id !== conversationId)
-        : [...current, conversationId];
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(
-          pinStorageKey(tenderId),
-          JSON.stringify(next),
-        );
-      }
-      return next;
-    });
-  }
+    const requested =
+      initialConversationId === "new" ? "" : (initialConversationId ?? "");
+    if (requested === activeSelection.current) return;
+    setSelectedConversation(requested);
+    setDetail(null);
+    setComposer("");
+    setSendConflict(false);
+  }, [initialConversationId, base]);
 
   async function load(): Promise<void> {
     try {
@@ -231,22 +452,17 @@ export function RagChatbot({
       const safeIndexes = normalizeIndexes(loadedIndexes);
       const safeConversations = normalizeConversations(loadedConversations);
       setIndexes(safeIndexes);
-      setConversations(safeConversations);
-      setSelectedConversation((current) => {
-        if (
-          current !== "" &&
-          safeConversations.some((item) => item.id === current)
-        ) {
-          return current;
-        }
-        const firstActive = safeConversations.find(
-          (item) => item.status === undefined || item.status === "ACTIVE",
-        );
-        return firstActive?.id ?? "";
-      });
+      setReadinessLoaded(true);
+      setConversations(
+        safeConversations.map((item) => ({
+          ...item,
+          title: deriveConversationTitle(item.title || "Untitled conversation"),
+        })),
+      );
       setStatus("");
     } catch (caught) {
-      setStatus(formatApiError(caught, "Chatbot status is unavailable."));
+      setReadinessLoaded(false);
+      setStatus(chatError(caught, "Tender search status is unavailable."));
     }
   }
 
@@ -256,16 +472,14 @@ export function RagChatbot({
       return;
     }
     try {
-      setDetail(
-        normalizeConversationDetail(
-          await apiRequest<ConversationDetail>(
-            `${base}/rag-conversations/${selectedConversation}`,
-          ),
-        ),
+      const loaded = await apiRequest<ConversationDetail>(
+        `${base}/rag-conversations/${selectedConversation}`,
       );
+      if (activeSelection.current !== selectedConversation) return;
+      setDetail(normalizeConversationDetail(loaded));
     } catch (caught) {
       setStatus(
-        formatApiError(
+        chatError(
           caught,
           "This conversation is unavailable or no longer authorised.",
         ),
@@ -285,17 +499,43 @@ export function RagChatbot({
     return () => window.clearInterval(timer);
   }, [base, selectedConversation]);
 
-  const currentIndex = indexes.find((item) => item.sourceMode === mode) ?? null;
+  const activeMode = detail?.sourceMode ?? mode;
+  const currentIndex =
+    indexes.find((item) =>
+      detail?.indexRunId !== undefined
+        ? item.id === detail.indexRunId
+        : item.sourceMode === activeMode &&
+          item.tenderVersionId === versionId &&
+          item.invalidatedAt === null &&
+          item.status === "COMPLETE",
+    ) ??
+    indexes.find(
+      (item) =>
+        item.sourceMode === activeMode && item.tenderVersionId === versionId,
+    ) ??
+    null;
+  const searchReady =
+    readinessLoaded &&
+    !sendConflict &&
+    currentIndex?.status === "COMPLETE" &&
+    currentIndex.invalidatedAt === null &&
+    currentIndex.tenderVersionId === versionId &&
+    (selectedConversation === ""
+      ? true
+      : detail !== null &&
+        detail.indexRunId === currentIndex.id &&
+        detail.status === "ACTIVE");
+  const preparing =
+    currentIndex !== null &&
+    ["QUEUED", "CHUNKING", "EMBEDDING", "INDEXING", "VALIDATING"].includes(
+      currentIndex.status,
+    );
   const currentIndexTone =
     currentIndex?.status === "FAILED"
       ? "danger"
       : currentIndex?.status === "COMPLETE"
         ? "success"
         : "info";
-  const currentIndexNote =
-    currentIndex?.status === "FAILED"
-      ? "AI search preparation failed safely for this tender scope. Retry building the current index."
-      : "Persistent chats exist per tender. Pinning, renaming, and cross-tender history are not currently supported.";
   const filteredConversations = useMemo(() => {
     const query = deferredSearch.trim().toLowerCase();
     return conversations.filter((item) => {
@@ -303,11 +543,11 @@ export function RagChatbot({
       return item.title.toLowerCase().includes(query);
     });
   }, [conversations, deferredSearch]);
-  const pinnedConversations = filteredConversations.filter((item) =>
-    pinnedIds.includes(item.id),
+  const pinnedConversations = filteredConversations.filter(
+    (conversation) => conversation.pinned,
   );
   const recentConversations = filteredConversations.filter(
-    (item) => !pinnedIds.includes(item.id),
+    (conversation) => !conversation.pinned,
   );
 
   const starterPrompts = [
@@ -318,36 +558,40 @@ export function RagChatbot({
 
   const pairedMessages = useMemo(() => {
     if (detail === null) return [];
-    let assistantIndex = -1;
     return detail.messages.map((message) => {
       const answerRun =
         message.role === "ASSISTANT"
-          ? (detail.answerRuns[++assistantIndex] ?? null)
+          ? (detail.answerRuns.find(
+              (run) => run.answerMessageId === message.id,
+            ) ?? null)
           : null;
-      return { answerRun, message };
+      const questionRun =
+        message.role === "USER"
+          ? (detail.answerRuns.find(
+              (run) => run.questionMessageId === message.id,
+            ) ?? null)
+          : null;
+      return { answerRun, message, questionRun };
     });
   }, [detail]);
 
   async function buildIndex(): Promise<void> {
     setBusyAction("index");
-    setStatus("Indexing authorised sources...");
+    setIndexFailure(false);
+    setStatus("Preparing tender search…");
     try {
       await apiRequest(`${base}/versions/${versionId}/rag-indexes`, {
         body: JSON.stringify({
           idempotency_key: crypto.randomUUID(),
-          source_mode: mode,
+          source_mode: activeMode,
         }),
         method: "POST",
       });
       await load();
-      setStatus("A current source index has been queued.");
+      setStatus("Preparing tender search…");
     } catch (caught) {
-      setStatus(
-        formatApiError(
-          caught,
-          "Indexing could not start. A current extraction, permission, and configured provider are required.",
-        ),
-      );
+      setIndexFailure(true);
+      setStatus(chatError(caught, "We couldn't prepare tender search."));
     } finally {
       setBusyAction("");
     }
@@ -359,22 +603,18 @@ export function RagChatbot({
         `${base}/rag-conversations`,
         {
           body: JSON.stringify({
-            source_mode: mode,
-            title:
-              draftTitle.trim() === ""
-                ? buildConversationTitle(question)
-                : draftTitle.trim(),
+            source_mode: activeMode,
+            title: deriveConversationTitle(question),
           }),
           method: "POST",
         },
       );
-      setDraftTitle("");
       setSelectedConversation(conversation.id);
       await load();
       return conversation.id;
     } catch (caught) {
       setStatus(
-        formatApiError(
+        chatError(
           caught,
           "Create a completed current index for this source mode first.",
         ),
@@ -383,10 +623,8 @@ export function RagChatbot({
     }
   }
 
-  async function ask(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    const question = composer.trim();
-    if (question === "") return;
+  async function queueQuestion(question: string): Promise<void> {
+    if (question === "" || !searchReady || busyAction !== "") return;
     let conversationId = selectedConversation;
     setBusyAction("ask");
     setStatus("Retrieving fresh authorised evidence...");
@@ -407,10 +645,18 @@ export function RagChatbot({
         },
       );
       setComposer("");
-      await loadConversation();
+      const saved = await apiRequest<ConversationDetail>(
+        `${base}/rag-conversations/${conversationId}`,
+      );
+      setDetail(normalizeConversationDetail(saved));
+      await load();
+      window.dispatchEvent(new Event("conversations-changed"));
+      onConversationChange?.(conversationId);
     } catch (caught) {
+      if (caught instanceof PublicApiError && caught.status === 409)
+        setSendConflict(true);
       setStatus(
-        formatApiError(
+        chatError(
           caught,
           "The question could not be queued. The provider or source index may be unavailable.",
         ),
@@ -418,6 +664,27 @@ export function RagChatbot({
     } finally {
       setBusyAction("");
     }
+  }
+
+  async function retryAnswer(runId: string): Promise<void> {
+    if (busyAction !== "" || selectedConversation === "") return;
+    setBusyAction(`retry:${runId}`);
+    try {
+      await apiRequest(`${base}/rag-answers/${runId}/retry`, {
+        method: "POST",
+      });
+      await loadConversation();
+      await load();
+    } catch (caught) {
+      setStatus(chatError(caught, "The response could not be retried."));
+    } finally {
+      setBusyAction("");
+    }
+  }
+
+  async function ask(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault();
+    await queueQuestion(composer.trim());
   }
 
   async function archiveConversation(): Promise<void> {
@@ -434,9 +701,7 @@ export function RagChatbot({
       await load();
       setStatus("Conversation archived.");
     } catch (caught) {
-      setStatus(
-        formatApiError(caught, "The conversation could not be archived."),
-      );
+      setStatus(chatError(caught, "The conversation could not be archived."));
     } finally {
       setBusyAction("");
     }
@@ -452,351 +717,382 @@ export function RagChatbot({
       await load();
       setStatus("Conversation deleted.");
     } catch (caught) {
-      setStatus(
-        formatApiError(caught, "The conversation could not be deleted."),
-      );
+      setStatus(chatError(caught, "The conversation could not be deleted."));
     } finally {
       setBusyAction("");
     }
   }
 
+  function renderConversation(conversation: Conversation): JSX.Element {
+    return (
+      <ConversationRow
+        conversation={conversation}
+        deleteConversation={deleteConversation}
+        isActive={selectedConversation === conversation.id}
+        isMenuOpen={openMenuId === conversation.id}
+        key={conversation.id}
+        onOpen={() => {
+          setSendConflict(false);
+          setDetail(null);
+          setMode(conversation.sourceMode);
+          setSelectedConversation(conversation.id);
+          onConversationChange?.(conversation.id);
+        }}
+        onToggleMenu={() =>
+          setOpenMenuId((current) =>
+            current === conversation.id ? "" : conversation.id,
+          )
+        }
+        onTogglePin={() =>
+          void apiRequest(
+            `/organisations/${organisationId}/conversations/${conversation.id}`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ pinned: !conversation.pinned }),
+            },
+          )
+            .then(() => {
+              setOpenMenuId("");
+              return load();
+            })
+            .catch((caught) =>
+              setStatus(chatError(caught, "Pin could not be saved.")),
+            )
+        }
+      />
+    );
+  }
+
   return (
-    <div className="chat-workspace">
-      <aside className="workspace-card chat-rail">
-        <div className="chat-rail__identity">
-          <span className="workspace-sidebar__brand-mark" aria-hidden="true">
-            TI
-          </span>
-          <div>
-            <strong>Tender Intelligence</strong>
-            <small>AI Chat</small>
-          </div>
-        </div>
-
-        <nav aria-label="Chat actions" className="chat-rail__shortcuts">
-          <button
-            className="chat-rail__shortcut"
-            onClick={() => {
-              setSelectedConversation("");
-              setDetail(null);
-              setDraftTitle("");
-              setComposer("");
-            }}
-            type="button"
-          >
-            <Plus aria-hidden="true" size={16} />
-            <span>New chat</span>
-          </button>
-          <label className="chat-rail__shortcut chat-rail__search">
-            <Search aria-hidden="true" size={16} />
-            <Input
-              aria-label="Search current tender chats"
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search chats"
-              value={searchQuery}
-            />
-          </label>
-        </nav>
-
-        <nav aria-label="Chat shortcuts" className="chat-rail__shortcuts">
-          <Link className="chat-rail__shortcut" href="/dashboard">
-            <Home aria-hidden="true" size={16} />
-            <span>Home</span>
-          </Link>
-          <Link
-            className="chat-rail__shortcut"
-            href={`/tenders/${organisationId}`}
-          >
-            <FileText aria-hidden="true" size={16} />
-            <span>Tenders</span>
-          </Link>
-          <Link
-            className="chat-rail__shortcut"
-            href={`/documents/${organisationId}`}
-          >
-            <FileText aria-hidden="true" size={16} />
-            <span>Company documents</span>
-          </Link>
-        </nav>
-
-        {pinnedConversations.length > 0 ? (
-          <div className="chat-rail__group">
-            <div className="chat-rail__group-header">
-              <strong>Pinned</strong>
+    <div
+      className={`chat-workspace ${embedded ? "chat-workspace--embedded" : ""} ${streamlined ? "chat-workspace--streamlined" : ""} ${compact ? "chat-workspace--compact" : ""}`}
+    >
+      {!embedded ? (
+        <aside className="workspace-card chat-rail">
+          {!streamlined ? (
+            <div className="chat-rail__identity">
+              <span
+                className="workspace-sidebar__brand-mark"
+                aria-hidden="true"
+              >
+                TI
+              </span>
+              <div>
+                <strong>Tender Intelligence</strong>
+                <small>AI Chat</small>
+              </div>
             </div>
-            <div className="chat-rail__list">
-              {pinnedConversations.map((conversation) => (
-                <div
-                  className={`chat-rail__item ${selectedConversation === conversation.id ? "chat-rail__item--active" : ""}`}
-                  key={conversation.id}
-                >
-                  <button
-                    className="chat-rail__item-button"
-                    onClick={() => setSelectedConversation(conversation.id)}
-                    type="button"
-                  >
-                    <span>{conversation.title}</span>
-                    <small>{formatTimestamp(conversation.updatedAt)}</small>
-                  </button>
-                  <IconButton
-                    className="chat-rail__item-action"
-                    label={`Unpin ${conversation.title}`}
-                    onClick={() => togglePinned(conversation.id)}
-                  >
-                    <Star aria-hidden="true" fill="currentColor" size={14} />
-                  </IconButton>
+          ) : null}
+
+          <nav aria-label="Chat actions" className="chat-rail__shortcuts">
+            <button
+              className="chat-rail__shortcut"
+              onClick={() => {
+                setSendConflict(false);
+                setSelectedConversation("");
+                onConversationChange?.("new");
+                setDetail(null);
+                setComposer("");
+              }}
+              type="button"
+            >
+              <Plus aria-hidden="true" size={16} />
+              <span>New chat</span>
+            </button>
+            <label className="chat-rail__shortcut chat-rail__search">
+              <Search aria-hidden="true" size={16} />
+              <Input
+                aria-label="Search current tender chats"
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search chats"
+                value={searchQuery}
+              />
+            </label>
+          </nav>
+
+          <div className="chat-rail__scroll">
+            {streamlined ? (
+              <div className="chat-rail__scope">
+                <div className="chat-rail__group-header">
+                  <strong>This tender</strong>
                 </div>
-              ))}
-            </div>
-          </div>
-        ) : null}
-
-        <div className="chat-rail__group">
-          <div className="chat-rail__group-header">
-            <strong>Recent</strong>
-          </div>
-          {recentConversations.length === 0 ? (
-            <p className="workspace-sidebar__empty">
-              {filteredConversations.length === 0
-                ? "No saved conversations for this tender yet."
-                : "No unpinned conversations match this search."}
-            </p>
-          ) : (
-            <div className="chat-rail__list">
-              {recentConversations.map((conversation) => (
-                <div
-                  className={`chat-rail__item ${selectedConversation === conversation.id ? "chat-rail__item--active" : ""}`}
-                  key={conversation.id}
-                >
-                  <button
-                    className="chat-rail__item-button"
-                    onClick={() => setSelectedConversation(conversation.id)}
-                    type="button"
-                  >
-                    <span>{conversation.title}</span>
-                    <small>{formatTimestamp(conversation.updatedAt)}</small>
-                  </button>
-                  <div className="chat-rail__item-actions">
-                    <IconButton
-                      label={`Pin ${conversation.title}`}
-                      onClick={() => togglePinned(conversation.id)}
-                    >
-                      <Star aria-hidden="true" size={14} />
-                    </IconButton>
-                    <IconButton
-                      label={`Delete ${conversation.title}`}
-                      onClick={() => void deleteConversation(conversation.id)}
-                    >
-                      <Trash2 aria-hidden="true" size={14} />
-                    </IconButton>
+                <strong className="chat-rail__scope-title">
+                  {tenderTitle ?? "Current tender"}
+                </strong>
+              </div>
+            ) : null}
+            <div className="chat-rail__group">
+              {pinnedConversations.length > 0 ? (
+                <>
+                  <div className="chat-rail__group-header">
+                    <strong>Pinned</strong>
                   </div>
+                  <div className="chat-rail__list">
+                    {pinnedConversations.map(renderConversation)}
+                  </div>
+                </>
+              ) : null}
+              <div className="chat-rail__group-header">
+                <strong>Recent</strong>
+              </div>
+              {recentConversations.length === 0 ? (
+                <p className="workspace-sidebar__empty">
+                  {filteredConversations.length === 0
+                    ? "No saved conversations for this tender yet."
+                    : "No saved conversations match this search."}
+                </p>
+              ) : (
+                <div className="chat-rail__list">
+                  {recentConversations.map(renderConversation)}
                 </div>
-              ))}
+              )}
             </div>
-          )}
-        </div>
-
-        <div className="chat-rail__footer">
-          <Link
-            className="chat-rail__shortcut"
-            href={`/settings/${organisationId}`}
-          >
-            <Settings aria-hidden="true" size={16} />
-            <span>Settings</span>
-          </Link>
-          <span className="chat-rail__shortcut chat-rail__shortcut--disabled">
-            <MessageSquare aria-hidden="true" size={16} />
-            <span>Help</span>
-          </span>
-          <Link className="chat-rail__shortcut" href="/account">
-            <UserRound aria-hidden="true" size={16} />
-            <span>Account</span>
-          </Link>
-        </div>
-      </aside>
+          </div>
+        </aside>
+      ) : null}
 
       <section className="workspace-card chat-canvas">
-        <header className="chat-canvas__header">
-          <div>
-            <div className="chat-canvas__context">
-              <span>Using tender:</span>
-              <strong>{tenderTitle ?? tenderId}</strong>
+        {!compact ? (
+          <header className="chat-canvas__header">
+            <div>
+              {streamlined ? (
+                <small>Tender</small>
+              ) : (
+                <div className="chat-canvas__context">
+                  <span>Using tender:</span>
+                  <strong>{tenderTitle ?? tenderId}</strong>
+                </div>
+              )}
+              <h2>
+                {detail?.title ??
+                  (selectedConversation === ""
+                    ? streamlined
+                      ? "New conversation"
+                      : "New tender conversation"
+                    : "Tender conversation")}
+              </h2>
+              <p>
+                Answers remain grounded in authorised tender and company
+                evidence sources only. No legal advice or autonomous bid
+                decisions are made here.
+              </p>
             </div>
-            <h2>
-              {detail?.title ??
-                (selectedConversation === ""
-                  ? "New tender conversation"
-                  : "Tender conversation")}
-            </h2>
-            <p>
-              Answers remain grounded in authorised tender and company evidence
-              sources only. No legal advice or autonomous bid decisions are made
-              here.
-            </p>
-          </div>
-
-          <div className="chat-canvas__controls">
-            <label className="chat-canvas__mode">
-              <span>Source mode</span>
-              <Select
-                onChange={(event) => setMode(event.target.value as SourceMode)}
-                value={mode}
-              >
-                <option value="TENDER_ONLY">Tender only</option>
-                <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
-                  Tender and approved company evidence
-                </option>
-                <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
-                  Tender and derived workflow records
-                </option>
-                <option value="FULL_AUTHORISED_TENDER_CONTEXT">
-                  Full authorised tender context
-                </option>
-              </Select>
-            </label>
+          </header>
+        ) : null}
+        {!searchReady ? (
+          <div className="chat-canvas__failure" role="status">
+            <div>
+              <strong>
+                {busyAction === "index" || preparing
+                  ? "Preparing tender search…"
+                  : indexFailure
+                    ? "We couldn't prepare tender search."
+                    : currentIndex?.status === "FAILED"
+                      ? "We couldn't prepare tender search."
+                      : "Prepare tender search"}
+              </strong>
+              <p id="chat-readiness-reason">
+                {indexFailure
+                  ? "Try again to prepare the authorised sources for this tender."
+                  : "Tender search must be ready before sending source-grounded questions."}
+              </p>
+              {detail?.indexRunId && currentIndex?.invalidatedAt != null ? (
+                <small>
+                  This conversation uses an older source index. After
+                  preparation, choose New chat.
+                </small>
+              ) : null}
+            </div>
             <Button
+              disabled={preparing || busyAction !== ""}
               loading={busyAction === "index"}
               onClick={() => void buildIndex()}
-              variant="secondary"
+              variant="quiet"
             >
-              Build current index
+              {preparing || busyAction === "index"
+                ? "Preparing tender search…"
+                : currentIndex === null && !indexFailure
+                  ? "Prepare tender search"
+                  : "Retry"}
             </Button>
-            {selectedConversation !== "" ? (
-              <Button
-                loading={busyAction === "archive"}
-                onClick={() => void archiveConversation()}
-                variant="quiet"
-              >
-                <Archive aria-hidden="true" size={16} />
-                Archive
-              </Button>
-            ) : null}
           </div>
-        </header>
-
-        <div className="chat-canvas__status-row">
-          <Badge tone={currentIndexTone}>
-            {currentIndex === null
-              ? "No current index"
-              : `${humanizeEnum(currentIndex.status)} (${currentIndex.progressPercentage}%)`}
-          </Badge>
-          <Badge tone="neutral">{humanizeEnum(mode)}</Badge>
-          <span className="chat-canvas__status-note">{currentIndexNote}</span>
-        </div>
+        ) : null}
+        {!compact && !streamlined ? (
+          <details className="chat-advanced">
+            <summary>Sources and conversation options</summary>
+            <div className="chat-canvas__controls">
+              <label className="chat-canvas__mode">
+                <span>Source mode</span>
+                <Select
+                  disabled={selectedConversation !== ""}
+                  onChange={(event) =>
+                    setMode(event.target.value as SourceMode)
+                  }
+                  value={activeMode}
+                >
+                  <option value="TENDER_ONLY">Tender only</option>
+                  <option value="TENDER_AND_APPROVED_COMPANY_EVIDENCE">
+                    Tender and approved company evidence
+                  </option>
+                  <option value="TENDER_AND_DERIVED_WORKFLOW_RECORDS">
+                    Tender and derived workflow records
+                  </option>
+                  <option value="FULL_AUTHORISED_TENDER_CONTEXT">
+                    Full authorised tender context
+                  </option>
+                </Select>
+              </label>
+              <Button
+                disabled={preparing || busyAction !== ""}
+                loading={busyAction === "index"}
+                onClick={() => void buildIndex()}
+                variant="secondary"
+              >
+                Prepare tender search
+              </Button>
+              {selectedConversation !== "" ? (
+                <Button
+                  loading={busyAction === "archive"}
+                  onClick={() => void archiveConversation()}
+                  variant="quiet"
+                >
+                  <Archive aria-hidden="true" size={16} />
+                  Archive
+                </Button>
+              ) : null}
+            </div>
+            <div className="chat-canvas__status-row">
+              <Badge tone={currentIndexTone}>
+                {currentIndex === null
+                  ? "Search not prepared"
+                  : `${humanizeEnum(currentIndex.status)} (${currentIndex.progressPercentage}%)`}
+              </Badge>
+              <Badge tone="neutral">{humanizeEnum(activeMode)}</Badge>
+            </div>
+          </details>
+        ) : null}
 
         <div className="chat-canvas__messages">
           {detail === null && selectedConversation === "" ? (
-            <EmptyState
-              description="Start a new tender-scoped conversation. The first prompt can also become the saved conversation title."
-              title="No conversation selected"
-            />
+            streamlined ? (
+              <div className="chat-empty-state">
+                <h2>How can I help?</h2>
+                <p>
+                  Ask about eligibility, missing evidence, risks, or your
+                  proposal draft.
+                </p>
+              </div>
+            ) : (
+              <EmptyState
+                description="Explore eligibility requirements, missing evidence, risks, and drafting questions."
+                title="Ask about this tender"
+              />
+            )
           ) : pairedMessages.length === 0 ? (
             <EmptyState
               description="Ask a tender question to start a cited conversation."
               title="Conversation ready"
             />
           ) : (
-            pairedMessages.map(({ answerRun, message }) => (
-              <article
-                className={`chat-message chat-message--${message.role === "USER" ? "user" : "assistant"}`}
-                key={message.id}
-              >
-                <div className="chat-message__meta">
-                  <strong>
-                    {message.role === "USER" ? "You" : "Tender Intelligence"}
-                  </strong>
-                  {answerRun !== null ? (
-                    <Badge
-                      tone={
-                        answerRun.status === "COMPLETED" ? "success" : "warning"
-                      }
-                    >
-                      {humanizeEnum(answerRun.status)}
-                    </Badge>
-                  ) : null}
-                </div>
-                <p>{message.content}</p>
-                {answerRun?.status === "INSUFFICIENT_EVIDENCE" ? (
-                  <Alert
-                    tone="warning"
-                    title="Insufficient authorised evidence"
-                  >
-                    <p>No answer could be grounded for this question.</p>
-                  </Alert>
+            pairedMessages.map(({ answerRun, message, questionRun }) => (
+              <Fragment key={message.id}>
+                {message.role === "USER" ? (
+                  <article className="chat-message chat-message--user">
+                    <div className="chat-message__meta">
+                      <strong>You</strong>
+                    </div>
+                    <p>{withoutDiagnosticSuffix(message.content)}</p>
+                  </article>
+                ) : answerRun !== null ? (
+                  <AssistantResponse
+                    answer={withoutDiagnosticSuffix(message.content)}
+                    onRetry={() => void retryAnswer(answerRun.id)}
+                    onShowSuggestions={() =>
+                      document
+                        .getElementById("chat-suggestions")
+                        ?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        })
+                    }
+                    run={answerRun}
+                    tenderFilesHref={tenderFilesHref}
+                  />
+                ) : (
+                  <article className="chat-message chat-message--assistant">
+                    <div className="chat-message__meta">
+                      <strong>Tender Intelligence</strong>
+                    </div>
+                    <p>{withoutDiagnosticSuffix(message.content)}</p>
+                  </article>
+                )}
+                {message.role === "USER" &&
+                questionRun !== null &&
+                questionRun.answerMessageId == null ? (
+                  <AssistantResponse
+                    onRetry={() => void retryAnswer(questionRun.id)}
+                    onShowSuggestions={() =>
+                      document
+                        .getElementById("chat-suggestions")
+                        ?.scrollIntoView({
+                          behavior: "smooth",
+                          block: "center",
+                        })
+                    }
+                    run={questionRun}
+                    tenderFilesHref={tenderFilesHref}
+                  />
                 ) : null}
-                {answerRun?.status === "HUMAN_REVIEW_REQUIRED" ? (
-                  <Alert tone="warning" title="Human review required">
-                    <p>This answer path requires explicit human review.</p>
-                  </Alert>
-                ) : null}
-                {answerRun?.status === "FAILED" ? (
-                  <Alert tone="danger" title="Provider unavailable">
-                    <p>No fallback answer was generated for this question.</p>
-                  </Alert>
-                ) : null}
-                {answerRun !== null && answerRun.citations.length > 0 ? (
-                  <div className="chat-citation-list">
-                    {answerRun.citations.map((citation) => (
-                      <Card
-                        className="chat-citation-card"
-                        key={`${answerRun.id}:${citation.handle}`}
-                      >
-                        <strong>
-                          [{citation.handle}] {citation.documentName}
-                        </strong>
-                        <p>{citation.excerpt}</p>
-                        <small>
-                          {citation.pageNumber === null
-                            ? "Page unavailable"
-                            : `Page ${citation.pageNumber}`}
-                          {citation.clauseLabel === null
-                            ? ""
-                            : `, clause ${citation.clauseLabel}`}
-                        </small>
-                      </Card>
-                    ))}
-                  </div>
-                ) : null}
-              </article>
+              </Fragment>
             ))
           )}
         </div>
 
-        <div className="chat-suggestions">
-          {starterPrompts.map((prompt) => (
-            <button
-              className="chat-suggestions__chip"
-              key={prompt}
-              onClick={() => setComposer(prompt)}
-              type="button"
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
+        {!streamlined ? (
+          <div className="chat-suggestions" id="chat-suggestions">
+            {starterPrompts.map((prompt) => (
+              <button
+                className="chat-suggestions__chip"
+                key={prompt}
+                onClick={() => setComposer(prompt)}
+                type="button"
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        ) : null}
 
         <form className="chat-composer" onSubmit={(event) => void ask(event)}>
-          {selectedConversation === "" ? (
-            <Input
-              onChange={(event) => setDraftTitle(event.target.value)}
-              placeholder="Optional title for the new saved conversation"
-              value={draftTitle}
-            />
-          ) : null}
           <Textarea
             aria-label="Ask about this tender"
+            aria-describedby={
+              !searchReady ? "chat-readiness-reason" : undefined
+            }
             maxLength={2_000}
             onChange={(event) => setComposer(event.target.value)}
-            placeholder="Ask about this tender using fresh retrieval"
-            rows={4}
+            placeholder={
+              streamlined
+                ? "Ask about this tender..."
+                : "Ask about this tender?"
+            }
+            rows={2}
             value={composer}
           />
           <div className="chat-composer__actions">
             <span aria-live="polite" className="chat-composer__status">
-              {status}
+              {busyAction === "index" || indexFailure || preparing
+                ? ""
+                : status}
             </span>
-            <Button loading={busyAction === "ask"} type="submit">
-              Ask with fresh retrieval
+            <Button
+              disabled={
+                !searchReady || composer.trim() === "" || busyAction !== ""
+              }
+              loading={busyAction === "ask"}
+              type="submit"
+            >
+              Send message
             </Button>
           </div>
         </form>

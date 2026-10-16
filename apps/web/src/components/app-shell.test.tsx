@@ -112,7 +112,7 @@ describe("app shell assistant and sidebar semantics", () => {
     });
   });
 
-  it("shows AI Assistant as a primary destination and keeps tender chat shortcuts tender-scoped", async () => {
+  it("shows AI Chat as a primary destination and keeps tender chat shortcuts tender-scoped", async () => {
     render(
       <AppShell>
         <div>Child content</div>
@@ -120,18 +120,40 @@ describe("app shell assistant and sidebar semantics", () => {
     );
 
     expect(
-      await screen.findByRole("link", { name: "AI Assistant" }),
+      await screen.findByRole("link", { name: "AI Chat" }),
+    ).toHaveAttribute("href", "/assistant/org-1");
+
+    expect(screen.getByRole("link", { name: "Company Docs" })).toHaveAttribute(
+      "href",
+      "/documents/org-1",
+    );
+    expect(
+      screen.getByRole("link", { name: /Tender Ops.*Aparna/ }),
+    ).toHaveAttribute("href", "/onboarding/org-1");
+    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
+      "href",
+      "/settings/org-1?section=organisation",
+    );
+    expect(
+      screen.getByRole("link", { name: /Browse tender chats/ }),
     ).toHaveAttribute("href", "/assistant/org-1");
 
     const chatsSection = await screen.findByRole("heading", {
-      name: "Tender chats",
+      name: "Chats",
     });
     const chats = within(chatsSection.closest("section")!);
 
-    expect(chats.getAllByText("Tender chat")).toHaveLength(2);
-    expect(chats.queryByText("Ask tender")).not.toBeInTheDocument();
     expect(
-      chats.queryByRole("link", { name: /AI Assistant/ }),
+      chats.getByText(
+        "AI-Enabled Municipal Video Analytics System - Supply, Installation and 3-Year Support",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      chats.getByText("Urban CCTV operations and analytics support"),
+    ).toBeInTheDocument();
+    expect(chats.queryByText("Tender chat")).not.toBeInTheDocument();
+    expect(
+      chats.queryByRole("link", { name: /AI Chat/ }),
     ).not.toBeInTheDocument();
   });
 
@@ -163,5 +185,28 @@ describe("app shell assistant and sidebar semantics", () => {
       "workspace-sidebar__quick-link--active",
     );
     expect(drafts.queryByText("Preparing draft...")).not.toBeInTheDocument();
+  });
+
+  it("uses an explicit Overview stage for Recent Tender links", async () => {
+    render(
+      <AppShell>
+        <div>Child content</div>
+      </AppShell>,
+    );
+
+    const recentTenders = within(
+      (await screen.findByRole("heading", { name: "Recent Tenders" })).closest(
+        "section",
+      )!,
+    );
+    expect(
+      recentTenders.getByRole("link", {
+        name: "AI-Enabled Municipal Video Analytics System - Supply, Installation and 3-Year Support",
+      }),
+    ).toHaveAttribute("href", "/tenders/org-1/tender-1?stage=overview");
+    expect(
+      recentTenders.queryByText(/Karnataka Municipal Technology Authority/),
+    ).not.toBeInTheDocument();
+    expect(recentTenders.queryByText(/days left/)).not.toBeInTheDocument();
   });
 });

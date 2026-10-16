@@ -13,7 +13,11 @@ import {
   type RagSourceMode,
 } from "@tender/domain";
 import { createHash } from "node:crypto";
-import type { AnswerGateway, EmbeddingGateway } from "./ai-provider.js";
+import type {
+  AnswerGateway,
+  EmbeddingGateway,
+  GeneratedAnswer,
+} from "./ai-provider.js";
 import { ProviderResponseError } from "./ai-provider.js";
 
 export type RagJob =
@@ -50,7 +54,58 @@ interface RetrievedChunk {
   readonly fused_score: number;
   readonly lexical_rank: bigint | null;
   readonly page_number: number | null;
+  readonly source_class: RagSourceClass;
   readonly vector_rank: bigint | null;
+}
+
+const recoverableAnswerFailures = new Set([
+  "AI_PROVIDER_UNAVAILABLE",
+  "INVALID_PROVIDER_RESPONSE",
+  "PROVIDER_AUTH_FAILED",
+  "PROVIDER_DEPENDENCY_UNAVAILABLE",
+  "PROVIDER_MODEL_UNAVAILABLE",
+  "PROVIDER_NETWORK_ERROR",
+  "PROVIDER_QUOTA_EXHAUSTED",
+  "PROVIDER_RATE_LIMITED",
+  "PROVIDER_SERVICE_UNAVAILABLE",
+  "PROVIDER_TIMEOUT",
+]);
+
+export function createProviderFallbackAnswer(
+  error: unknown,
+  contexts: readonly { readonly handle: string; readonly text: string }[],
+): GeneratedAnswer | null {
+  if (
+    !(error instanceof ProviderResponseError) ||
+    !recoverableAnswerFailures.has(error.code)
+  )
+    return null;
+  const evidence = contexts
+    .filter(
+      ({ text }) =>
+        text.trim().length >= 3 &&
+        !text.startsWith("Answers are limited to authorised tender") &&
+        !text.startsWith("[UNTRUSTED CONTENT;"),
+    )
+    .slice(0, 4)
+    .map(({ handle, text }) => {
+      const normalized = text.replace(/\s+/g, " ").trim();
+      const excerpt = normalized.slice(0, 260).trimEnd();
+      return { excerpt, handle };
+    });
+  if (evidence.length === 0) return null;
+  return {
+    answer: [
+      "I found these relevant points in the current tender:",
+      ...evidence.map(({ excerpt }) => `• ${excerpt}`),
+    ].join("\n"),
+    citationClaims: evidence.map(({ excerpt, handle }) => ({
+      claim: excerpt,
+      evidence: excerpt,
+      handles: [handle],
+    })),
+    outcome: "ANSWERED",
+  };
 }
 
 interface CitationCoordinatesInput {
@@ -89,7 +144,9 @@ export class RagProcessor {
         ? "PROVIDER_UNAVAILABLE"
         : error instanceof ProviderResponseError
           ? error.code
-          : error.message.slice(0, 80);
+          : /^[A-Z][A-Z0-9_]{1,79}$/.test(error.message)
+            ? error.message
+            : "RAG_PROCESSING_FAILED";
     if (job.kind === "INDEX")
       await this.database.ragIndexRun.updateMany({
         data: { failureCode, status: "FAILED" },
@@ -582,6 +639,8 @@ export class RagProcessor {
     if (run === null) throw new Error("RAG_ANSWER_NOT_FOUND");
     if (
       run.status === "COMPLETE" ||
+      run.status === "INSUFFICIENT_EVIDENCE" ||
+      run.status === "HUMAN_REVIEW_REQUIRED" ||
       run.status === "INVALIDATED" ||
       run.status === "CANCELLED"
     )
@@ -624,7 +683,7 @@ export class RagProcessor {
     const chunks = await this.database.$queryRaw<readonly RetrievedChunk[]>(
       Prisma.sql`
         WITH authorised AS (
-          SELECT "id","content","content_checksum","document_name","page_number","clause_label",
+          SELECT "id","content","content_checksum","document_name","page_number","clause_label","source_class",
             ts_rank_cd("search_vector", plainto_tsquery('english', ${run.questionMessage.content})) AS lexical_score,
             1 - ("embedding" <=> ${`[${queryVector.join(",")}]`}::vector) AS vector_score
           FROM "rag_chunks"
@@ -639,17 +698,27 @@ export class RagProcessor {
             rank() OVER (ORDER BY lexical_score DESC, "id") AS lexical_rank,
             rank() OVER (ORDER BY vector_score DESC, "id") AS vector_rank
           FROM authorised
-          ORDER BY GREATEST(lexical_score, vector_score) DESC
-          LIMIT ${RAG_CANDIDATE_LIMIT}
         )
-        SELECT "id" AS chunk_id,"content","content_checksum","document_name","page_number","clause_label",
+        SELECT "id" AS chunk_id,"content","content_checksum","document_name","page_number","clause_label","source_class",
           lexical_rank,vector_rank,
           (1.0/(60+lexical_rank) + 1.0/(60+vector_rank))::float8 AS fused_score
-        FROM ranked ORDER BY fused_score DESC, "id" LIMIT ${RAG_CONTEXT_LIMIT}`,
+        FROM ranked
+        WHERE lexical_rank <= ${RAG_CANDIDATE_LIMIT}
+          OR vector_rank <= ${RAG_CANDIDATE_LIMIT}
+          OR "source_class"::text IN ('TENDER_METADATA','STRUCTURED_FIELD')
+        ORDER BY CASE
+          WHEN "source_class"::text = 'TENDER_METADATA' THEN 0
+          WHEN "source_class"::text = 'STRUCTURED_FIELD' THEN 1
+          ELSE 2
+        END,
+          fused_score DESC, "id"
+        LIMIT ${RAG_CONTEXT_LIMIT}`,
     );
     const retrievalLatencyMs = Date.now() - retrievalStarted;
-    const retrieval = await this.database.ragRetrievalRun.create({
-      data: {
+    const retrieval = await this.database.ragRetrievalRun.upsert({
+      where: { answerRunId: run.id },
+      update: {},
+      create: {
         answerRunId: run.id,
         candidateLimit: RAG_CANDIDATE_LIMIT,
         fusionPolicyVersion: RAG_FUSION_POLICY_VERSION,
@@ -661,6 +730,10 @@ export class RagProcessor {
         sourceMode: run.sourceMode,
         tenderId: run.tenderId,
       },
+    });
+    // An interrupted answer can be retried with fresh retrieval under the same run.
+    await this.database.ragRetrievalHit.deleteMany({
+      where: { retrievalRunId: retrieval.id },
     });
     if (chunks.length === 0) {
       await this.completeWithoutAnswer(run.id, retrievalLatencyMs);
@@ -686,11 +759,18 @@ export class RagProcessor {
         : chunk.content,
     }));
     const generationStarted = Date.now();
-    const generated = await this.answers.answer(
-      run.questionMessage.content,
-      contexts,
-      signal,
-    );
+    let generated: GeneratedAnswer;
+    try {
+      generated = await this.answers.answer(
+        run.questionMessage.content,
+        contexts,
+        signal,
+      );
+    } catch (error: unknown) {
+      const fallback = createProviderFallbackAnswer(error, contexts);
+      if (fallback === null) throw error;
+      generated = fallback;
+    }
     const generationLatencyMs = Date.now() - generationStarted;
     await this.answerCheckpoint(run.id, "VERIFYING_CITATIONS", 80, signal);
     const handles = contexts.map(({ handle }, index) => ({
@@ -698,19 +778,35 @@ export class RagProcessor {
       handle,
     }));
     const claimed = generated.citationClaims.flatMap(({ handles }) => handles);
+    const chunkByHandle = new Map(
+      contexts.map(({ handle }, index) => [handle, chunks[index]]),
+    );
+    const normaliseEvidence = (value: string): string =>
+      value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
     if (
-      generated.outcome === "ANSWERED" &&
-      (!verifyCitationHandles(claimed, handles) ||
-        generated.citationClaims.some(
-          ({ claim, handles: claimHandles }) =>
-            !generated.answer.includes(claim) ||
-            claimHandles.some(
-              (handle) => !generated.answer.includes(`[${handle}]`),
-            ),
-        ))
+      (generated.outcome === "ANSWERED" && claimed.length === 0) ||
+      (claimed.length > 0 &&
+        (!verifyCitationHandles(claimed, handles) ||
+          generated.citationClaims.some(
+            ({ claim, evidence, handles: claimHandles }) =>
+              claim.trim() === "" ||
+              claimHandles.length === 0 ||
+              claimHandles.some((handle) => {
+                const chunk = chunkByHandle.get(handle);
+                return (
+                  chunk === undefined ||
+                  !normaliseEvidence(chunk.content).includes(
+                    normaliseEvidence(evidence),
+                  )
+                );
+              }),
+          )))
     )
       throw new Error("CITATION_VERIFICATION_FAILED");
     await this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT id FROM rag_answer_runs WHERE id=${run.id}::uuid AND organisation_id=${run.organisationId}::uuid FOR UPDATE`,
+      );
       const currentRun = await transaction.ragAnswerRun.findFirst({
         select: { id: true },
         where: {
@@ -722,11 +818,14 @@ export class RagProcessor {
           },
           invalidatedAt: null,
           organisationId: run.organisationId,
-          status: "GENERATING",
+          status: "VERIFYING_CITATIONS",
           tenderId: run.tenderId,
         },
       });
       if (currentRun === null) throw new Error("RAG_ANSWER_CANCELLED");
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT id FROM rag_conversations WHERE id=${run.conversationId}::uuid AND organisation_id=${run.organisationId}::uuid FOR UPDATE`,
+      );
       const messageCount = await transaction.ragMessage.count({
         where: {
           conversationId: run.conversationId,
@@ -744,31 +843,36 @@ export class RagProcessor {
           tenderId: run.tenderId,
         },
       });
+      const citationClaimByHandle = new Map<string, string>();
       for (const claim of generated.citationClaims) {
-        for (const handle of claim.handles) {
-          const handleIndex = Number(handle.slice(1)) - 1;
-          const chunk = chunks[handleIndex];
-          if (chunk === undefined) throw new Error("UNKNOWN_CITATION_HANDLE");
-          await transaction.ragAnswerCitation.create({
-            data: {
-              answerRunId: run.id,
-              chunkId: chunk.chunk_id,
-              claimText: claim.claim.slice(0, 1000),
-              clauseLabel: chunk.clause_label,
-              documentName: chunk.document_name,
-              excerpt: chunk.content.slice(0, 1000),
-              handle,
-              pageNumber: chunk.page_number,
-              sourceChecksum: chunk.content_checksum,
-            },
-          });
-        }
+        for (const handle of claim.handles)
+          if (!citationClaimByHandle.has(handle))
+            citationClaimByHandle.set(handle, claim.claim);
+      }
+      for (const [handle, claimText] of citationClaimByHandle) {
+        const handleIndex = Number(handle.slice(1)) - 1;
+        const chunk = chunks[handleIndex];
+        if (chunk === undefined) throw new Error("UNKNOWN_CITATION_HANDLE");
+        await transaction.ragAnswerCitation.create({
+          data: {
+            answerRunId: run.id,
+            chunkId: chunk.chunk_id,
+            claimText: claimText.slice(0, 1000),
+            clauseLabel: chunk.clause_label,
+            documentName: chunk.document_name,
+            excerpt: chunk.content.slice(0, 1000),
+            handle,
+            pageNumber: chunk.page_number,
+            sourceChecksum: chunk.content_checksum,
+          },
+        });
       }
       await transaction.ragAnswerRun.update({
         data: {
           answerMessageId: answer.id,
           completedAt: new Date(),
           currentStage: "Complete",
+          failureCode: null,
           generationLatencyMs,
           progressPercentage: 100,
           retrievalLatencyMs,
@@ -777,6 +881,10 @@ export class RagProcessor {
           totalLatencyMs: Date.now() - started,
         },
         where: { id: run.id },
+      });
+      await transaction.ragConversation.update({
+        where: { id: run.conversationId },
+        data: { updatedAt: new Date() },
       });
     });
   }

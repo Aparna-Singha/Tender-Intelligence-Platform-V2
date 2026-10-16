@@ -13,6 +13,7 @@ const { apiRequest, uploadFileToSignedStorageUrl } = vi.hoisted(() => ({
   apiRequest: vi.fn(),
   uploadFileToSignedStorageUrl: vi.fn(),
 }));
+let search = new URLSearchParams();
 
 vi.mock("../lib/api", () => ({
   PublicApiError: class PublicApiError extends Error {},
@@ -24,12 +25,13 @@ vi.mock("../lib/direct-upload", () => ({
 }));
 vi.mock("next/navigation", () => ({
   usePathname: () => "/documents/org-1",
-  useSearchParams: () => new URLSearchParams(),
+  useSearchParams: () => search,
 }));
 
 describe("company docs workspace", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    search = new URLSearchParams();
     apiRequest.mockReset();
     uploadFileToSignedStorageUrl.mockReset();
     vi.restoreAllMocks();
@@ -75,9 +77,9 @@ describe("company docs workspace", () => {
             displayName: "Factory licence",
             expiryDate: null,
             id: "doc-4",
-            status: "READY",
+            status: "REJECTED",
             updatedAt: "2026-08-16T10:00:00.000Z",
-            verificationStatus: "REJECTED",
+            verificationStatus: "UNVERIFIED",
           },
           {
             category: "PURCHASE_ORDER",
@@ -101,7 +103,7 @@ describe("company docs workspace", () => {
     ).toBeInTheDocument();
     const summaryGrid = screen
       .getByText("Current")
-      .closest(".tender-summary-grid");
+      .closest(".company-docs-health");
     expect(summaryGrid).toBeInstanceOf(HTMLElement);
     if (!(summaryGrid instanceof HTMLElement)) {
       throw new Error("Expected health summary grid to render");
@@ -114,13 +116,11 @@ describe("company docs workspace", () => {
     const tableCard = screen
       .getByRole("table")
       .closest(".company-docs-table-card");
-    expect(currentCard).toHaveTextContent("1");
+    expect(currentCard).toHaveTextContent("0");
     expect(attentionCard).toHaveTextContent("4");
-    expect(expiringCard).toHaveTextContent("1");
-    expect(outdatedCard).toHaveTextContent("0");
-    expect(
-      screen.getByText(/Evidence health needs review|Expiry review coming up/),
-    ).toBeInTheDocument();
+    expect(expiringCard).toHaveTextContent("0");
+    expect(outdatedCard).toHaveTextContent("1");
+    expect(screen.getByLabelText("Evidence health")).toBeInTheDocument();
     expect(screen.getByText("All documents")).toBeInTheDocument();
     expect(screen.getByText("GST certificate")).toBeInTheDocument();
     expect(tableCard).toBeInstanceOf(HTMLElement);
@@ -132,10 +132,9 @@ describe("company docs workspace", () => {
     expect(table.getAllByText("Purchase order").length).toBeGreaterThanOrEqual(
       1,
     );
-    expect(screen.getByText("Human review required")).toBeInTheDocument();
-    expect(screen.getByText("Unverified")).toBeInTheDocument();
-    expect(screen.getByText("Rejected")).toBeInTheDocument();
-    expect(table.getByText("Quarantined")).toBeInTheDocument();
+    expect(table.getAllByText("Needs review")).toHaveLength(2);
+    expect(table.getByText("Rejected")).toBeInTheDocument();
+    expect(table.getByText("Outdated")).toBeInTheDocument();
   });
 
   it("shows truthful supported-type guidance in the upload modal", async () => {
@@ -158,6 +157,17 @@ describe("company docs workspace", () => {
       ".pdf,.jpg,.jpeg,.png,.docx,.xlsx",
     );
     expect(within(dialog).getByRole("combobox")).toHaveValue("UDYAM");
+  });
+
+  it("preserves a safe tender return path when evidence is opened from eligibility", async () => {
+    search = new URLSearchParams({
+      returnTo: "/tenders/org-1/tender-1?stage=eligibility",
+    });
+    render(<DocumentCentre organisationId="org-1" />);
+
+    expect(
+      await screen.findByRole("link", { name: "Return to tender" }),
+    ).toHaveAttribute("href", "/tenders/org-1/tender-1?stage=eligibility");
   });
 
   it("abandons a failed direct upload before completion and allows a clean retry", async () => {

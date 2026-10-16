@@ -9,6 +9,7 @@ import {
   type MessageEvent,
 } from "@nestjs/common";
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -49,6 +50,10 @@ import {
 
 const demonstrationLabel =
   "Demonstration tender — not live procurement information.";
+
+function optionalDate(value: string | undefined): Date | null {
+  return value === undefined ? null : new Date(value);
+}
 
 @Injectable()
 export class TendersService {
@@ -426,14 +431,14 @@ export class TendersService {
           description: input.description ?? null,
           isDemonstration: source.adapterType === "CURATED_DATASET",
           officialSourceUrl: input.official_source_url ?? null,
-          openingDate: input.opening_date ?? null,
+          openingDate: optionalDate(input.opening_date),
           organisationId,
-          preBidMeetingDate: input.pre_bid_meeting_date ?? null,
+          preBidMeetingDate: optionalDate(input.pre_bid_meeting_date),
           procurementType: input.procurement_type ?? null,
-          publicationDate: input.publication_date ?? null,
+          publicationDate: optionalDate(input.publication_date),
           sourceTenderNumber: input.source_tender_number ?? null,
           sourceType: source.adapterType,
-          submissionDeadline: input.submission_deadline,
+          submissionDeadline: new Date(input.submission_deadline),
           title: input.title,
         },
       });
@@ -516,22 +521,22 @@ export class TendersService {
           : { officialSourceUrl: input.official_source_url }),
         ...(input.opening_date === undefined
           ? {}
-          : { openingDate: input.opening_date }),
+          : { openingDate: new Date(input.opening_date) }),
         ...(input.pre_bid_meeting_date === undefined
           ? {}
-          : { preBidMeetingDate: input.pre_bid_meeting_date }),
+          : { preBidMeetingDate: new Date(input.pre_bid_meeting_date) }),
         ...(input.procurement_type === undefined
           ? {}
           : { procurementType: input.procurement_type }),
         ...(input.publication_date === undefined
           ? {}
-          : { publicationDate: input.publication_date }),
+          : { publicationDate: new Date(input.publication_date) }),
         ...(input.source_tender_number === undefined
           ? {}
           : { sourceTenderNumber: input.source_tender_number }),
         ...(input.submission_deadline === undefined
           ? {}
-          : { submissionDeadline: input.submission_deadline }),
+          : { submissionDeadline: new Date(input.submission_deadline) }),
         ...(input.title === undefined ? {} : { title: input.title }),
       },
       where: { deletedAt: null, id: tenderId, organisationId },
@@ -921,14 +926,88 @@ export class TendersService {
     input: CreateCorrigendumRequest,
     requestId: string,
   ): Promise<unknown> {
+    const existing = await this.database.tenderCorrigendum.findFirst({
+      where: {
+        tenderId,
+        OR: [
+          { identifier: input.identifier },
+          { resultingVersion: { sourceFingerprint: input.checksum_sha256 } },
+        ],
+      },
+    });
+    if (existing !== null)
+      return { duplicate: true, version_id: existing.resultingVersionId };
+
+    const sourceTender = await this.database.tender.findFirst({
+      include: {
+        currentVersion: {
+          include: {
+            documents: {
+              where: {
+                approvedObjectKey: { not: null },
+                deletedAt: null,
+                status: "READY",
+              },
+            },
+          },
+        },
+      },
+      where: { id: tenderId, organisationId },
+    });
+    if (sourceTender?.currentVersion === null || sourceTender === null)
+      throw new NotFoundException();
+    const sourceVersion = sourceTender.currentVersion;
+
+    const inheritedDocuments = await Promise.all(
+      sourceVersion.documents.map(async (document) => {
+        const id = randomUUID();
+        const approvedObjectKey = `tender-approved/${organisationId}/${id}`;
+        await this.storage.send(
+          new CopyObjectCommand({
+            Bucket: this.environment.S3_BUCKET,
+            CopySource: `${this.environment.S3_BUCKET}/${document.approvedObjectKey!}`,
+            Key: approvedObjectKey,
+            MetadataDirective: "COPY",
+          }),
+        );
+        return {
+          approvedObjectKey,
+          declaredMimeType: document.declaredMimeType,
+          detectedMimeType: document.detectedMimeType,
+          displayFilename: document.displayFilename,
+          extension: document.extension,
+          id,
+          originalFilename: document.originalFilename,
+          provenance: `Inherited from tender version ${sourceVersion.id}.`,
+          quarantineObjectKey: `tender-quarantine/${organisationId}/${id}`,
+          retentionUntil: document.retentionUntil,
+          role: document.role,
+          sha256: document.sha256,
+          sizeBytes: document.sizeBytes,
+          sourceUrl: document.sourceUrl,
+          status: document.status,
+          ...(document.storageMetadata === null
+            ? {}
+            : { storageMetadata: document.storageMetadata }),
+          uploadCompletedAt: document.uploadCompletedAt,
+          uploadSessionExpiresAt: document.uploadSessionExpiresAt,
+          uploadedByUserId: document.uploadedByUserId,
+        };
+      }),
+    );
+
     try {
-      return await this.database.$transaction(async (tx) => {
+      const result = await this.database.$transaction(async (tx) => {
         const tender = await tx.tender.findFirst({
           include: { currentVersion: true },
           where: { id: tenderId, organisationId },
         });
         if (tender?.currentVersion === null || tender === null)
           throw new NotFoundException();
+        if (tender.currentVersion.id !== sourceVersion.id)
+          throw new ConflictException(
+            "The tender version changed; refresh and try again",
+          );
         const existing = await tx.tenderCorrigendum.findFirst({
           where: {
             tenderId,
@@ -963,12 +1042,20 @@ export class TendersService {
             affectedVersionId: tender.currentVersion.id,
             description: input.description,
             identifier: input.identifier,
-            publicationDate: input.publication_date ?? null,
+            publicationDate: optionalDate(input.publication_date),
             resultingVersionId: next.id,
             sourceUrl: input.source_url ?? null,
             tenderId,
           },
         });
+        if (inheritedDocuments.length > 0)
+          await tx.tenderDocument.createMany({
+            data: inheritedDocuments.map((document) => ({
+              ...document,
+              organisationId,
+              tenderVersionId: next.id,
+            })),
+          });
         await tx.tender.update({
           data: { currentVersionId: next.id, lifecycleStatus: "DRAFT" },
           where: { id: tenderId },
@@ -990,7 +1077,29 @@ export class TendersService {
         });
         return { duplicate: false, version_id: next.id };
       });
+      if (result.duplicate)
+        await Promise.allSettled(
+          inheritedDocuments.map((document) =>
+            this.storage.send(
+              new DeleteObjectCommand({
+                Bucket: this.environment.S3_BUCKET,
+                Key: document.approvedObjectKey,
+              }),
+            ),
+          ),
+        );
+      return result;
     } catch (error: unknown) {
+      await Promise.allSettled(
+        inheritedDocuments.map((document) =>
+          this.storage.send(
+            new DeleteObjectCommand({
+              Bucket: this.environment.S3_BUCKET,
+              Key: document.approvedObjectKey,
+            }),
+          ),
+        ),
+      );
       if (
         typeof error === "object" &&
         error !== null &&
@@ -1346,6 +1455,10 @@ export class TendersService {
         : this.database.extractedTenderField.findMany({
             orderBy: { createdAt: "asc" },
             select: {
+              citations: {
+                select: { tenderDocument: { select: { role: true } } },
+                where: { validationStatus: "VALID" },
+              },
               extractionRunId: true,
               normalizedTextValue: true,
             },
@@ -1416,7 +1529,20 @@ export class TendersService {
             },
           });
     const deadlineByExtractionRunId = new Map<string, string | null>();
-    deadlineFields.forEach((field) => {
+    const prioritizedDeadlineFields = [...deadlineFields].sort(
+      (left, right) =>
+        Number(
+          right.citations.some(
+            (citation) => citation.tenderDocument.role === "CORRIGENDUM",
+          ),
+        ) -
+        Number(
+          left.citations.some(
+            (citation) => citation.tenderDocument.role === "CORRIGENDUM",
+          ),
+        ),
+    );
+    prioritizedDeadlineFields.forEach((field) => {
       if (!deadlineByExtractionRunId.has(field.extractionRunId)) {
         deadlineByExtractionRunId.set(
           field.extractionRunId,

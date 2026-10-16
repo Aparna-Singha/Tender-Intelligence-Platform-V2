@@ -1,5 +1,7 @@
 "use client";
 
+import { ContextualAssistant } from "./contextual-assistant";
+
 import { Building2, Plus, Sparkles, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
@@ -78,6 +80,43 @@ function deadlineTone(
   if (days < 0 || days <= 3) return "danger";
   if (days <= 7) return "warning";
   return "info";
+}
+
+function dashboardSupportingLabel(
+  presentation: ReturnType<typeof describeTender>,
+): string {
+  const labels: Readonly<Record<string, string>> = {
+    "analysis ready": "Ready to draft",
+    "analysing tender": "Analysis running",
+    "checking eligibility": "Eligibility running",
+    "checking tender file": "Checking file",
+    "draft preparation failed": "Draft issue",
+    "extraction failed": "Extraction issue",
+    "extraction not started": "Extraction pending",
+    "eligibility failed": "Eligibility issue",
+    "eligibility not started": "Eligibility pending",
+    "needs attention": "Issue detected",
+    "needs review": "Review required",
+    "preparing draft": "Drafting",
+    "ready for review": "Review draft",
+    "reading tender": "Reading source",
+    "review tender": "Decision required",
+    "risk analysis failed": "Risk check failed",
+    "risk analysis not started": "Risk check pending",
+    "source processing failed": "Processing issue",
+    "upload failed": "Upload issue",
+    "upload tender": "Source needed",
+    "uploading tender": "Uploading",
+  };
+  const status = presentation.statusLabel
+    .replace(/[.…]+$/u, "")
+    .trim()
+    .toLowerCase();
+
+  return (
+    labels[status] ??
+    presentation.supportingLabel.split(/\s+/).slice(0, 3).join(" ")
+  );
 }
 
 export function Dashboard(): JSX.Element {
@@ -207,7 +246,7 @@ export function Dashboard(): JSX.Element {
         key: tender.id,
         tenderName: tender.title,
         tone: deadlineTone(tender.submissionDeadline),
-        href: `/tenders/${selectedId ?? ""}/${tender.id}`,
+        href: `/tenders/${selectedId ?? ""}/${tender.id}?stage=overview`,
       }));
     return [...tenderAttention, ...recommendationRows];
   }, [guidance, selectedId, selectedOrganisation, tenderModels]);
@@ -271,7 +310,7 @@ export function Dashboard(): JSX.Element {
   }
 
   return (
-    <div className="workspace-page">
+    <div className="workspace-page dashboard-page">
       <header className="workspace-page__header">
         <div>
           <h1>Good morning, {greetingName(session?.user.display_name)}</h1>
@@ -284,11 +323,12 @@ export function Dashboard(): JSX.Element {
           </Button>
         ) : (
           <Link
+            aria-label="Add tender"
             className="button button--primary workspace-cta"
             href={`/tenders/${selectedId}`}
           >
             <Plus aria-hidden="true" size={18} />
-            Add tender
+            Analyse new tender
           </Link>
         )}
       </header>
@@ -317,7 +357,10 @@ export function Dashboard(): JSX.Element {
         </section>
       ) : (
         <>
-          <section className="workspace-section">
+          <section
+            aria-hidden="true"
+            className="workspace-section dashboard-secondary-summary"
+          >
             <div className="tender-summary-grid">
               <div className="tender-summary-card">
                 <span className="tender-summary-card__label">
@@ -344,7 +387,10 @@ export function Dashboard(): JSX.Element {
           </section>
 
           {companyReminder === null ? null : (
-            <section className="workspace-section">
+            <section
+              aria-hidden="true"
+              className="workspace-section dashboard-company-reminder"
+            >
               <div className="workspace-card workspace-card--compact">
                 <div className="workspace-row workspace-row--plain">
                   <div className="workspace-row__title">
@@ -408,9 +454,6 @@ export function Dashboard(): JSX.Element {
             <div className="workspace-section__header workspace-section__header--stacked">
               <div>
                 <h2>Your tenders</h2>
-                <p>
-                  One clear state, one next action, and the nearest deadline.
-                </p>
               </div>
               <div
                 className="workspace-chip-row workspace-chip-row--left dashboard-filter-row"
@@ -448,22 +491,21 @@ export function Dashboard(): JSX.Element {
                     <article className="workspace-row" key={tender.id}>
                       <div className="workspace-row__title">
                         <strong>{tender.title}</strong>
-                        <p>{tender.buyer}</p>
                       </div>
                       <span
                         className={`status-badge status-badge--${presentation.tone}`}
                       >
                         {presentation.statusLabel}
                       </span>
-                      <p className="workspace-row__supporting">
-                        {presentation.supportingLabel}
-                      </p>
+                      <span className="workspace-row__supporting">
+                        {dashboardSupportingLabel(presentation)}
+                      </span>
                       <span className="workspace-row__deadline">
                         {formatDeadlineCountdown(tender.submissionDeadline)}
                       </span>
                       <Link
                         className="button button--secondary"
-                        href={`/tenders/${selectedId ?? ""}/${tender.id}`}
+                        href={`/tenders/${selectedId ?? ""}/${tender.id}?stage=overview`}
                       >
                         {presentation.actionLabel}
                       </Link>
@@ -473,6 +515,48 @@ export function Dashboard(): JSX.Element {
               )}
             </div>
           </section>
+
+          {inProgressRows.length > 0 ? (
+            <section className="workspace-section dashboard-in-progress">
+              <div className="workspace-section__header">
+                <div>
+                  <h2>In progress</h2>
+                </div>
+              </div>
+              <div className="workspace-progress-grid">
+                {inProgressRows.map(({ presentation, tender }) => {
+                  const progress = tender.workspace?.processingProgress ?? 0;
+                  const progressPrefix = presentation.isDraft
+                    ? "Drafting"
+                    : "Analysing";
+                  return (
+                    <Link
+                      className="workspace-card progress-card"
+                      href={`/tenders/${selectedId ?? ""}/${tender.id}?stage=overview`}
+                      key={tender.id}
+                    >
+                      <div className="progress-card__header">
+                        <strong>
+                          {progressPrefix}: {tender.title}
+                        </strong>
+                        <span>{progress}%</span>
+                      </div>
+                      <div
+                        aria-label={`${progress}% complete`}
+                        aria-valuemax={100}
+                        aria-valuemin={0}
+                        aria-valuenow={progress}
+                        className="progress-bar"
+                        role="progressbar"
+                      >
+                        <span style={{ width: `${progress}%` }} />
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          ) : null}
         </>
       )}
 
@@ -484,12 +568,16 @@ export function Dashboard(): JSX.Element {
           AI Assistant
         </button>
       ) : (
-        <Link className="workspace-floating-ai" href={aiChatHref}>
-          <span>
-            <Sparkles aria-hidden="true" size={16} />
-          </span>
-          AI Assistant
-        </Link>
+        <>
+          <Link className="visually-hidden" href={aiChatHref}>
+            AI Assistant
+          </Link>
+          <ContextualAssistant
+            context="my workspace"
+            organisationId={selectedId!}
+            openInChatHref={aiChatHref}
+          />
+        </>
       )}
 
       {createOpen ? (

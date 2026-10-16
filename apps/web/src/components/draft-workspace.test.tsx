@@ -3,11 +3,21 @@ import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PublicApiError } from "../lib/api";
 import { DraftWorkspace } from "./draft-workspace";
 
 const { apiRequest } = vi.hoisted(() => ({ apiRequest: vi.fn() }));
 
 vi.mock("../lib/api", () => ({
+  PublicApiError: class PublicApiError extends Error {
+    public constructor(
+      message: string,
+      public readonly status: number,
+      public readonly code: string,
+    ) {
+      super(message);
+    }
+  },
   apiRequest,
   formatApiError: (_error: unknown, fallback: string) => fallback,
 }));
@@ -40,15 +50,18 @@ function installApi(): void {
 }
 
 describe("draft workspace safety", () => {
+  it("keeps draft action status visible in the readiness rail", () => {
+    expect(source).toContain('className="draft-rail__status"');
+  });
+
   beforeEach(() => {
     apiRequest.mockReset();
     installApi();
   });
 
   it("shows human-control and source limitations", () => {
-    expect(source).toContain("AI-assisted first draft");
-    expect(source).toContain("Human review is mandatory");
-    expect(source).toContain("does not determine legal compliance");
+    expect(source).toContain("Generated content requires human review");
+    expect(source).toContain("does not determine legal");
   });
 
   it("shows citations, placeholders, history, and review controls", () => {
@@ -58,8 +71,9 @@ describe("draft workspace safety", () => {
     expect(source).toContain("Request review");
     expect(source).toContain("Request changes");
     expect(source).toContain("Approve for final readiness review");
-    expect(source).toContain("Open review package");
+    expect(source).toContain("Review & Export");
     expect(source).toContain("Source scope");
+    expect(source).not.toContain('aria-hidden="true"');
     expect(source).toContain("citation");
   });
 
@@ -71,28 +85,227 @@ describe("draft workspace safety", () => {
     expect(source).not.toContain("Submit bid");
   });
 
-  it("keeps empty-state ownership on Draft instead of review controls", () => {
-    expect(source).toContain("No proposal draft yet");
-    expect(source).toContain("Set up draft");
+  it("keeps draft creation in the main workspace before a proposal exists", () => {
+    expect(source).toContain("Create proposal draft");
+    expect(source).toContain("Create another draft");
+    expect(source).toContain("setShowCreationForm(true)");
+    expect(source).toContain("Draft not started");
   });
 
-  it("opens draft setup before focusing the title input and does not fire a mutation", async () => {
+  it("renders the dedicated draft header and workspace tabs", () => {
+    expect(source).toContain('aria-label="Draft workspace tabs"');
+    expect(source).toContain("Back to Overview");
+    expect(source).toContain("draft-workspace-header");
+    expect(source).toContain("Preview full draft");
+    expect(source).toContain("Overall draft readiness");
+    expect(source).not.toContain("AI suggestions");
+    expect(source).not.toContain("Review status");
+  });
+
+  it("shows the draft form immediately and does not fire a mutation", async () => {
     render(<DraftWorkspace organisationId="org-1" tenderId="tender-1" />);
 
-    const setupButton = await screen.findByRole("button", {
-      name: "Set up draft",
-    });
-    await userEvent.click(setupButton);
-
-    const titleInput = screen.getByLabelText("Draft title");
-    await waitFor(() => expect(titleInput).toHaveFocus());
-    expect(screen.getByText("Start a new proposal draft")).toBeInTheDocument();
     expect(
-      screen.getByText(/Draft setup is open in the main workspace/i),
+      await screen.findByRole("heading", { name: "Create proposal draft" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText("Draft setup and history").closest("details"),
-    ).toHaveAttribute("open");
+      screen.getByRole("heading", { name: "Your proposal draft" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("navigation", { name: "Draft workspace tabs" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Draft name")).toBeInTheDocument();
+    expect(
+      screen.getByText("Draft history").closest("details"),
+    ).not.toHaveAttribute("open");
     expect(apiRequest).toHaveBeenCalledTimes(3);
+  });
+
+  it("enables creation when the existing controlled template is ready", async () => {
+    render(<DraftWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    expect(
+      await screen.findByRole("button", { name: "Create draft" }),
+    ).toBeEnabled();
+  });
+
+  it("explains the actual template prerequisite when creation is disabled", async () => {
+    apiRequest.mockImplementation((path: string) => {
+      if (path.endsWith("draft-templates?draft_type=CONSOLIDATED_FIRST_DRAFT"))
+        return Promise.resolve([]);
+      if (path.endsWith("draft-generation-runs") || path.endsWith("/drafts"))
+        return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected API call: ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<DraftWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    expect(
+      await screen.findByText(
+        "A controlled draft template is required before a proposal can be created.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create draft" })).toBeDisabled();
+    await user.click(
+      screen.getByRole("button", { name: "Create controlled template" }),
+    );
+    expect(apiRequest).toHaveBeenCalledWith(
+      "/organisations/org-1/tenders/tender-1/draft-templates",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("keeps provider failures safe and actionable without a request ID", async () => {
+    apiRequest.mockImplementation((path: string, init?: RequestInit) => {
+      if (
+        path ===
+        "/organisations/org-1/tenders/tender-1/draft-templates?draft_type=CONSOLIDATED_FIRST_DRAFT"
+      )
+        return Promise.resolve([
+          {
+            activeVersionId: "template-version-1",
+            id: "template-1",
+            name: "Controlled consolidated first draft",
+            versions: [{ id: "template-version-1", versionNumber: 1 }],
+          },
+        ]);
+      if (path.endsWith("draft-generation-runs") && init?.method === "POST")
+        return Promise.reject(
+          new PublicApiError(
+            "Request ID: internal-123",
+            503,
+            "SERVICE_UNAVAILABLE",
+          ),
+        );
+      if (path.endsWith("draft-generation-runs") || path.endsWith("/drafts"))
+        return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected API call: ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<DraftWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    await user.type(await screen.findByLabelText("Draft name"), "First draft");
+    await user.click(screen.getByRole("button", { name: "Create draft" }));
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Draft generation is temporarily unavailable.",
+      }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Your tender and review work are safe. Try again once the drafting service is available.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Request ID/)).not.toBeInTheDocument();
+  });
+
+  it("identifies dependency failures as temporary and retries the failed run", async () => {
+    let retryRequest: (() => void) | undefined;
+    apiRequest.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith("draft-templates?draft_type=CONSOLIDATED_FIRST_DRAFT"))
+        return Promise.resolve([
+          {
+            activeVersionId: "template-version-1",
+            id: "template-1",
+            name: "Controlled consolidated first draft",
+            versions: [{ id: "template-version-1", versionNumber: 1 }],
+          },
+        ]);
+      if (path.endsWith("draft-generation-runs/failed-run/retry"))
+        return new Promise((resolve) => {
+          retryRequest = () =>
+            resolve({
+              id: "retry-run",
+              safeFailureCode: null,
+              sourceMode: "TENDER_ONLY",
+              status: "QUEUED",
+              title: "Proposal draft",
+            });
+        });
+      if (path.endsWith("draft-generation-runs") && init?.method !== "POST")
+        return Promise.resolve([
+          {
+            id: "failed-run",
+            safeFailureCode: "PROVIDER_DEPENDENCY_UNAVAILABLE",
+            sourceMode: "TENDER_ONLY",
+            status: "FAILED",
+            title: "Proposal draft",
+          },
+        ]);
+      if (path.endsWith("/drafts")) return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected API call: ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<DraftWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Draft generation is temporarily unavailable.",
+      }),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(screen.getByText("Retrying...").closest("button")).toBeDisabled();
+    retryRequest?.();
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/tenders/tender-1/draft-generation-runs/failed-run/retry",
+        { method: "POST" },
+      ),
+    );
+  });
+
+  it("starts from current inputs when an old failed snapshot cannot be retried", async () => {
+    apiRequest.mockImplementation((path: string, init?: RequestInit) => {
+      if (path.endsWith("draft-templates?draft_type=CONSOLIDATED_FIRST_DRAFT"))
+        return Promise.resolve([
+          {
+            activeVersionId: "template-version-1",
+            id: "template-1",
+            name: "Controlled consolidated first draft",
+            versions: [{ id: "template-version-1", versionNumber: 1 }],
+          },
+        ]);
+      if (path.endsWith("draft-generation-runs/failed-run/retry"))
+        return Promise.reject(new PublicApiError("Conflict", 409, "CONFLICT"));
+      if (path.endsWith("draft-generation-runs") && init?.method === "POST")
+        return Promise.resolve({
+          id: "fresh-run",
+          safeFailureCode: null,
+          sourceMode: "TENDER_ONLY",
+          status: "QUEUED",
+          title: "Proposal draft",
+        });
+      if (path.endsWith("draft-generation-runs"))
+        return Promise.resolve([
+          {
+            id: "failed-run",
+            safeFailureCode: "DRAFT_INPUTS_NOT_CURRENT",
+            sourceMode: "TENDER_ONLY",
+            status: "FAILED",
+            title: "Proposal draft",
+          },
+        ]);
+      if (path.endsWith("/drafts")) return Promise.resolve([]);
+      return Promise.reject(new Error(`Unexpected API call: ${path}`));
+    });
+    const user = userEvent.setup();
+    render(<DraftWorkspace organisationId="org-1" tenderId="tender-1" />);
+
+    await user.click(await screen.findByRole("button", { name: "Retry" }));
+
+    const calls = apiRequest.mock.calls as unknown as readonly (readonly [
+      string,
+      RequestInit?,
+    ])[];
+    const freshStart = calls.find(
+      ([path, init]) =>
+        path.endsWith("draft-generation-runs") && init?.method === "POST",
+    );
+    expect(freshStart?.[1]?.method).toBe("POST");
+    const body = freshStart?.[1]?.body;
+    expect(typeof body).toBe("string");
+    if (typeof body !== "string") throw new Error("Expected JSON body");
+    expect(body).toContain('"title":"Proposal draft"');
   });
 });

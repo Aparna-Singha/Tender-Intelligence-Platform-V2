@@ -99,6 +99,24 @@ export class EvidenceAssessmentProcessor {
     )
       throw new Error("TENDER_CITATION_VALIDATION_FAILED");
 
+    const closingDates = await this.database.extractedTenderField.findMany({
+      select: { normalizedDateValue: true },
+      where: {
+        extractionRunId: run.extractionRunId,
+        fieldType: "SUBMISSION_DEADLINE",
+        normalizedDateValue: { not: null },
+        reviewState: { not: "REJECTED" },
+      },
+    });
+    const finalClosingDate = closingDates.reduce<Date | undefined>(
+      (latest, item) =>
+        item.normalizedDateValue !== null &&
+        (latest === undefined || item.normalizedDateValue > latest)
+          ? item.normalizedDateValue
+          : latest,
+      undefined,
+    );
+
     await this.checkpoint(
       run.id,
       signal,
@@ -106,11 +124,15 @@ export class EvidenceAssessmentProcessor {
       45,
       "Matching authorised structured evidence",
     );
-    const snapshotEvidence = buildEvidence(run.snapshot);
+    const snapshotEvidence = buildEvidence(run.snapshot, finalClosingDate);
     const rows: Prisma.EligibilityAssessmentCreateManyInput[] =
       requirements.map((requirement) => {
         const relevant = snapshotEvidence.filter((item) =>
-          isRelevant(requirement.category, item.factType),
+          isRelevant(
+            requirement.category,
+            item.factType,
+            requirement.sourceWording,
+          ),
         );
         const proposal = proposeEligibilityAssessment(
           {
@@ -178,6 +200,9 @@ export class EvidenceAssessmentProcessor {
       const factVersions = run.snapshot.evidenceFacts.map(
         (item) => item.evidenceFactVersion,
       );
+      const requirementById = new Map(
+        requirements.map((requirement) => [requirement.id, requirement]),
+      );
       const snapshotCitationIds = new Set(
         run.snapshot.evidenceCitations.map(
           (citation) => citation.sourceEvidenceCitationId,
@@ -190,6 +215,8 @@ export class EvidenceAssessmentProcessor {
               isRelevant(
                 assessment.requirementCategory,
                 fact.evidenceFact.factType,
+                requirementById.get(assessment.structuredRequirementId)
+                  ?.sourceWording ?? "",
               ),
             )
             .slice(0, 20)
@@ -202,12 +229,17 @@ export class EvidenceAssessmentProcessor {
               );
               const direct =
                 fact.reviewState === "ACCEPTED" && citation !== undefined;
+              const conflict = fact.evidenceFact.factType.endsWith("_CONFLICT");
               return {
                 assessmentId: assessment.id,
                 evidenceCitationId: citation?.id ?? null,
                 evidenceFactVersionId: fact.id,
-                linkType: direct ? "DIRECT_SUPPORT" : "PARTIAL_SUPPORT",
-                relevance: direct ? 1 : 0.6,
+                linkType: conflict
+                  ? "CONTRADICTS"
+                  : direct
+                    ? "DIRECT_SUPPORT"
+                    : "PARTIAL_SUPPORT",
+                relevance: conflict || direct ? 1 : 0.6,
                 scope: fact.scope,
               };
             }),
@@ -384,8 +416,10 @@ type Snapshot = Prisma.EligibilityInputSnapshotGetPayload<{
   };
 }>;
 
-function buildEvidence(snapshot: Snapshot): readonly ComparisonEvidence[] {
-  const now = new Date();
+function buildEvidence(
+  snapshot: Snapshot,
+  evaluationDate = new Date(),
+): readonly ComparisonEvidence[] {
   const snapshotCitationIds = new Set(
     snapshot.evidenceCitations.map(
       (citation) => citation.sourceEvidenceCitationId,
@@ -427,7 +461,7 @@ function buildEvidence(snapshot: Snapshot): readonly ComparisonEvidence[] {
       factType: item.category,
       sourceKind: "DOCUMENT_METADATA" as const,
       verificationStatus:
-        item.expiryDate !== null && item.expiryDate < now
+        item.expiryDate !== null && item.expiryDate < evaluationDate
           ? "EXPIRED"
           : item.verificationStatus,
     })),
@@ -471,15 +505,38 @@ function buildEvidence(snapshot: Snapshot): readonly ComparisonEvidence[] {
         ...(item.unit === null && item.currency === null
           ? {}
           : { valueUnit: item.unit ?? item.currency ?? "" }),
-        verificationStatus: item.reviewState,
+        verificationStatus: item.evidenceFact.factType.endsWith("_CONFLICT")
+          ? "CONFLICTING"
+          : item.reviewState,
       };
     }),
   ];
 }
 
-function isRelevant(category: string, factType: string): boolean {
+export function isRelevant(
+  category: string,
+  factType: string,
+  sourceWording = "",
+): boolean {
   const left = category.toUpperCase().replaceAll(/[^A-Z0-9]/gu, "");
   const right = factType.toUpperCase().replaceAll(/[^A-Z0-9]/gu, "");
+  const source = sourceWording.toUpperCase();
+  if (left.includes("EXPERIENCE"))
+    return ["COMPLETEDEXPERIENCEORDERVALUE", "EXPERIENCECERTIFICATE"].some(
+      (candidate) => right.includes(candidate),
+    );
+  if (left.includes("TURNOVER")) return right.includes("TURNOVER3YEARAVERAGE");
+  if (left.includes("CERTIFICATION"))
+    return right.includes("ISO9001CERTIFICATION");
+  if (left.includes("OEMAUTORISATION"))
+    return right.includes("OEMAUTORISATION");
+  if (left === "OTHER") {
+    if (/\b(?:UDYAM|MSME)\b/u.test(source)) return right.includes("UDYAM");
+    if (/\bGST\b/u.test(source)) return right.startsWith("GST");
+    if (/\b(?:INCORPORATION|CIN)\b/u.test(source))
+      return right === "INCORPORATION";
+    return false;
+  }
   return (
     left.includes(right) ||
     right.includes(left) ||

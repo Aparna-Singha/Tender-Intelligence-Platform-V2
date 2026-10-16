@@ -172,6 +172,27 @@ export class RagController {
     return this.rag.cancelAnswer(organisationId, tenderId, answerRunId);
   }
 
+  @RequireOrganisationPermission("RAG_QUESTION_ASK")
+  @Post("rag-answers/:answerRunId/retry")
+  @HttpCode(202)
+  @ApiOperation({
+    summary:
+      "Retry the existing tender question without creating another message",
+  })
+  public retryAnswer(
+    @Param("organisationId") organisationId: string,
+    @Param("tenderId") tenderId: string,
+    @Param("answerRunId") answerRunId: string,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<unknown> {
+    return this.rag.retryAnswer(
+      organisationId,
+      tenderId,
+      answerRunId,
+      request.id,
+    );
+  }
+
   @RequireOrganisationPermission("RAG_CONVERSATION_READ")
   @Sse("rag-answers/:answerRunId/events")
   public events(

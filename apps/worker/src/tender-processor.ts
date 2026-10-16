@@ -214,7 +214,7 @@ export class TenderProcessor {
             organisationId: data.organisationId,
             requestId: data.requestId,
             tenderId: latestDocument.tenderVersion.tenderId,
-            triggerId: latestDocument.tenderVersionId,
+            triggerId: document.id,
             triggerType: "SOURCE_READY",
             userId: document.uploadedByUserId,
           }

@@ -324,6 +324,21 @@ describe("dashboard home parity behavior", () => {
       ).toBeInTheDocument();
 
       expect(
+        within(tendersSection!).getByText("Review required"),
+      ).toBeInTheDocument();
+      expect(
+        within(tendersSection!).getByText("Issue detected"),
+      ).toBeInTheDocument();
+      expect(
+        within(tendersSection!).queryByText(
+          "Risk summary available for review.",
+        ),
+      ).not.toBeInTheDocument();
+      expect(
+        within(tendersSection!).queryByText("Upload needs attention."),
+      ).not.toBeInTheDocument();
+
+      expect(
         screen.queryByRole("heading", {
           name: "In progress",
         }),

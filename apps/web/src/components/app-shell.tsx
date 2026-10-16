@@ -9,7 +9,6 @@ import {
   MessageSquare,
   Sparkles,
   Settings,
-  UserRound,
   X,
 } from "lucide-react";
 import Link from "next/link";
@@ -18,11 +17,7 @@ import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Drawer, IconButton, Select, humanizeEnum } from "@tender/ui";
 import { apiRequest } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
-import {
-  describeTender,
-  formatDeadlineCountdown,
-  type TenderSummary,
-} from "./tender-presentation";
+import { describeTender, type TenderSummary } from "./tender-presentation";
 
 interface Session {
   readonly active_organisation_id: string | null;
@@ -106,21 +101,19 @@ function SidebarSection({
 function QuickAccessLink({
   active = false,
   href,
-  meta,
   title,
 }: {
   readonly active?: boolean;
   readonly href: string;
-  readonly meta?: string;
   readonly title: string;
 }): JSX.Element {
   return (
     <Link
+      aria-label={title}
       className={`workspace-sidebar__quick-link ${active ? "workspace-sidebar__quick-link--active" : ""}`}
       href={href}
     >
       <span>{title}</span>
-      {meta === undefined ? null : <small>{meta}</small>}
     </Link>
   );
 }
@@ -158,14 +151,14 @@ function SidebarContents({
       label: "Tenders",
     },
     {
-      href: organisationId === null ? null : `/settings/${organisationId}`,
+      href: organisationId === null ? null : `/documents/${organisationId}`,
       icon: Settings,
-      label: "Company",
+      label: "Company Docs",
     },
     {
       href: organisationId === null ? null : assistantHref(organisationId),
       icon: Sparkles,
-      label: "AI Assistant",
+      label: "AI Chat",
     },
   ];
   const recentTenders = [...tenders]
@@ -216,7 +209,7 @@ function SidebarContents({
           </span>
         </Link>
         <label className="workspace-sidebar__organisation-picker">
-          <span>Current organisation</span>
+          <span>Workspace</span>
           <Select
             aria-label="Current organisation"
             disabled={memberships.length === 0}
@@ -255,9 +248,8 @@ function SidebarContents({
           ) : (
             recentTenders.map((tender) => (
               <QuickAccessLink
-                href={`/tenders/${organisationId ?? ""}/${tender.id}`}
+                href={`/tenders/${organisationId ?? ""}/${tender.id}?stage=overview`}
                 key={tender.id}
-                meta={formatDeadlineCountdown(tender.submissionDeadline)}
                 title={tender.title}
               />
             ))
@@ -283,7 +275,7 @@ function SidebarContents({
           )}
         </SidebarSection>
 
-        <SidebarSection title="Tender chats">
+        <SidebarSection title="Chats">
           {chatShortcuts.length === 0 ? (
             <p className="workspace-sidebar__empty">
               Tender chat stays tender-scoped and appears once a workspace
@@ -303,22 +295,20 @@ function SidebarContents({
                   >
                     <MessageSquare aria-hidden="true" size={12} />
                   </span>
-                  <span>
-                    Tender chat
-                    <small>{tender.title}</small>
-                  </span>
+                  <span>{tender.title}</span>
                 </Link>
               ))}
-              <Link
-                className="workspace-sidebar__view-all"
-                href={`/tenders/${organisationId ?? ""}`}
-                {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-              >
-                Browse tender chats{" "}
-                <ChevronRight aria-hidden="true" size={12} />
-              </Link>
             </>
           )}
+          {organisationId !== null ? (
+            <Link
+              className="workspace-sidebar__view-all"
+              href={assistantHref(organisationId ?? "")}
+              {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
+            >
+              Browse tender chats <ChevronRight aria-hidden="true" size={12} />
+            </Link>
+          ) : null}
         </SidebarSection>
 
         <div className="workspace-sidebar__footer-links">
@@ -326,17 +316,10 @@ function SidebarContents({
             href={
               organisationId === null
                 ? null
-                : `/settings/${organisationId}?section=security`
+                : `/settings/${organisationId}?section=organisation`
             }
             icon={Settings}
             label="Settings"
-            pathname={pathname}
-            {...(onNavigate === undefined ? {} : { onNavigate })}
-          />
-          <WorkspaceNavItem
-            href="/account"
-            icon={UserRound}
-            label="Account"
             pathname={pathname}
             {...(onNavigate === undefined ? {} : { onNavigate })}
           />
@@ -348,7 +331,15 @@ function SidebarContents({
       </div>
 
       <div className="workspace-sidebar__footer">
-        <div className="workspace-sidebar__account-card">
+        <Link
+          className="workspace-sidebar__account-card"
+          href={
+            organisationId === null
+              ? "/dashboard"
+              : `/onboarding/${organisationId}`
+          }
+          {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
+        >
           <div className="workspace-sidebar__account-summary">
             <span
               className="workspace-sidebar__account-mark"
@@ -368,7 +359,7 @@ function SidebarContents({
               </small>
             </div>
           </div>
-        </div>
+        </Link>
       </div>
     </div>
   );
@@ -433,18 +424,14 @@ export function AppShell({
   }, [pathOrganisationId, router]);
 
   const mobileTitle = useMemo(() => {
-    if (pathname.startsWith("/assistant/")) return "AI Assistant";
+    if (pathname.startsWith("/assistant/")) return "AI Chat";
     if (pathname.startsWith("/tenders/")) return "Tenders";
     if (
       pathname.startsWith("/documents/") ||
       pathname.startsWith("/onboarding/")
     )
-      return "Company";
-    if (pathname.startsWith("/settings/")) {
-      return searchParams.get("section") === "security"
-        ? "Settings"
-        : "Company";
-    }
+      return "Company Docs";
+    if (pathname.startsWith("/settings/")) return "Settings";
     if (pathname.startsWith("/account")) return "Account";
     return "Home";
   }, [pathname, searchParams]);

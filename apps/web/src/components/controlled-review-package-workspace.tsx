@@ -507,7 +507,7 @@ export function ControlledReviewPackageWorkspace({
 
   return (
     <section aria-labelledby="controlled-package-heading">
-      <h2 id="controlled-package-heading">Controlled download</h2>
+      <h2 id="controlled-package-heading">Controlled review package</h2>
       <Alert tone="warning">
         <p>
           Review packages are for authorised human review only. Generation and
