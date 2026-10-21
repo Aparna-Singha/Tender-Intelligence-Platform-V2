@@ -25,13 +25,14 @@ import type {
   UpdateTenderRequest,
 } from "@tender/contracts";
 import type { ApiEnvironment } from "@tender/config";
-import type { PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 import {
   AdminImportAdapter,
   CuratedDatasetAdapter,
   extensionFor,
   isAllowedMimeExtension,
   ManualUploadAdapter,
+  selectSubmissionDeadline,
   type NormalizedTenderSource,
 } from "@tender/domain";
 import type { Queue } from "bullmq";
@@ -957,47 +958,63 @@ export class TendersService {
     if (sourceTender?.currentVersion === null || sourceTender === null)
       throw new NotFoundException();
     const sourceVersion = sourceTender.currentVersion;
+    const attemptedObjectKeys: string[] = [];
 
-    const inheritedDocuments = await Promise.all(
-      sourceVersion.documents.map(async (document) => {
-        const id = randomUUID();
-        const approvedObjectKey = `tender-approved/${organisationId}/${id}`;
-        await this.storage.send(
-          new CopyObjectCommand({
-            Bucket: this.environment.S3_BUCKET,
-            CopySource: `${this.environment.S3_BUCKET}/${document.approvedObjectKey!}`,
-            Key: approvedObjectKey,
-            MetadataDirective: "COPY",
-          }),
-        );
-        return {
-          approvedObjectKey,
-          declaredMimeType: document.declaredMimeType,
-          detectedMimeType: document.detectedMimeType,
-          displayFilename: document.displayFilename,
-          extension: document.extension,
-          id,
-          originalFilename: document.originalFilename,
-          provenance: `Inherited from tender version ${sourceVersion.id}.`,
-          quarantineObjectKey: `tender-quarantine/${organisationId}/${id}`,
-          retentionUntil: document.retentionUntil,
-          role: document.role,
-          sha256: document.sha256,
-          sizeBytes: document.sizeBytes,
-          sourceUrl: document.sourceUrl,
-          status: document.status,
-          ...(document.storageMetadata === null
-            ? {}
-            : { storageMetadata: document.storageMetadata }),
-          uploadCompletedAt: document.uploadCompletedAt,
-          uploadSessionExpiresAt: document.uploadSessionExpiresAt,
-          uploadedByUserId: document.uploadedByUserId,
-        };
-      }),
-    );
+    const copyInheritedDocument = async (
+      document: (typeof sourceVersion.documents)[number],
+    ): Promise<
+      Omit<
+        Prisma.TenderDocumentCreateManyInput,
+        "organisationId" | "tenderVersionId"
+      >
+    > => {
+      const id = randomUUID();
+      const approvedObjectKey = `tender-approved/${organisationId}/${id}`;
+      attemptedObjectKeys.push(approvedObjectKey);
+      await this.storage.send(
+        new CopyObjectCommand({
+          Bucket: this.environment.S3_BUCKET,
+          CopySource: `${this.environment.S3_BUCKET}/${document.approvedObjectKey!}`,
+          Key: approvedObjectKey,
+          MetadataDirective: "COPY",
+        }),
+      );
+      return {
+        approvedObjectKey,
+        declaredMimeType: document.declaredMimeType,
+        detectedMimeType: document.detectedMimeType,
+        displayFilename: document.displayFilename,
+        extension: document.extension,
+        id,
+        originalFilename: document.originalFilename,
+        provenance: `Inherited from tender version ${sourceVersion.id}.`,
+        quarantineObjectKey: `tender-quarantine/${organisationId}/${id}`,
+        retentionUntil: document.retentionUntil,
+        role: document.role,
+        sha256: document.sha256,
+        sizeBytes: document.sizeBytes,
+        sourceUrl: document.sourceUrl,
+        status: document.status,
+        ...(document.storageMetadata === null
+          ? {}
+          : { storageMetadata: document.storageMetadata }),
+        uploadCompletedAt: document.uploadCompletedAt,
+        uploadSessionExpiresAt: document.uploadSessionExpiresAt,
+        uploadedByUserId: document.uploadedByUserId,
+      };
+    };
+    const inheritedDocuments: Awaited<
+      ReturnType<typeof copyInheritedDocument>
+    >[] = [];
 
     try {
+      // Copy serially so a failed copy cannot leave another in-flight copy after cleanup.
+      for (const document of sourceVersion.documents)
+        inheritedDocuments.push(await copyInheritedDocument(document));
       const result = await this.database.$transaction(async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT id FROM tenders WHERE id=${tenderId}::uuid AND organisation_id=${organisationId}::uuid FOR UPDATE`,
+        );
         const tender = await tx.tender.findFirst({
           include: { currentVersion: true },
           where: { id: tenderId, organisationId },
@@ -1078,28 +1095,24 @@ export class TendersService {
         return { duplicate: false, version_id: next.id };
       });
       if (result.duplicate)
-        await Promise.allSettled(
-          inheritedDocuments.map((document) =>
-            this.storage.send(
-              new DeleteObjectCommand({
-                Bucket: this.environment.S3_BUCKET,
-                Key: document.approvedObjectKey,
-              }),
-            ),
-          ),
-        );
+        await this.cleanupRemovedTenderDocument({
+          cleanupReason: "CORRIGENDUM_COPY",
+          documentId: randomUUID(),
+          keys: attemptedObjectKeys,
+          organisationId,
+          requestId,
+          tenderId,
+        });
       return result;
     } catch (error: unknown) {
-      await Promise.allSettled(
-        inheritedDocuments.map((document) =>
-          this.storage.send(
-            new DeleteObjectCommand({
-              Bucket: this.environment.S3_BUCKET,
-              Key: document.approvedObjectKey,
-            }),
-          ),
-        ),
-      );
+      await this.cleanupRemovedTenderDocument({
+        cleanupReason: "CORRIGENDUM_COPY",
+        documentId: randomUUID(),
+        keys: attemptedObjectKeys,
+        organisationId,
+        requestId,
+        tenderId,
+      });
       if (
         typeof error === "object" &&
         error !== null &&
@@ -1319,7 +1332,8 @@ export class TendersService {
   }
 
   private async cleanupRemovedTenderDocument(input: {
-    readonly cleanupReason: "ABANDONED_UPLOAD" | "READY_SOURCE_REMOVED";
+    readonly cleanupReason:
+      "ABANDONED_UPLOAD" | "READY_SOURCE_REMOVED" | "CORRIGENDUM_COPY";
     readonly documentId: string;
     readonly keys: readonly (string | null)[];
     readonly organisationId: string;
@@ -1354,7 +1368,6 @@ export class TendersService {
           {
             cleanupReason: input.cleanupReason,
             documentId: input.documentId,
-            keys,
             organisationId: input.organisationId,
             queueError:
               queueError instanceof Error
@@ -1453,14 +1466,17 @@ export class TendersService {
       extractionIds.length === 0
         ? Promise.resolve([])
         : this.database.extractedTenderField.findMany({
-            orderBy: { createdAt: "asc" },
             select: {
               citations: {
-                select: { tenderDocument: { select: { role: true } } },
-                where: { validationStatus: "VALID" },
+                select: {
+                  validationStatus: true,
+                  tenderDocument: { select: { role: true } },
+                },
               },
               extractionRunId: true,
+              findingState: true,
               normalizedTextValue: true,
+              reviewState: true,
             },
             where: {
               extractionRunId: { in: extractionIds },
@@ -1528,28 +1544,19 @@ export class TendersService {
               tenderVersionId: { in: versionIds },
             },
           });
-    const deadlineByExtractionRunId = new Map<string, string | null>();
-    const prioritizedDeadlineFields = [...deadlineFields].sort(
-      (left, right) =>
-        Number(
-          right.citations.some(
-            (citation) => citation.tenderDocument.role === "CORRIGENDUM",
-          ),
-        ) -
-        Number(
-          left.citations.some(
-            (citation) => citation.tenderDocument.role === "CORRIGENDUM",
+    const deadlineByExtractionRunId = new Map<
+      string,
+      ReturnType<typeof selectSubmissionDeadline>
+    >();
+    for (const extractionRunId of extractionIds)
+      deadlineByExtractionRunId.set(
+        extractionRunId,
+        selectSubmissionDeadline(
+          deadlineFields.filter(
+            (field) => field.extractionRunId === extractionRunId,
           ),
         ),
-    );
-    prioritizedDeadlineFields.forEach((field) => {
-      if (!deadlineByExtractionRunId.has(field.extractionRunId)) {
-        deadlineByExtractionRunId.set(
-          field.extractionRunId,
-          field.normalizedTextValue,
-        );
-      }
-    });
+      );
     const decisionByRiskRunId = new Map<
       string,
       { readonly decision: "CONTINUE" | "HOLD" | "STOP" }
@@ -1575,7 +1582,7 @@ export class TendersService {
 
     return tenders.map((tender) => {
       const currentVersion = tender.currentVersion;
-      const submissionDeadlineText =
+      const selectedDeadline =
         currentVersion?.activeExtractionRun === null ||
         currentVersion?.activeExtractionRun === undefined
           ? null
@@ -1584,7 +1591,8 @@ export class TendersService {
             ) ?? null);
       const deadlineResolution = resolveSubmissionDeadline(
         tender.submissionDeadline,
-        submissionDeadlineText,
+        selectedDeadline?.text ?? null,
+        selectedDeadline?.conflicting ?? false,
       );
       const currentVersionKey =
         currentVersion === null ? null : `${tender.id}:${currentVersion.id}`;

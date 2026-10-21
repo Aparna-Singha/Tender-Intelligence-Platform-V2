@@ -72,6 +72,7 @@ export interface TenderWorkflowContext {
 export function resolveSubmissionDeadline(
   metadataSubmissionDeadline: Date | null | undefined,
   extractedSubmissionDeadlineText: string | null,
+  conflicting = false,
 ): SubmissionDeadlineResolution {
   const metadata = metadataSubmissionDeadline?.toISOString() ?? null;
   const extracted =
@@ -80,8 +81,9 @@ export function resolveSubmissionDeadline(
       : (parseTenderDateTime(extractedSubmissionDeadlineText)?.toISOString() ??
         null);
   return {
-    deadlineSource:
-      extracted !== null
+    deadlineSource: conflicting
+      ? "UNAVAILABLE"
+      : extracted !== null
         ? "EXTRACTED_SOURCE"
         : metadata !== null
           ? "METADATA"
@@ -94,7 +96,7 @@ export function resolveSubmissionDeadline(
       Math.abs(new Date(metadata).getTime() - new Date(extracted).getTime()) >=
         60_000,
     metadataSubmissionDeadline: metadata,
-    submissionDeadline: extracted ?? metadata,
+    submissionDeadline: conflicting ? null : (extracted ?? metadata),
   };
 }
 

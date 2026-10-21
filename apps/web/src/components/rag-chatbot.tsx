@@ -558,7 +558,28 @@ export function RagChatbot({
 
   const pairedMessages = useMemo(() => {
     if (detail === null) return [];
-    return detail.messages.map((message) => {
+    const latestRunByQuestion = new Map<string, AnswerRun>();
+    for (const run of detail.answerRuns)
+      if (run.questionMessageId)
+        latestRunByQuestion.set(run.questionMessageId, run);
+    const historicalAnswerIds = new Set(
+      detail.answerRuns.map((run) => run.answerMessageId).filter(Boolean),
+    );
+    const messageById = new Map(
+      detail.messages.map((message) => [message.id, message]),
+    );
+    const visibleMessages: Message[] = [];
+    for (const message of detail.messages) {
+      if (message.role === "ASSISTANT" && historicalAnswerIds.has(message.id))
+        continue;
+      visibleMessages.push(message);
+      if (message.role === "USER") {
+        const answerId = latestRunByQuestion.get(message.id)?.answerMessageId;
+        const answer = answerId ? messageById.get(answerId) : undefined;
+        if (answer) visibleMessages.push(answer);
+      }
+    }
+    return visibleMessages.map((message) => {
       const answerRun =
         message.role === "ASSISTANT"
           ? (detail.answerRuns.find(
@@ -567,9 +588,7 @@ export function RagChatbot({
           : null;
       const questionRun =
         message.role === "USER"
-          ? (detail.answerRuns.find(
-              (run) => run.questionMessageId === message.id,
-            ) ?? null)
+          ? (latestRunByQuestion.get(message.id) ?? null)
           : null;
       return { answerRun, message, questionRun };
     });

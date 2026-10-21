@@ -2641,7 +2641,7 @@ model RagMessage {
   createdByUserId    String?         @map("created_by_user_id") @db.Uuid
   createdAt          DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
   conversation       RagConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  questionAnswerRun  RagAnswerRun?   @relation("RagQuestionMessage")
+  questionAnswerRuns RagAnswerRun[]  @relation("RagQuestionMessage")
   completedAnswerRun RagAnswerRun?   @relation("RagAnswerMessage")
 
   @@unique([conversationId, sequence])
@@ -2656,8 +2656,9 @@ model RagAnswerRun {
   tenderId                String              @map("tender_id") @db.Uuid
   tenderVersionId         String              @map("tender_version_id") @db.Uuid
   conversationId          String              @map("conversation_id") @db.Uuid
-  questionMessageId       String              @unique @map("question_message_id") @db.Uuid
+  questionMessageId       String              @map("question_message_id") @db.Uuid
   answerMessageId         String?             @unique @map("answer_message_id") @db.Uuid
+  retryOfRunId            String?             @map("retry_of_run_id") @db.Uuid
   indexRunId              String              @map("index_run_id") @db.Uuid
   sourceMode              RagSourceMode       @map("source_mode")
   status                  RagAnswerRunStatus  @default(QUEUED)
@@ -2681,12 +2682,16 @@ model RagAnswerRun {
   conversation            RagConversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   questionMessage         RagMessage          @relation("RagQuestionMessage", fields: [questionMessageId], references: [id], onDelete: Restrict)
   answerMessage           RagMessage?         @relation("RagAnswerMessage", fields: [answerMessageId], references: [id], onDelete: SetNull)
+  retryOfRun              RagAnswerRun?       @relation("RagRetry", fields: [retryOfRunId], references: [id], onDelete: Restrict)
+  retryRun                RagAnswerRun?       @relation("RagRetry")
   indexRun                RagIndexRun         @relation(fields: [indexRunId], references: [id], onDelete: Restrict)
   retrievalRun            RagRetrievalRun?
   citations               RagAnswerCitation[]
   feedback                RagFeedback[]
 
   @@index([organisationId, tenderId, conversationId, status, createdAt])
+  @@index([questionMessageId, createdAt])
+  @@unique([retryOfRunId])
   @@map("rag_answer_runs")
 }
 

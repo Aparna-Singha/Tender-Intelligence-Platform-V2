@@ -96,7 +96,7 @@ export function createProviderFallbackAnswer(
   if (evidence.length === 0) return null;
   return {
     answer: [
-      "I found these relevant points in the current tender:",
+      "AI answer generation is temporarily unavailable. These are retrieved source excerpts, not an AI-generated answer. Check the cited documents before relying on them:",
       ...evidence.map(({ excerpt }) => `• ${excerpt}`),
     ].join("\n"),
     citationClaims: evidence.map(({ excerpt, handle }) => ({

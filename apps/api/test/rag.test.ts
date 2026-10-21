@@ -13,22 +13,79 @@ const environment = {
 };
 
 describe("Phase 9 tenant and prerequisite boundaries", () => {
-  it("retries a failed answer in place without adding another question", async () => {
-    const database = {
-      $transaction: vi.fn(
-        (callback: (transaction: unknown) => Promise<unknown>) =>
-          callback(database),
-      ),
-      ragAnswerCitation: { deleteMany: vi.fn() },
-      ragAnswerRun: {
-        findFirst: vi.fn().mockResolvedValue({
-          id: "answer-a",
-          status: "FAILED",
-          answerMessageId: null,
+  it.each(["FAILED", "INSUFFICIENT_EVIDENCE", "HUMAN_REVIEW_REQUIRED"])(
+    "preserves %s attempt and starts a linked retry",
+    async (status) => {
+      const database = {
+        $transaction: vi.fn(
+          (callback: (transaction: unknown) => Promise<unknown>) =>
+            callback(database),
+        ),
+        $queryRaw: vi.fn().mockResolvedValue([]),
+        ragAnswerCitation: { deleteMany: vi.fn() },
+        ragAnswerRun: {
+          findFirst: vi.fn().mockResolvedValue({
+            answerPolicyVersion: "policy",
+            conversationId: "conversation-a",
+            id: "answer-a",
+            indexRunId: "index-a",
+            model: "model",
+            provider: "gemini",
+            questionMessageId: "question-a",
+            retrievalPolicyVersion: "retrieval",
+            sourceMode: "TENDER_ONLY",
+            status,
+            tenderVersionId: "version-a",
+          }),
+          findUnique: vi.fn().mockResolvedValue(null),
+          create: vi.fn().mockResolvedValue({ id: "answer-retry" }),
+        },
+        ragMessage: { delete: vi.fn() },
+      };
+      const jobs = { add: vi.fn() };
+      const service = new RagService(
+        database as never,
+        jobs as never,
+        environment as never,
+      );
+      await expect(
+        service.retryAnswer(
+          "organisation-a",
+          "tender-a",
+          "answer-a",
+          "request-a",
+        ),
+      ).resolves.toEqual({ id: "answer-retry" });
+      expect(database.ragMessage.delete).not.toHaveBeenCalled();
+      expect(database.ragAnswerCitation.deleteMany).not.toHaveBeenCalled();
+      expect(database.ragAnswerRun.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            retryOfRunId: "answer-a",
+            questionMessageId: "question-a",
+          }),
         }),
-        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      );
+      expect(jobs.add).toHaveBeenCalledWith(
+        "answer-tender-rag",
+        expect.objectContaining({ answerRunId: "answer-retry" }),
+        expect.any(Object),
+      );
+    },
+  );
+  it("returns the existing linked retry for a duplicate request", async () => {
+    const database = {
+      $transaction: vi.fn((callback: (tx: unknown) => Promise<unknown>) =>
+        callback(database),
+      ),
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      ragAnswerRun: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: "original", status: "FAILED" }),
+        findUnique: vi.fn().mockResolvedValue({ id: "retry" }),
+        create: vi.fn(),
       },
-      ragMessage: { delete: vi.fn() },
     };
     const jobs = { add: vi.fn() };
     const service = new RagService(
@@ -37,27 +94,10 @@ describe("Phase 9 tenant and prerequisite boundaries", () => {
       environment as never,
     );
     await expect(
-      service.retryAnswer(
-        "organisation-a",
-        "tender-a",
-        "answer-a",
-        "request-a",
-      ),
-    ).resolves.toEqual({ id: "answer-a" });
-    expect(database.ragMessage.delete).not.toHaveBeenCalled();
-    expect(database.ragAnswerRun.updateMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          status: "QUEUED",
-          answerMessageId: null,
-        }),
-      }),
-    );
-    expect(jobs.add).toHaveBeenCalledWith(
-      "answer-tender-rag",
-      expect.objectContaining({ answerRunId: "answer-a" }),
-      expect.any(Object),
-    );
+      service.retryAnswer("org", "tender", "original", "request"),
+    ).resolves.toEqual({ id: "retry" });
+    expect(database.ragAnswerRun.create).not.toHaveBeenCalled();
+    expect(jobs.add).not.toHaveBeenCalled();
   });
   it("does not reveal another organisation's answer", async () => {
     const database = {

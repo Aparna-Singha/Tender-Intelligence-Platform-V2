@@ -3,6 +3,7 @@ import type { TenderWorkflowProgressJob } from "@tender/contracts";
 import {
   EVIDENCE_COMPARISON_POLICY_VERSION,
   proposeEligibilityAssessment,
+  selectSubmissionDeadline,
   type ComparisonEvidence,
 } from "@tender/domain";
 
@@ -100,22 +101,14 @@ export class EvidenceAssessmentProcessor {
       throw new Error("TENDER_CITATION_VALIDATION_FAILED");
 
     const closingDates = await this.database.extractedTenderField.findMany({
-      select: { normalizedDateValue: true },
+      include: { citations: { include: { tenderDocument: true } } },
       where: {
         extractionRunId: run.extractionRunId,
         fieldType: "SUBMISSION_DEADLINE",
-        normalizedDateValue: { not: null },
-        reviewState: { not: "REJECTED" },
       },
     });
-    const finalClosingDate = closingDates.reduce<Date | undefined>(
-      (latest, item) =>
-        item.normalizedDateValue !== null &&
-        (latest === undefined || item.normalizedDateValue > latest)
-          ? item.normalizedDateValue
-          : latest,
-      undefined,
-    );
+    const finalClosingDate =
+      selectSubmissionDeadline(closingDates).date ?? undefined;
 
     await this.checkpoint(
       run.id,

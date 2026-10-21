@@ -335,6 +335,19 @@ export class TenderProcessor {
     data: TenderDocumentCleanupJob,
   ): Promise<void> {
     for (const key of data.keys) {
+      if (
+        !key.startsWith(`tender-approved/${data.organisationId}/`) &&
+        !key.startsWith(`tender-quarantine/${data.organisationId}/`)
+      )
+        throw new Error("CLEANUP_KEY_OUTSIDE_ORGANISATION");
+      const committed = await this.database.tenderDocument.count({
+        where: {
+          organisationId: data.organisationId,
+          approvedObjectKey: key,
+          deletedAt: null,
+        },
+      });
+      if (committed > 0) continue;
       await this.deleteObjectIfPresent(key);
     }
   }

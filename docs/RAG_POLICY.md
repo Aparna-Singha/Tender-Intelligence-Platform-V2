@@ -125,8 +125,10 @@ Every follow-up performs fresh retrieval; conversation history is not evidence.
 The provider receives application-issued handles only. Unknown handles or
 unsupported material claims fail closed.
 
-Gemini is the first adapter behind provider-neutral ports. Missing configuration,
-timeout, invalid schema, or invented citations create no fallback answer.
+Gemini is the first adapter behind provider-neutral ports. Recoverable provider
+failures may return explicitly labelled, cited retrieval excerpts; they are not
+presented as generated answers. Cancellation, invalid schema, invented citations,
+and unsupported evidence create no fallback answer.
 Production remains blocked until provider retention, training use, residency,
 subprocessors, and deletion terms are approved. There is no internet retrieval,
 tool use, legal advice, drafting, readiness, export, scraping, or submission.
