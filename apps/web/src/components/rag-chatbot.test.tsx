@@ -418,6 +418,55 @@ describe("RAG chatbot workspace", () => {
     );
   });
 
+  it("labels a completed retrieval-only fallback using its persisted provider code", async () => {
+    apiRequest.mockImplementation((path: string) => {
+      if (
+        path.endsWith("/rag-indexes") ||
+        path.endsWith("/rag-conversations?limit=50")
+      )
+        return [];
+      if (path.endsWith("/rag-conversations/conversation-1"))
+        return {
+          answerRuns: [
+            {
+              id: "run-1",
+              questionMessageId: "question-1",
+              answerMessageId: "answer-1",
+              citations: [],
+              status: "COMPLETE",
+              failureCode: "PROVIDER_TIMEOUT",
+            },
+          ],
+          id: "conversation-1",
+          messages: [
+            {
+              content: "What is the requirement?",
+              id: "question-1",
+              role: "USER",
+            },
+            {
+              content: "Retrieved source excerpt",
+              id: "answer-1",
+              role: "ASSISTANT",
+            },
+          ],
+          sourceMode: "TENDER_ONLY",
+          title: "Fallback",
+        };
+      throw new Error(`Unexpected API call: ${path}`);
+    });
+    render(
+      <RagChatbot
+        initialConversationId="conversation-1"
+        organisationId="org-1"
+        tenderId="tender-1"
+        versionId="version-1"
+      />,
+    );
+    expect(await screen.findByText("Retrieved source excerpt")).toBeVisible();
+    expect(screen.getByText("Source excerpts · AI unavailable")).toBeVisible();
+  });
+
   it("shows the grounded answer when a tender question requires human review", async () => {
     apiRequest.mockImplementation((path: string) => {
       if (path.endsWith("/rag-indexes")) return [];

@@ -4,6 +4,7 @@ import {
   EVIDENCE_COMPARISON_POLICY_VERSION,
   proposeEligibilityAssessment,
   selectSubmissionDeadline,
+  type AssessmentProposal,
   type ComparisonEvidence,
 } from "@tender/domain";
 
@@ -107,8 +108,8 @@ export class EvidenceAssessmentProcessor {
         fieldType: "SUBMISSION_DEADLINE",
       },
     });
-    const finalClosingDate =
-      selectSubmissionDeadline(closingDates).date ?? undefined;
+    const deadline = selectSubmissionDeadline(closingDates);
+    const evaluationDate = deadline.date ?? new Date();
 
     await this.checkpoint(
       run.id,
@@ -117,7 +118,7 @@ export class EvidenceAssessmentProcessor {
       45,
       "Matching authorised structured evidence",
     );
-    const snapshotEvidence = buildEvidence(run.snapshot, finalClosingDate);
+    const snapshotEvidence = buildEvidence(run.snapshot, evaluationDate);
     const rows: Prisma.EligibilityAssessmentCreateManyInput[] =
       requirements.map((requirement) => {
         const relevant = snapshotEvidence.filter((item) =>
@@ -127,33 +128,49 @@ export class EvidenceAssessmentProcessor {
             requirement.sourceWording,
           ),
         );
-        const proposal = proposeEligibilityAssessment(
-          {
-            category: requirement.category,
-            confidence: requirement.confidence,
-            findingState: requirement.findingState,
-            obligation: requirement.obligation,
-            sourceWording: requirement.sourceWording,
-            tenderCitationIds: requirement.citations.map(
-              (citation) => citation.id,
-            ),
-            ...(requirement.thresholdNumericValue === null
-              ? {}
-              : {
-                  threshold: {
-                    ...(requirement.currency === null
-                      ? {}
-                      : { currency: requirement.currency }),
-                    operator: requirement.thresholdOperator ?? "=",
-                    ...(requirement.unit === null
-                      ? {}
-                      : { unit: requirement.unit }),
-                    value: requirement.thresholdNumericValue.toNumber(),
-                  },
-                }),
-          },
-          relevant,
-        );
+        const requirementInput = {
+          category: requirement.category,
+          confidence: requirement.confidence,
+          findingState: requirement.findingState,
+          obligation: requirement.obligation,
+          sourceWording: requirement.sourceWording,
+          tenderCitationIds: requirement.citations.map(
+            (citation) => citation.id,
+          ),
+          ...(requirement.thresholdNumericValue === null
+            ? {}
+            : {
+                threshold: {
+                  ...(requirement.currency === null
+                    ? {}
+                    : { currency: requirement.currency }),
+                  operator: requirement.thresholdOperator ?? "=",
+                  ...(requirement.unit === null
+                    ? {}
+                    : { unit: requirement.unit }),
+                  value: requirement.thresholdNumericValue.toNumber(),
+                },
+              }),
+        } as const;
+        const proposal: AssessmentProposal =
+          deadline.date === null &&
+          relevant.some((item) => item.expiresAt !== undefined)
+            ? {
+                confidence: 0,
+                directEvidenceIndexes: [],
+                policyRule: "SUBMISSION_DEADLINE_UNRESOLVED",
+                rationale: deadline.conflicting
+                  ? "Conflicting cited submission deadlines prevent assessment of evidence validity at submission."
+                  : "No authoritative submission deadline is available to assess evidence validity at submission.",
+                state: "HUMAN_REVIEW_REQUIRED",
+                uncertainty:
+                  "An authorised reviewer must establish the submission deadline before comparing expiring evidence.",
+              }
+            : proposeEligibilityAssessment(
+                requirementInput,
+                relevant,
+                evaluationDate,
+              );
         return {
           assessmentRunId: run.id,
           comparisonPolicyRule: proposal.policyRule,
@@ -411,7 +428,7 @@ type Snapshot = Prisma.EligibilityInputSnapshotGetPayload<{
 
 function buildEvidence(
   snapshot: Snapshot,
-  evaluationDate = new Date(),
+  evaluationDate: Date,
 ): readonly ComparisonEvidence[] {
   const snapshotCitationIds = new Set(
     snapshot.evidenceCitations.map(

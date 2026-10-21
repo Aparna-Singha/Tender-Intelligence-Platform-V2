@@ -4,7 +4,7 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { S3Client } from "@aws-sdk/client-s3";
-import type { PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 import type { TenderWorkflowProgressJob } from "@tender/contracts";
 import {
   isAllowedMimeExtension,
@@ -334,22 +334,32 @@ export class TenderProcessor {
   public async cleanupRemovedDocument(
     data: TenderDocumentCleanupJob,
   ): Promise<void> {
-    for (const key of data.keys) {
-      if (
-        !key.startsWith(`tender-approved/${data.organisationId}/`) &&
-        !key.startsWith(`tender-quarantine/${data.organisationId}/`)
-      )
-        throw new Error("CLEANUP_KEY_OUTSIDE_ORGANISATION");
-      const committed = await this.database.tenderDocument.count({
-        where: {
-          organisationId: data.organisationId,
-          approvedObjectKey: key,
-          deletedAt: null,
-        },
-      });
-      if (committed > 0) continue;
-      await this.deleteObjectIfPresent(key);
-    }
+    const keysToDelete = await this.database.$transaction(
+      async (transaction) => {
+        await transaction.$queryRaw(
+          Prisma.sql`SELECT id FROM tenders WHERE id=${data.tenderId}::uuid AND organisation_id=${data.organisationId}::uuid FOR UPDATE`,
+        );
+        const unreferenced: string[] = [];
+        for (const key of data.keys) {
+          if (
+            !key.startsWith(`tender-approved/${data.organisationId}/`) &&
+            !key.startsWith(`tender-quarantine/${data.organisationId}/`)
+          )
+            throw new Error("CLEANUP_KEY_OUTSIDE_ORGANISATION");
+          const committed = await transaction.tenderDocument.count({
+            where: {
+              organisationId: data.organisationId,
+              approvedObjectKey: key,
+              deletedAt: null,
+            },
+          });
+          if (committed > 0) continue;
+          unreferenced.push(key);
+        }
+        return unreferenced;
+      },
+    );
+    for (const key of keysToDelete) await this.deleteObjectIfPresent(key);
   }
 
   private async deleteObjectIfPresent(key: string): Promise<void> {

@@ -19,7 +19,13 @@ describe("tender storage cleanup", () => {
         .mockResolvedValueOnce(undefined),
     };
     const processor = new TenderProcessor(
-      { tenderDocument: { count: vi.fn().mockResolvedValue(0) } } as never,
+      {
+        $transaction: (callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            $queryRaw: vi.fn().mockResolvedValue([{ id: "tender-a" }]),
+            tenderDocument: { count: vi.fn().mockResolvedValue(0) },
+          }),
+      } as never,
       storage as never,
       "private-test",
       { scan: vi.fn() } as never,
@@ -47,7 +53,13 @@ describe("tender storage cleanup", () => {
   it("keeps a committed object when delayed cleanup arrives", async () => {
     const storage = { send: vi.fn() };
     const processor = new TenderProcessor(
-      { tenderDocument: { count: vi.fn().mockResolvedValue(1) } } as never,
+      {
+        $transaction: (callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            $queryRaw: vi.fn().mockResolvedValue([{ id: "tender-a" }]),
+            tenderDocument: { count: vi.fn().mockResolvedValue(1) },
+          }),
+      } as never,
       storage as never,
       "private-test",
       { scan: vi.fn() } as never,

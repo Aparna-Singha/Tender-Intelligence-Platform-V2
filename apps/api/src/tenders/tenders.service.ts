@@ -1006,11 +1006,13 @@ export class TendersService {
     const inheritedDocuments: Awaited<
       ReturnType<typeof copyInheritedDocument>
     >[] = [];
+    let transactionStarted = false;
 
     try {
       // Copy serially so a failed copy cannot leave another in-flight copy after cleanup.
       for (const document of sourceVersion.documents)
         inheritedDocuments.push(await copyInheritedDocument(document));
+      transactionStarted = true;
       const result = await this.database.$transaction(async (tx) => {
         await tx.$queryRaw(
           Prisma.sql`SELECT id FROM tenders WHERE id=${tenderId}::uuid AND organisation_id=${organisationId}::uuid FOR UPDATE`,
@@ -1112,6 +1114,7 @@ export class TendersService {
         organisationId,
         requestId,
         tenderId,
+        deferUntilAuthorityCheck: transactionStarted,
       });
       if (
         typeof error === "object" &&
@@ -1339,47 +1342,59 @@ export class TendersService {
     readonly organisationId: string;
     readonly requestId: string;
     readonly tenderId: string;
+    readonly deferUntilAuthorityCheck?: boolean;
   }): Promise<void> {
     const keys = input.keys.filter((key): key is string => key !== null);
     if (keys.length === 0) return;
-    try {
-      await this.deleteTenderObjectsNow(keys);
-      return;
-    } catch (error: unknown) {
+    let storageError: unknown;
+    if (!input.deferUntilAuthorityCheck) {
       try {
-        await this.jobs.add(
-          "cleanup-tender-document-storage",
-          {
-            documentId: input.documentId,
-            keys,
-            organisationId: input.organisationId,
-            requestId: input.requestId,
-            tenderId: input.tenderId,
-          },
-          {
-            attempts: 10,
-            backoff: { delay: 1_000, type: "exponential" },
-            jobId: `cleanup-tender-document-${input.cleanupReason}-${input.documentId}`,
-            removeOnComplete: 100,
-          },
-        );
-      } catch (queueError: unknown) {
-        this.logger.error(
-          {
-            cleanupReason: input.cleanupReason,
-            documentId: input.documentId,
-            organisationId: input.organisationId,
-            queueError:
-              queueError instanceof Error
-                ? queueError.message
-                : String(queueError),
-            storageError:
-              error instanceof Error ? error.message : String(error),
-            tenderId: input.tenderId,
-          },
-          "Tender storage cleanup could not be queued after an immediate cleanup failure",
-        );
+        await this.deleteTenderObjectsNow(keys);
+        return;
+      } catch (error: unknown) {
+        storageError = error;
       }
+    }
+    try {
+      await this.jobs.add(
+        "cleanup-tender-document-storage",
+        {
+          documentId: input.documentId,
+          keys,
+          organisationId: input.organisationId,
+          requestId: input.requestId,
+          tenderId: input.tenderId,
+        },
+        {
+          attempts: 10,
+          backoff: { delay: 1_000, type: "exponential" },
+          ...(input.deferUntilAuthorityCheck ? { delay: 1_000 } : {}),
+          jobId: `cleanup-tender-document-${input.cleanupReason}-${input.documentId}`,
+          removeOnComplete: 100,
+        },
+      );
+    } catch (queueError: unknown) {
+      this.logger.error(
+        {
+          cleanupReason: input.cleanupReason,
+          documentId: input.documentId,
+          organisationId: input.organisationId,
+          queueError:
+            queueError instanceof Error
+              ? queueError.message
+              : String(queueError),
+          ...(storageError === undefined
+            ? {}
+            : {
+                storageError:
+                  storageError instanceof Error
+                    ? storageError.message
+                    : "Unknown storage error",
+              }),
+          tenderId: input.tenderId,
+        },
+        "Tender storage cleanup could not be queued",
+      );
     }
   }
 

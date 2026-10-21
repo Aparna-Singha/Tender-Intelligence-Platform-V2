@@ -760,6 +760,7 @@ export class RagProcessor {
     }));
     const generationStarted = Date.now();
     let generated: GeneratedAnswer;
+    let fallbackFailureCode: string | null = null;
     try {
       generated = await this.answers.answer(
         run.questionMessage.content,
@@ -770,6 +771,8 @@ export class RagProcessor {
       const fallback = createProviderFallbackAnswer(error, contexts);
       if (fallback === null) throw error;
       generated = fallback;
+      fallbackFailureCode =
+        error instanceof ProviderResponseError ? error.code : null;
     }
     const generationLatencyMs = Date.now() - generationStarted;
     await this.answerCheckpoint(run.id, "VERIFYING_CITATIONS", 80, signal);
@@ -872,7 +875,7 @@ export class RagProcessor {
           answerMessageId: answer.id,
           completedAt: new Date(),
           currentStage: "Complete",
-          failureCode: null,
+          failureCode: fallbackFailureCode,
           generationLatencyMs,
           progressPercentage: 100,
           retrievalLatencyMs,

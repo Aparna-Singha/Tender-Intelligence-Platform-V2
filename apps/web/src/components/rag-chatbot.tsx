@@ -244,6 +244,18 @@ type AssistantResponseState =
   | "loading"
   | "review_required";
 
+const providerFailureCodes = new Set([
+  "AI_PROVIDER_UNAVAILABLE",
+  "PROVIDER_AUTH_FAILED",
+  "PROVIDER_DEPENDENCY_UNAVAILABLE",
+  "PROVIDER_MODEL_UNAVAILABLE",
+  "PROVIDER_NETWORK_ERROR",
+  "PROVIDER_QUOTA_EXHAUSTED",
+  "PROVIDER_RATE_LIMITED",
+  "PROVIDER_SERVICE_UNAVAILABLE",
+  "PROVIDER_TIMEOUT",
+]);
+
 function assistantResponseState(status: string): AssistantResponseState {
   if (["COMPLETE", "COMPLETED"].includes(status)) return "answered";
   if (status === "INSUFFICIENT_EVIDENCE") return "insufficient_evidence";
@@ -348,17 +360,7 @@ function AssistantResponse({
     );
   }
   if (state === "failed") {
-    const providerUnavailable = [
-      "AI_PROVIDER_UNAVAILABLE",
-      "PROVIDER_AUTH_FAILED",
-      "PROVIDER_DEPENDENCY_UNAVAILABLE",
-      "PROVIDER_MODEL_UNAVAILABLE",
-      "PROVIDER_NETWORK_ERROR",
-      "PROVIDER_QUOTA_EXHAUSTED",
-      "PROVIDER_RATE_LIMITED",
-      "PROVIDER_SERVICE_UNAVAILABLE",
-      "PROVIDER_TIMEOUT",
-    ].includes(run.failureCode ?? "");
+    const providerUnavailable = providerFailureCodes.has(run.failureCode ?? "");
     return (
       <article className="chat-message chat-message--assistant chat-response-card chat-response-card--failed">
         <strong>Tender Intelligence</strong>
@@ -379,6 +381,7 @@ function AssistantResponse({
     <article className="chat-message chat-message--assistant">
       <div className="chat-message__meta">
         <strong>Tender Intelligence</strong>
+        {run.failureCode ? <span>Source excerpts · AI unavailable</span> : null}
       </div>
       <p>{answer}</p>
       <ChatCitations run={run} />

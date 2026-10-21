@@ -195,6 +195,20 @@ describe("RAG answer persistence after citation verification", () => {
         data: expect.objectContaining({
           status: "COMPLETE",
           answerMessageId: "message",
+          failureCode: null,
+        }),
+      }),
+    );
+    status = "QUEUED";
+    gateway.answer.mockRejectedValueOnce(
+      new ProviderResponseError("PROVIDER_TIMEOUT"),
+    );
+    await processor.process(job, new AbortController().signal);
+    expect(db.ragAnswerRun.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "COMPLETE",
+          failureCode: "PROVIDER_TIMEOUT",
         }),
       }),
     );

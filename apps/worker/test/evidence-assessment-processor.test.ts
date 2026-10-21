@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { DeadlineField } from "@tender/domain";
 import {
   EvidenceAssessmentProcessor,
   isEvidenceAssessmentJob,
@@ -43,6 +44,119 @@ describe("evidence category relevance", () => {
 });
 
 describe("evidence assessment progression safety", () => {
+  it("requires review when conflicting deadlines affect expiring evidence", async () => {
+    const createMany = vi.fn().mockResolvedValue(undefined);
+    const transaction = {
+      auditEvent: { create: vi.fn() },
+      checklistGenerationRun: { updateMany: vi.fn() },
+      checklistItem: { updateMany: vi.fn() },
+      eligibilityAssessment: {
+        createMany,
+        deleteMany: vi.fn(),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+      eligibilityAssessmentEvidenceLink: { createMany: vi.fn() },
+      eligibilityAssessmentRun: {
+        findUnique: vi.fn().mockResolvedValue({
+          cancellationRequestedAt: null,
+          status: "VALIDATING",
+        }),
+        update: vi.fn(),
+      },
+      tenderVersion: { update: vi.fn() },
+    };
+    const deadline = (text: string): DeadlineField => ({
+      normalizedTextValue: text,
+      findingState: "FOUND",
+      reviewState: "UNREVIEWED",
+      citations: [
+        { validationStatus: "VALID", tenderDocument: { role: "CORRIGENDUM" } },
+      ],
+    });
+    const database = {
+      $transaction: vi.fn(
+        (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+      earlyPursuitDecision: {
+        findFirst: vi
+          .fn()
+          .mockResolvedValue({ id: "decision", decision: "CONTINUE" }),
+      },
+      eligibilityAssessmentRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "assessment",
+          organisationId: "org",
+          tenderId: "tender",
+          tenderVersionId: "version",
+          riskAnalysisRunId: "risk",
+          extractionRunId: "extraction",
+          pursuitDecisionId: "decision",
+          requestedByUserId: "user",
+          status: "QUEUED",
+          snapshot: {
+            documents: [
+              {
+                category: "ISO_9001_CERTIFICATION",
+                expiryDate: new Date("2027-01-01"),
+                verificationStatus: "VERIFIED",
+              },
+            ],
+            documentReadiness: [],
+            evidenceCitations: [],
+            evidenceFacts: [],
+            profileValues: [],
+            turnoverRecords: [],
+          },
+        }),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      },
+      tenderVersion: {
+        findFirst: vi.fn().mockResolvedValue({
+          activeEarlyRiskRun: { status: "COMPLETE", invalidatedAt: null },
+          activeExtractionRun: { status: "COMPLETE", invalidatedAt: null },
+        }),
+      },
+      extractedTenderField: {
+        findMany: vi
+          .fn()
+          .mockResolvedValue([
+            deadline("20-12-2026 09:00:00"),
+            deadline("21-12-2026 09:00:00"),
+          ]),
+      },
+      structuredRequirement: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "requirement",
+            category: "CERTIFICATION",
+            confidence: "HIGH",
+            findingState: "FOUND",
+            obligation: "MANDATORY",
+            sourceWording: "Valid ISO certificate",
+            thresholdNumericValue: null,
+            citations: [{ id: "citation" }],
+          },
+        ]),
+      },
+    };
+    await new EvidenceAssessmentProcessor(database as never).process(
+      {
+        assessmentRunId: "assessment",
+        organisationId: "org",
+        requestId: "request",
+      },
+      new AbortController().signal,
+    );
+    expect(createMany).toHaveBeenCalledWith({
+      data: [
+        expect.objectContaining({
+          proposedState: "HUMAN_REVIEW_REQUIRED",
+          comparisonPolicyRule: "SUBMISSION_DEADLINE_UNRESOLVED",
+        }),
+      ],
+    });
+  });
   it("returns a progression trigger when the current eligibility assessment completes", async () => {
     const checklistGenerationRunUpdateMany = vi.fn().mockResolvedValue({
       count: 0,

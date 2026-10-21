@@ -127,7 +127,9 @@ unsupported material claims fail closed.
 
 Gemini is the first adapter behind provider-neutral ports. Recoverable provider
 failures may return explicitly labelled, cited retrieval excerpts; they are not
-presented as generated answers. Cancellation, invalid schema, invented citations,
+presented as generated answers. Completed fallback runs persist the provider failure
+code so API clients can distinguish retrieved excerpts from generated answers.
+Cancellation, invalid schema, invented citations,
 and unsupported evidence create no fallback answer.
 Production remains blocked until provider retention, training use, residency,
 subprocessors, and deletion terms are approved. There is no internet retrieval,

@@ -1509,10 +1509,11 @@ describe("corrigendum inherited object compensation", () => {
         },
         $transaction: vi.fn(),
       };
+      const jobs = { add: vi.fn().mockResolvedValue(undefined) };
       const service = new TendersService(
         database as never,
         storage as never,
-        {} as never,
+        jobs as never,
         environment,
       );
       await expect(
@@ -1532,7 +1533,7 @@ describe("corrigendum inherited object compensation", () => {
       ).toHaveLength(failureAt);
     },
   );
-  it.each(["database failure", "duplicate request"])(
+  it.each(["lost commit acknowledgment", "duplicate request"])(
     "compensates copied keys after %s",
     async (outcome) => {
       const storage = { send: vi.fn().mockResolvedValue({}) };
@@ -1548,16 +1549,17 @@ describe("corrigendum inherited object compensation", () => {
           }),
         },
         $transaction:
-          outcome === "database failure"
-            ? vi.fn().mockRejectedValue(new Error("database failed"))
+          outcome === "lost commit acknowledgment"
+            ? vi.fn().mockRejectedValue(new Error("commit acknowledgment lost"))
             : vi
                 .fn()
                 .mockResolvedValue({ duplicate: true, version_id: "existing" }),
       };
+      const jobs = { add: vi.fn().mockResolvedValue(undefined) };
       const service = new TendersService(
         database as never,
         storage as never,
-        {} as never,
+        jobs as never,
         environment,
       );
       const action = service.addCorrigendum(
@@ -1567,8 +1569,8 @@ describe("corrigendum inherited object compensation", () => {
         input as never,
         "request",
       );
-      if (outcome === "database failure")
-        await expect(action).rejects.toThrow("database failed");
+      if (outcome === "lost commit acknowledgment")
+        await expect(action).rejects.toThrow("commit acknowledgment lost");
       else
         await expect(action).resolves.toEqual({
           duplicate: true,
@@ -1583,7 +1585,13 @@ describe("corrigendum inherited object compensation", () => {
         storage.send.mock.calls.filter(
           ([command]) => command instanceof DeleteObjectCommand,
         ),
-      ).toHaveLength(2);
+      ).toHaveLength(outcome === "lost commit acknowledgment" ? 0 : 2);
+      if (outcome === "lost commit acknowledgment")
+        expect(jobs.add).toHaveBeenCalledWith(
+          "cleanup-tender-document-storage",
+          expect.objectContaining({ keys: expect.any(Array) }),
+          expect.objectContaining({ delay: 1_000 }),
+        );
     },
   );
 });
