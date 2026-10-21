@@ -169,6 +169,11 @@ and model calls without recording sensitive document content.
 
 ## Deployment direction
 
+Phase 4A staging preparation is described in
+[Phase 4A Staging Deployment](PHASE4A_STAGING_DEPLOYMENT.md). It keeps local
+Compose intact and adds a separate VM stack and same-origin Vercel API rewrite.
+Cloud account setup and live workflow acceptance remain unverified.
+
 Deployments should promote immutable artifacts through isolated environments.
 Phase 1A includes separate production Dockerfiles for the web, API, and worker, plus
 Docker Compose for local PostgreSQL, Redis, and MinIO. Compose credentials are

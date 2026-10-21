@@ -1,6 +1,10 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalEnv": ["NEXT_PUBLIC_API_URL"],
+  "globalEnv": [
+    "API_PROXY_ORIGIN",
+    "NEXT_PUBLIC_API_URL",
+    "NEXT_PUBLIC_STORAGE_ORIGIN"
+  ],
   "globalPassThroughEnv": [
     "API_HOST",
     "API_PORT",

@@ -1,4 +1,11 @@
-.env
+.env*
+**/.env*
+*.pem
+*.key
+*.p12
+*.patch
+*.zip
+pr27-review-patches/
 .git
 .github
 .next
