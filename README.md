@@ -288,6 +288,10 @@ set; otherwise the service generates a UUID.
 After a clean checkout and dependency installation, generate the Prisma Client
 before running any type-aware validation:
 
+The database build generates the client when needed. Database lint reads the
+generated client and does not regenerate it, so parallel Turborepo tasks do not
+write the same client files at the same time.
+
 ```sh
 pnpm install --frozen-lockfile
 pnpm db:generate
