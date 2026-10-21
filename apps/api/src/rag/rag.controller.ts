@@ -177,7 +177,7 @@ export class RagController {
   @HttpCode(202)
   @ApiOperation({
     summary:
-      "Retry the existing tender question without creating another message",
+      "Create a new answer attempt for the existing question, retaining prior attempts",
   })
   public retryAnswer(
     @Param("organisationId") organisationId: string,

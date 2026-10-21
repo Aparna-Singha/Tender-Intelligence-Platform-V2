@@ -6,6 +6,12 @@ export interface DomainEvent<TPayload extends object = Record<string, never>> {
 }
 
 export {
+  selectSubmissionDeadline,
+  type DeadlineField,
+  type DeadlineSelection,
+} from "./submission-deadline.js";
+
+export {
   canChangeMemberRole,
   canInviteRole,
   hasPermission,

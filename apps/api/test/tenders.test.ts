@@ -11,6 +11,7 @@ vi.mock("@aws-sdk/s3-request-presigner", () => ({
 }));
 
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
@@ -1364,7 +1365,18 @@ describe("tender workspace tenant isolation", () => {
         findMany: vi.fn().mockResolvedValue([
           {
             extractionRunId: "extract-current",
+            findingState: "FOUND",
             normalizedTextValue: "21-08-2026 09:00:00",
+            reviewState: "UNREVIEWED",
+            citations: [
+              {
+                validationStatus: "VALID",
+                tenderDocument: {
+                  role: "PRIMARY",
+                  createdAt: new Date("2026-08-01"),
+                },
+              },
+            ],
           },
         ]),
       },
@@ -1446,6 +1458,142 @@ describe("tender workspace tenant isolation", () => {
       statusLabel: "Review tender",
     });
   });
+});
+
+describe("corrigendum inherited object compensation", () => {
+  const sourceDocument = (id: string): Record<string, unknown> => ({
+    id,
+    approvedObjectKey: `tender-approved/org/${id}`,
+    role: "PRIMARY",
+    declaredMimeType: "application/pdf",
+    detectedMimeType: "application/pdf",
+    displayFilename: `${id}.pdf`,
+    extension: ".pdf",
+    originalFilename: `${id}.pdf`,
+    retentionUntil: null,
+    sha256: id,
+    sizeBytes: 10n,
+    sourceUrl: null,
+    status: "READY",
+    storageMetadata: {},
+    uploadCompletedAt: null,
+    uploadSessionExpiresAt: new Date(),
+    uploadedByUserId: "user-a",
+  });
+  const input = {
+    identifier: "corr-1",
+    checksum_sha256: "a".repeat(64),
+    description: "Correction",
+  };
+  it.each([1, 2])(
+    "deletes every attempted key when copy %i fails",
+    async (failureAt) => {
+      let copies = 0;
+      const storage = {
+        send: vi.fn().mockImplementation((command: unknown) => {
+          if (command instanceof CopyObjectCommand && ++copies === failureAt)
+            return Promise.reject(new Error("copy failed"));
+          return Promise.resolve({});
+        }),
+      };
+      const database = {
+        tenderCorrigendum: { findFirst: vi.fn().mockResolvedValue(null) },
+        tender: {
+          findFirst: vi.fn().mockResolvedValue({
+            currentVersion: {
+              id: "version-a",
+              documents: [sourceDocument("one"), sourceDocument("two")],
+              versionNumber: 1,
+            },
+          }),
+        },
+        $transaction: vi.fn(),
+      };
+      const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+      const service = new TendersService(
+        database as never,
+        storage as never,
+        jobs as never,
+        environment,
+      );
+      await expect(
+        service.addCorrigendum(
+          "org",
+          "tender",
+          "user-a",
+          input as never,
+          "request",
+        ),
+      ).rejects.toThrow("copy failed");
+      expect(database.$transaction).not.toHaveBeenCalled();
+      expect(
+        storage.send.mock.calls.filter(
+          ([command]) => command instanceof DeleteObjectCommand,
+        ),
+      ).toHaveLength(failureAt);
+    },
+  );
+  it.each(["lost commit acknowledgment", "duplicate request"])(
+    "compensates copied keys after %s",
+    async (outcome) => {
+      const storage = { send: vi.fn().mockResolvedValue({}) };
+      const database = {
+        tenderCorrigendum: { findFirst: vi.fn().mockResolvedValue(null) },
+        tender: {
+          findFirst: vi.fn().mockResolvedValue({
+            currentVersion: {
+              id: "version-a",
+              documents: [sourceDocument("one"), sourceDocument("two")],
+              versionNumber: 1,
+            },
+          }),
+        },
+        $transaction:
+          outcome === "lost commit acknowledgment"
+            ? vi.fn().mockRejectedValue(new Error("commit acknowledgment lost"))
+            : vi
+                .fn()
+                .mockResolvedValue({ duplicate: true, version_id: "existing" }),
+      };
+      const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+      const service = new TendersService(
+        database as never,
+        storage as never,
+        jobs as never,
+        environment,
+      );
+      const action = service.addCorrigendum(
+        "org",
+        "tender",
+        "user-a",
+        input as never,
+        "request",
+      );
+      if (outcome === "lost commit acknowledgment")
+        await expect(action).rejects.toThrow("commit acknowledgment lost");
+      else
+        await expect(action).resolves.toEqual({
+          duplicate: true,
+          version_id: "existing",
+        });
+      expect(
+        storage.send.mock.calls.filter(
+          ([command]) => command instanceof CopyObjectCommand,
+        ),
+      ).toHaveLength(2);
+      expect(
+        storage.send.mock.calls.filter(
+          ([command]) => command instanceof DeleteObjectCommand,
+        ),
+      ).toHaveLength(outcome === "lost commit acknowledgment" ? 0 : 2);
+      if (outcome === "lost commit acknowledgment")
+        expect(jobs.add).toHaveBeenCalledWith(
+          "cleanup-tender-document-storage",
+          expect.objectContaining({ keys: expect.any(Array) }),
+          expect.objectContaining({ delay: 1_000 }),
+        );
+    },
+  );
 });
 
 describe("tender direct upload contract", () => {

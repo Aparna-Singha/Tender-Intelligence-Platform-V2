@@ -35,6 +35,7 @@ describe("RAG answer persistence after citation verification", () => {
       ],
     });
     expect(result?.answer).toContain("Overload relay and its accessories");
+    expect(result?.answer).toContain("not an AI-generated answer");
   });
 
   it("does not mask cancellation or non-provider failures", () => {
@@ -49,6 +50,26 @@ describe("RAG answer persistence after citation verification", () => {
         { handle: "C1", text: "Tender evidence" },
       ]),
     ).toBeNull();
+    expect(
+      createProviderFallbackAnswer(
+        new ProviderResponseError("INVALID_PROVIDER_RESPONSE"),
+        [{ handle: "C1", text: "Tender evidence" }],
+      ),
+    ).toBeNull();
+  });
+
+  it.each([
+    "PROVIDER_TIMEOUT",
+    "PROVIDER_AUTH_FAILED",
+    "PROVIDER_QUOTA_EXHAUSTED",
+    "PROVIDER_SERVICE_UNAVAILABLE",
+  ] as const)("labels %s fallback as retrieved excerpts", (code) => {
+    const fallback = createProviderFallbackAnswer(
+      new ProviderResponseError(code),
+      [{ handle: "C1", text: "Required delivery within 30 days." }],
+    );
+    expect(fallback?.answer).toContain("not an AI-generated answer");
+    expect(fallback?.citationClaims[0]?.handles).toEqual(["C1"]);
   });
 
   it("retries retrieval safely and saves the verified answer and citations", async () => {
@@ -180,6 +201,20 @@ describe("RAG answer persistence after citation verification", () => {
         data: expect.objectContaining({
           status: "COMPLETE",
           answerMessageId: "message",
+          failureCode: null,
+        }),
+      }),
+    );
+    status = "QUEUED";
+    gateway.answer.mockRejectedValueOnce(
+      new ProviderResponseError("PROVIDER_TIMEOUT"),
+    );
+    await processor.process(job, new AbortController().signal);
+    expect(db.ragAnswerRun.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "COMPLETE",
+          failureCode: "PROVIDER_TIMEOUT",
         }),
       }),
     );

@@ -20,7 +20,7 @@ import {
   RAG_RETRIEVAL_POLICY_VERSION,
 } from "@tender/domain";
 import type { Queue } from "bullmq";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { conversationTitle } from "./conversations.service.js";
 import { Observable, concat, from, interval, takeUntil } from "rxjs";
 import {
@@ -481,7 +481,7 @@ export class RagService {
     return { cancelled: true };
   }
 
-  /** Reuses the original question and run so a retry remains one visible chat turn. */
+  /** Creates an immutable attempt under the same visible question. */
   public async retryAnswer(
     organisationId: string,
     tenderId: string,
@@ -489,8 +489,23 @@ export class RagService {
     requestId: string,
   ): Promise<unknown> {
     const result = await this.database.$transaction(async (transaction) => {
+      await transaction.$queryRaw(
+        Prisma.sql`SELECT id FROM rag_answer_runs WHERE id=${answerRunId}::uuid AND organisation_id=${organisationId}::uuid FOR UPDATE`,
+      );
       const run = await transaction.ragAnswerRun.findFirst({
-        select: { answerMessageId: true, id: true, status: true },
+        select: {
+          answerPolicyVersion: true,
+          conversationId: true,
+          id: true,
+          indexRunId: true,
+          model: true,
+          provider: true,
+          questionMessageId: true,
+          retrievalPolicyVersion: true,
+          sourceMode: true,
+          status: true,
+          tenderVersionId: true,
+        },
         where: { id: answerRunId, organisationId, tenderId },
       });
       if (run === null) throw new NotFoundException();
@@ -506,47 +521,43 @@ export class RagService {
         )
       )
         throw new ConflictException("Answer cannot be retried");
-      await transaction.ragAnswerCitation.deleteMany({
-        where: { answerRunId },
+      const priorRetry = await transaction.ragAnswerRun.findUnique({
+        where: { retryOfRunId: answerRunId },
       });
-      if (run.answerMessageId !== null) {
-        await transaction.ragMessage.delete({
-          where: { id: run.answerMessageId },
-        });
-      }
-      const update = await transaction.ragAnswerRun.updateMany({
+      if (priorRetry !== null)
+        return { queued: priorRetry.status === "QUEUED", run: priorRetry };
+      const retry = await transaction.ragAnswerRun.create({
         data: {
-          answerMessageId: null,
-          cancellationRequestedAt: null,
-          completedAt: null,
-          currentStage: "Queued",
-          failureCode: null,
-          generationLatencyMs: null,
-          progressPercentage: 0,
-          retrievalLatencyMs: null,
-          startedAt: null,
-          status: "QUEUED",
-          totalLatencyMs: null,
-        },
-        where: {
-          id: answerRunId,
+          answerPolicyVersion: run.answerPolicyVersion,
+          conversationId: run.conversationId,
+          idempotencyKey: `${organisationId}:${run.conversationId}:retry:${randomUUID()}`,
+          indexRunId: run.indexRunId,
+          model: run.model,
           organisationId,
-          status: run.status,
+          provider: run.provider,
+          questionMessageId: run.questionMessageId,
+          retrievalPolicyVersion: run.retrievalPolicyVersion,
+          retryOfRunId: run.id,
+          sourceMode: run.sourceMode,
           tenderId,
+          tenderVersionId: run.tenderVersionId,
         },
       });
-      if (update.count !== 1)
-        throw new ConflictException("Answer cannot be retried");
-      return { queued: true, run: { id: answerRunId } };
+      return { queued: true, run: retry };
     });
     if (result.queued) {
       await this.jobs.add(
         "answer-tender-rag",
-        { answerRunId, kind: "ANSWER", organisationId, requestId },
+        {
+          answerRunId: result.run.id,
+          kind: "ANSWER",
+          organisationId,
+          requestId,
+        },
         {
           attempts: 2,
           backoff: { delay: 2_000, type: "exponential" },
-          jobId: `rag-answer-${answerRunId}-retry-${Date.now()}`,
+          jobId: `rag-answer-${result.run.id}`,
           removeOnComplete: 100,
         },
       );

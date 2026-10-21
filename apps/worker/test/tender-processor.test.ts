@@ -19,14 +19,23 @@ describe("tender storage cleanup", () => {
         .mockResolvedValueOnce(undefined),
     };
     const processor = new TenderProcessor(
-      {} as never,
+      {
+        $transaction: (callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            $queryRaw: vi.fn().mockResolvedValue([{ id: "tender-a" }]),
+            tenderDocument: { count: vi.fn().mockResolvedValue(0) },
+          }),
+      } as never,
       storage as never,
       "private-test",
       { scan: vi.fn() } as never,
     );
     const job: TenderDocumentCleanupJob = {
       documentId: "document-a",
-      keys: ["approved/object-key", "quarantine/object-key"],
+      keys: [
+        "tender-approved/organisation-a/object-key",
+        "tender-quarantine/organisation-a/object-key",
+      ],
       organisationId: "organisation-a",
       requestId: "request-a",
       tenderId: "tender-a",
@@ -40,6 +49,29 @@ describe("tender storage cleanup", () => {
       1,
       expect.any(DeleteObjectCommand),
     );
+  });
+  it("keeps a committed object when delayed cleanup arrives", async () => {
+    const storage = { send: vi.fn() };
+    const processor = new TenderProcessor(
+      {
+        $transaction: (callback: (tx: unknown) => Promise<unknown>) =>
+          callback({
+            $queryRaw: vi.fn().mockResolvedValue([{ id: "tender-a" }]),
+            tenderDocument: { count: vi.fn().mockResolvedValue(1) },
+          }),
+      } as never,
+      storage as never,
+      "private-test",
+      { scan: vi.fn() } as never,
+    );
+    await processor.cleanupRemovedDocument({
+      documentId: "document-a",
+      keys: ["tender-approved/organisation-a/committed"],
+      organisationId: "organisation-a",
+      requestId: "request-a",
+      tenderId: "tender-a",
+    });
+    expect(storage.send).not.toHaveBeenCalled();
   });
 });
 

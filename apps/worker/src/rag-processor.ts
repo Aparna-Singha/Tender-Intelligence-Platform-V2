@@ -60,7 +60,6 @@ interface RetrievedChunk {
 
 const recoverableAnswerFailures = new Set([
   "AI_PROVIDER_UNAVAILABLE",
-  "INVALID_PROVIDER_RESPONSE",
   "PROVIDER_AUTH_FAILED",
   "PROVIDER_DEPENDENCY_UNAVAILABLE",
   "PROVIDER_MODEL_UNAVAILABLE",
@@ -96,7 +95,7 @@ export function createProviderFallbackAnswer(
   if (evidence.length === 0) return null;
   return {
     answer: [
-      "I found these relevant points in the current tender:",
+      "AI answer generation is temporarily unavailable. These are retrieved source excerpts, not an AI-generated answer. Check the cited documents before relying on them:",
       ...evidence.map(({ excerpt }) => `• ${excerpt}`),
     ].join("\n"),
     citationClaims: evidence.map(({ excerpt, handle }) => ({
@@ -760,6 +759,7 @@ export class RagProcessor {
     }));
     const generationStarted = Date.now();
     let generated: GeneratedAnswer;
+    let fallbackFailureCode: string | null = null;
     try {
       generated = await this.answers.answer(
         run.questionMessage.content,
@@ -770,6 +770,8 @@ export class RagProcessor {
       const fallback = createProviderFallbackAnswer(error, contexts);
       if (fallback === null) throw error;
       generated = fallback;
+      fallbackFailureCode =
+        error instanceof ProviderResponseError ? error.code : null;
     }
     const generationLatencyMs = Date.now() - generationStarted;
     await this.answerCheckpoint(run.id, "VERIFYING_CITATIONS", 80, signal);
@@ -872,7 +874,7 @@ export class RagProcessor {
           answerMessageId: answer.id,
           completedAt: new Date(),
           currentStage: "Complete",
-          failureCode: null,
+          failureCode: fallbackFailureCode,
           generationLatencyMs,
           progressPercentage: 100,
           retrievalLatencyMs,

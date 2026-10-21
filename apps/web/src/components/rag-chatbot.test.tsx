@@ -361,6 +361,112 @@ describe("RAG chatbot workspace", () => {
     );
   });
 
+  it("keeps one visible question and places the latest retry beside it", async () => {
+    apiRequest.mockImplementation((path: string) => {
+      if (
+        path.endsWith("/rag-indexes") ||
+        path.endsWith("/rag-conversations?limit=50")
+      )
+        return [];
+      if (path.endsWith("/rag-conversations/conversation-1"))
+        return {
+          answerRuns: [
+            {
+              id: "run-old",
+              questionMessageId: "question-1",
+              answerMessageId: "answer-old",
+              citations: [],
+              status: "HUMAN_REVIEW_REQUIRED",
+            },
+            {
+              id: "run-new",
+              questionMessageId: "question-1",
+              answerMessageId: "answer-new",
+              citations: [],
+              status: "COMPLETE",
+            },
+          ],
+          id: "conversation-1",
+          messages: [
+            { content: "First question?", id: "question-1", role: "USER" },
+            { content: "Old answer", id: "answer-old", role: "ASSISTANT" },
+            { content: "Second question?", id: "question-2", role: "USER" },
+            { content: "Latest answer", id: "answer-new", role: "ASSISTANT" },
+          ],
+          sourceMode: "TENDER_ONLY",
+          title: "Retry history",
+        };
+      throw new Error(`Unexpected API call: ${path}`);
+    });
+    render(
+      <RagChatbot
+        initialConversationId="conversation-1"
+        organisationId="org-1"
+        tenderId="tender-1"
+        versionId="version-1"
+      />,
+    );
+    expect(await screen.findByText("Latest answer")).toBeVisible();
+    expect(screen.queryByText("Old answer")).toBeNull();
+    const content =
+      document.querySelector(".chat-canvas__messages")?.textContent ?? "";
+    expect(content.indexOf("First question?")).toBeLessThan(
+      content.indexOf("Latest answer"),
+    );
+    expect(content.indexOf("Latest answer")).toBeLessThan(
+      content.indexOf("Second question?"),
+    );
+  });
+
+  it("labels a completed retrieval-only fallback using its persisted provider code", async () => {
+    apiRequest.mockImplementation((path: string) => {
+      if (
+        path.endsWith("/rag-indexes") ||
+        path.endsWith("/rag-conversations?limit=50")
+      )
+        return [];
+      if (path.endsWith("/rag-conversations/conversation-1"))
+        return {
+          answerRuns: [
+            {
+              id: "run-1",
+              questionMessageId: "question-1",
+              answerMessageId: "answer-1",
+              citations: [],
+              status: "COMPLETE",
+              failureCode: "PROVIDER_TIMEOUT",
+            },
+          ],
+          id: "conversation-1",
+          messages: [
+            {
+              content: "What is the requirement?",
+              id: "question-1",
+              role: "USER",
+            },
+            {
+              content: "Retrieved source excerpt",
+              id: "answer-1",
+              role: "ASSISTANT",
+            },
+          ],
+          sourceMode: "TENDER_ONLY",
+          title: "Fallback",
+        };
+      throw new Error(`Unexpected API call: ${path}`);
+    });
+    render(
+      <RagChatbot
+        initialConversationId="conversation-1"
+        organisationId="org-1"
+        tenderId="tender-1"
+        versionId="version-1"
+      />,
+    );
+    expect(await screen.findByText("Retrieved source excerpt")).toBeVisible();
+    expect(screen.getByText("Source excerpts · AI unavailable")).toBeVisible();
+  });
+
   it("shows the grounded answer when a tender question requires human review", async () => {
     apiRequest.mockImplementation((path: string) => {
       if (path.endsWith("/rag-indexes")) return [];
