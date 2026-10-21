@@ -50,6 +50,12 @@ describe("RAG answer persistence after citation verification", () => {
         { handle: "C1", text: "Tender evidence" },
       ]),
     ).toBeNull();
+    expect(
+      createProviderFallbackAnswer(
+        new ProviderResponseError("INVALID_PROVIDER_RESPONSE"),
+        [{ handle: "C1", text: "Tender evidence" }],
+      ),
+    ).toBeNull();
   });
 
   it.each([

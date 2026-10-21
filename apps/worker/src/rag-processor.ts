@@ -60,7 +60,6 @@ interface RetrievedChunk {
 
 const recoverableAnswerFailures = new Set([
   "AI_PROVIDER_UNAVAILABLE",
-  "INVALID_PROVIDER_RESPONSE",
   "PROVIDER_AUTH_FAILED",
   "PROVIDER_DEPENDENCY_UNAVAILABLE",
   "PROVIDER_MODEL_UNAVAILABLE",
