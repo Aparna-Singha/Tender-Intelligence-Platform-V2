@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 import { parseEnvironment, webEnvironmentSchema } from "@tender/config";
 
-parseEnvironment("web", webEnvironmentSchema, process.env);
+const environment = parseEnvironment("web", webEnvironmentSchema, process.env);
 
 function originFrom(value: string | undefined): string | null {
   if (value === undefined || value.trim() === "") return null;
@@ -44,6 +44,18 @@ export const contentSecurityPolicy = [
 ].join("; ");
 
 const nextConfig: NextConfig = {
+  rewrites() {
+    return Promise.resolve(
+      environment.API_PROXY_ORIGIN === undefined
+        ? []
+        : [
+            {
+              source: "/api/:path*",
+              destination: `${environment.API_PROXY_ORIGIN}/:path*`,
+            },
+          ],
+    );
+  },
   headers() {
     return Promise.resolve([
       {

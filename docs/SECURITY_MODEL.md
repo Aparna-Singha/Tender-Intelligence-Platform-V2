@@ -1,5 +1,10 @@
 # Security Model
 
+Phase 4A staging routing and private container controls are documented in
+[Phase 4A Staging Deployment](PHASE4A_STAGING_DEPLOYMENT.md). The web uses
+same-origin `/api` rewrites while the API retains strict cookies and CSRF checks;
+this requires an actual browser validation on the chosen Vercel domain.
+
 ## Phase 10.5 web presentation controls
 
 - Route organisation IDs remain selectors; cookies and server-derived memberships

@@ -195,4 +195,33 @@ describe("parseEnvironment", () => {
       }),
     ).toThrow(EnvironmentValidationError);
   });
+
+  it("requires a server-only HTTPS upstream for production same-origin API routing", () => {
+    const validWeb = {
+      NODE_ENV: "production",
+      NEXT_PUBLIC_API_URL: "/api",
+      NEXT_PUBLIC_STORAGE_ORIGIN: "https://storage.example.test",
+    };
+    expect(() =>
+      parseEnvironment("web", webEnvironmentSchema, validWeb),
+    ).toThrow("API_PROXY_ORIGIN");
+    expect(() =>
+      parseEnvironment("web", webEnvironmentSchema, {
+        ...validWeb,
+        API_PROXY_ORIGIN: "http://api.example.test",
+      }),
+    ).toThrow("HTTPS origin");
+    expect(() =>
+      parseEnvironment("web", webEnvironmentSchema, {
+        ...validWeb,
+        API_PROXY_ORIGIN: "https://api.example.test/path",
+      }),
+    ).toThrow("HTTPS origin");
+    expect(
+      parseEnvironment("web", webEnvironmentSchema, {
+        ...validWeb,
+        API_PROXY_ORIGIN: "https://api.example.test",
+      }).NEXT_PUBLIC_API_URL,
+    ).toBe("/api");
+  });
 });

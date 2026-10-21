@@ -1,0 +1,13 @@
+{$API_PUBLIC_HOST} {
+  encode zstd gzip
+  request_header -X-Forwarded-For
+  reverse_proxy api:4000
+  log {
+    output stdout
+    format json
+  }
+}
+
+http://127.0.0.1:8080 {
+  respond /health 200
+}

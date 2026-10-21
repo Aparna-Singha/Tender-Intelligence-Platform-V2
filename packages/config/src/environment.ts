@@ -316,12 +316,43 @@ export const workerEnvironmentSchema = serviceBaseSchema
       });
   });
 
-export const webEnvironmentSchema = z.object({
-  NODE_ENV: nodeEnvironmentSchema.default("development"),
-  NEXT_PUBLIC_API_URL: urlSchema,
-  NEXT_PUBLIC_STORAGE_ORIGIN: urlSchema,
-  WEB_PORT: portSchema.default(3000),
-});
+export const webEnvironmentSchema = z
+  .object({
+    NODE_ENV: nodeEnvironmentSchema.default("development"),
+    API_PROXY_ORIGIN: urlSchema.optional(),
+    NEXT_PUBLIC_API_URL: z.union([urlSchema, z.literal("/api")]),
+    NEXT_PUBLIC_STORAGE_ORIGIN: urlSchema,
+    WEB_PORT: portSchema.default(3000),
+  })
+  .superRefine((environment, context) => {
+    if (environment.API_PROXY_ORIGIN === undefined) {
+      if (environment.NEXT_PUBLIC_API_URL === "/api")
+        context.addIssue({
+          code: "custom",
+          message: "API_PROXY_ORIGIN is required for same-origin /api routing",
+          path: ["API_PROXY_ORIGIN"],
+        });
+      return;
+    }
+    const upstream = new URL(environment.API_PROXY_ORIGIN);
+    if (
+      upstream.origin !== environment.API_PROXY_ORIGIN ||
+      upstream.username !== "" ||
+      upstream.password !== "" ||
+      (environment.NODE_ENV === "production" && upstream.protocol !== "https:")
+    )
+      context.addIssue({
+        code: "custom",
+        message: "API_PROXY_ORIGIN must be an HTTPS origin in production",
+        path: ["API_PROXY_ORIGIN"],
+      });
+    if (environment.NEXT_PUBLIC_API_URL !== "/api")
+      context.addIssue({
+        code: "custom",
+        message: "NEXT_PUBLIC_API_URL must be /api when proxying the API",
+        path: ["NEXT_PUBLIC_API_URL"],
+      });
+  });
 
 export type ApiEnvironment = z.infer<typeof apiEnvironmentSchema>;
 export type WorkerEnvironment = z.infer<typeof workerEnvironmentSchema>;

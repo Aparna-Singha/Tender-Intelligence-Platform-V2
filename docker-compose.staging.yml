@@ -1,0 +1,160 @@
+name: tender-intelligence-staging
+
+x-logs: &bounded-logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  edge:
+    image: caddy:2.10.2-alpine
+    restart: unless-stopped
+    init: true
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_PUBLIC_HOST: ${API_PUBLIC_HOST:?Set the staging API DNS name}
+    volumes:
+      - ./infrastructure/docker/Caddyfile.staging:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [edge]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    mem_limit: 128m
+    cpus: 0.25
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logs
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    image: tender-api:${IMAGE_TAG:?Set the immutable image tag}
+    restart: unless-stopped
+    init: true
+    env_file: ${STAGING_ENV_FILE:-.env.staging}
+    networks: [edge, backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4000/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    mem_limit: 1536m
+    cpus: 0.75
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logs
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/worker.Dockerfile
+    image: tender-worker:${IMAGE_TAG:?Set the immutable image tag}
+    restart: unless-stopped
+    init: true
+    env_file: ${STAGING_ENV_FILE:-.env.staging}
+    networks: [backend]
+    depends_on:
+      redis:
+        condition: service_healthy
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:4001/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 90s
+    mem_limit: 3g
+    cpus: 1
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logs
+
+  redis:
+    image: redis:7.4.2-alpine
+    restart: unless-stopped
+    command:
+      [
+        "sh",
+        "-ec",
+        'exec redis-server --appendonly yes --maxmemory 384mb --maxmemory-policy noeviction --requirepass "$$REDIS_PASSWORD"',
+      ]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set a staging Redis password}
+    volumes:
+      - redis_data:/data
+    networks: [backend]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'REDISCLI_AUTH="$$REDIS_PASSWORD" redis-cli ping | grep -qx PONG',
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    mem_limit: 512m
+    cpus: 0.25
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logs
+
+  clamav:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/clamav.staging.Dockerfile
+    image: tender-clamav:${IMAGE_TAG:?Set the immutable image tag}
+    restart: unless-stopped
+    init: true
+    volumes:
+      - clamav_data:/var/lib/clamav
+    networks: [backend]
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "test -n \"$$(find /var/lib/clamav -maxdepth 1 -name 'daily.*' -mmin -2880 -print -quit)\" && printf 'zPING\\0' | nc -w 3 127.0.0.1 3310 | grep -q PONG",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 300s
+    mem_limit: 2560m
+    cpus: 0.75
+    pids_limit: 128
+    security_opt: ["no-new-privileges:true"]
+    logging: *bounded-logs
+
+networks:
+  edge:
+  backend:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:
+  clamav_data:
