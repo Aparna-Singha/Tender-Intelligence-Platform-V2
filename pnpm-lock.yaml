@@ -243,6 +243,9 @@ importers:
       tesseract.js:
         specifier: 6.0.1
         version: 6.0.1
+      tesseract.js-core:
+        specifier: 6.1.2
+        version: 6.1.2
     devDependencies:
       '@types/node':
         specifier: 24.10.13
