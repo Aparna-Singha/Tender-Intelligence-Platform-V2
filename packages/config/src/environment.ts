@@ -320,6 +320,8 @@ export const webEnvironmentSchema = z
   .object({
     NODE_ENV: nodeEnvironmentSchema.default("development"),
     API_PROXY_ORIGIN: urlSchema.optional(),
+    CF_ACCESS_CLIENT_ID: z.string().min(16).optional(),
+    CF_ACCESS_CLIENT_SECRET: z.string().min(16).optional(),
     NEXT_PUBLIC_API_URL: z.union([urlSchema, z.literal("/api")]),
     NEXT_PUBLIC_STORAGE_ORIGIN: urlSchema,
     WEB_PORT: portSchema.default(3000),
@@ -339,7 +341,7 @@ export const webEnvironmentSchema = z
       upstream.origin !== environment.API_PROXY_ORIGIN ||
       upstream.username !== "" ||
       upstream.password !== "" ||
-      (environment.NODE_ENV === "production" && upstream.protocol !== "https:")
+      upstream.protocol !== "https:"
     )
       context.addIssue({
         code: "custom",
@@ -352,6 +354,17 @@ export const webEnvironmentSchema = z
         message: "NEXT_PUBLIC_API_URL must be /api when proxying the API",
         path: ["NEXT_PUBLIC_API_URL"],
       });
+    if (environment.NODE_ENV === "production")
+      for (const key of [
+        "CF_ACCESS_CLIENT_ID",
+        "CF_ACCESS_CLIENT_SECRET",
+      ] as const)
+        if (environment[key] === undefined)
+          context.addIssue({
+            code: "custom",
+            message: `${key} is required for the production API proxy`,
+            path: [key],
+          });
   });
 
 export type ApiEnvironment = z.infer<typeof apiEnvironmentSchema>;

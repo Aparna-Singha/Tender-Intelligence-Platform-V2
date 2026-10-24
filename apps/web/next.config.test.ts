@@ -65,19 +65,14 @@ describe("web security headers", () => {
     expect(contentSecurityPolicy).not.toContain("'unsafe-eval'");
   });
 
-  it("routes all API paths through a same-origin prefix without exposing the upstream in CSP", async () => {
+  it("uses the route handler without an external rewrite or upstream CSP entry", async () => {
     process.env.API_PROXY_ORIGIN = "https://api.staging.example.test";
     process.env.NEXT_PUBLIC_API_URL = "/api";
     vi.resetModules();
 
     const { default: nextConfig, contentSecurityPolicy } =
       await import("./next.config");
-    expect(await nextConfig.rewrites?.()).toEqual([
-      {
-        source: "/api/:path*",
-        destination: "https://api.staging.example.test/:path*",
-      },
-    ]);
+    expect(nextConfig.rewrites).toBeUndefined();
     expect(contentSecurityPolicy).toContain(
       "connect-src 'self' http://127.0.0.1:9000",
     );
