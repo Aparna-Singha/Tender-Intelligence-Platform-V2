@@ -58,7 +58,7 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
       NEXT_PUBLIC_API_URL: http://localhost:4000
       NEXT_PUBLIC_STORAGE_ORIGIN: http://localhost:9000
-      TURBO_CONCURRENCY: ${{ runner.os == 'Windows' && '2' || '10' }}
+      TURBO_CONCURRENCY: ${{ matrix.os == 'windows-latest' && '2' || '10' }}
       TURBO_LOG_ORDER: stream
     steps:
       - name: Configure Git line endings
