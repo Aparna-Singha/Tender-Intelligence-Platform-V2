@@ -217,10 +217,25 @@ describe("parseEnvironment", () => {
         API_PROXY_ORIGIN: "https://api.example.test/path",
       }),
     ).toThrow("HTTPS origin");
+    expect(() =>
+      parseEnvironment("web", webEnvironmentSchema, {
+        ...validWeb,
+        API_PROXY_ORIGIN: "https://api.example.test",
+      }),
+    ).toThrow("CF_ACCESS_CLIENT_ID");
+    expect(() =>
+      parseEnvironment("web", webEnvironmentSchema, {
+        ...validWeb,
+        API_PROXY_ORIGIN: "https://api.example.test",
+        CF_ACCESS_CLIENT_ID: "test-client-id-123456",
+      }),
+    ).toThrow("CF_ACCESS_CLIENT_SECRET");
     expect(
       parseEnvironment("web", webEnvironmentSchema, {
         ...validWeb,
         API_PROXY_ORIGIN: "https://api.example.test",
+        CF_ACCESS_CLIENT_ID: "test-client-id-123456",
+        CF_ACCESS_CLIENT_SECRET: "test-client-secret-123456",
       }).NEXT_PUBLIC_API_URL,
     ).toBe("/api");
   });
