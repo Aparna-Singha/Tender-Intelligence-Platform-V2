@@ -1,0 +1,12 @@
+{
+  "name": "bidveda-mail-staging",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-24",
+  "secrets": {
+    "required": [
+      "RESEND_API_KEY",
+      "EMAIL_ADAPTER_TOKEN",
+      "ALLOWED_FRONTEND_ORIGIN",
+    ],
+  },
+}

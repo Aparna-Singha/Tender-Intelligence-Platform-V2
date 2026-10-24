@@ -14,6 +14,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  bidveda-mail-worker:
+    name: BidVeda mail Worker checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Test mail Worker with mocked Resend requests
+        run: pnpm exec vitest run infrastructure/cloudflare/bidveda-mail-staging/test/index.test.ts
+
+      - name: Type-check mail Worker
+        run: pnpm exec tsc -p infrastructure/cloudflare/bidveda-mail-staging/tsconfig.json --noEmit
+
+      - name: Lint mail Worker
+        run: pnpm exec eslint infrastructure/cloudflare/bidveda-mail-staging/src infrastructure/cloudflare/bidveda-mail-staging/test
+
+      - name: Bundle mail Worker without deploying
+        run: pnpm dlx wrangler@4.152.0 deploy --dry-run --config infrastructure/cloudflare/bidveda-mail-staging/wrangler.jsonc
+
   quality:
     name: Install, validate, test, and build (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
