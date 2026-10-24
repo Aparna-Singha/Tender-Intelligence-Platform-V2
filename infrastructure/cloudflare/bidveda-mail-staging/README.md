@@ -2,6 +2,8 @@
 
 This Cloudflare Worker implements the API's existing server-to-server email contract. It accepts `POST /deliver` with a bearer token and sends one fixed BidVeda invitation or password-reset message through Resend. It does not store or log message content, links, credentials, or Resend responses.
 
+The dedicated `BidVeda mail Worker checks` job in `.github/workflows/ci.yml` runs the mocked tests, typecheck, lint, and a pinned Wrangler 4.152.0 dry run. It supplies no production secrets and does not deploy or send email. These checks run separately because this directory is outside the pnpm/Turbo workspace.
+
 ## Configuration
 
 The existing Worker is named `bidveda-mail-staging`. Keep its existing `RESEND_API_KEY` and `EMAIL_ADAPTER_TOKEN` secrets. Before deployment, add `ALLOWED_FRONTEND_ORIGIN` as a Worker secret in Cloudflare's dashboard. Its value must be the exact HTTPS origin of the staging web app, with no path or trailing slash. The Worker rejects delivery when any of these three settings is missing or invalid. Do not put secret values in `wrangler.jsonc`, this repository, or shell history.
