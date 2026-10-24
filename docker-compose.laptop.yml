@@ -1,0 +1,8 @@
+# Apply after docker-compose.staging.yml for the isolated laptop pilot.
+services:
+  edge:
+    profiles: [vm-only]
+
+  api:
+    ports:
+      - "127.0.0.1:4000:4000"
