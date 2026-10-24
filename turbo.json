@@ -8,6 +8,8 @@
   "globalPassThroughEnv": [
     "API_HOST",
     "API_PORT",
+    "CF_ACCESS_CLIENT_ID",
+    "CF_ACCESS_CLIENT_SECRET",
     "DATABASE_URL",
     "EMAIL_DELIVERY_TOKEN",
     "EMAIL_DELIVERY_URL",
