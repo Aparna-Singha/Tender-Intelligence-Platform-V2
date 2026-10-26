@@ -280,6 +280,11 @@ describe("company docs workspace", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+    expect(uploadFileToSignedStorageUrl).toHaveBeenCalledWith(
+      "http://storage.local/upload-2",
+      file,
+      "0".repeat(64),
+    );
     await waitFor(() =>
       expect(
         screen.queryByRole("dialog", { name: "Upload company document" }),

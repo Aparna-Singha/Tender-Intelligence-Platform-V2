@@ -229,7 +229,10 @@ export class DocumentsService {
         Key: key,
         Metadata: { sha256: input.checksum_sha256 },
       }),
-      { expiresIn: this.environment.DOCUMENT_UPLOAD_TTL_SECONDS },
+      {
+        expiresIn: this.environment.DOCUMENT_UPLOAD_TTL_SECONDS,
+        unhoistableHeaders: new Set(["x-amz-meta-sha256"]),
+      },
     );
     return {
       document_id: created.document.id,

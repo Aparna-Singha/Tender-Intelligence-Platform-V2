@@ -1715,16 +1715,15 @@ export function TenderWorkspace({
             method: "POST",
           },
         );
-        // The presigned URL already embeds x-amz-meta-sha256 as a signed
-        // query parameter (see upload-sessions). Sending it again as a
-        // request header is redundant and MinIO/S3 rejects the PUT with
-        // "headers present which were not signed" (400) because the
-        // duplicate header is outside SignedHeaders.
         try {
           setMessage(
             `Uploading source ${index + 1} of ${files.length} to private storage...`,
           );
-          await uploadFileToSignedStorageUrl(session.upload_url, file);
+          await uploadFileToSignedStorageUrl(
+            session.upload_url,
+            file,
+            checksum,
+          );
         } catch {
           try {
             await apiRequest(

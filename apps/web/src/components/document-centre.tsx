@@ -426,7 +426,7 @@ export function DocumentCentre({
       }
       setMessage("Uploading directly to private storage...");
       try {
-        await uploadFileToSignedStorageUrl(session.upload_url, file);
+        await uploadFileToSignedStorageUrl(session.upload_url, file, checksum);
       } catch (caught) {
         try {
           await apiRequest(
