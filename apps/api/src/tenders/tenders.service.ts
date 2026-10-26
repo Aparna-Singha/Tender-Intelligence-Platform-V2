@@ -625,7 +625,10 @@ export class TendersService {
         Key: key,
         Metadata: { sha256: input.checksum_sha256 },
       }),
-      { expiresIn: this.environment.DOCUMENT_UPLOAD_TTL_SECONDS },
+      {
+        expiresIn: this.environment.DOCUMENT_UPLOAD_TTL_SECONDS,
+        unhoistableHeaders: new Set(["x-amz-meta-sha256"]),
+      },
     );
     await this.database.auditEvent.create({
       data: {

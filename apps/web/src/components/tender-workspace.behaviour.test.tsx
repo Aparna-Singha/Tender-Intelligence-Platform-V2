@@ -913,6 +913,11 @@ describe("tender workspace stages", () => {
         expect.objectContaining({ method: "POST" }),
       ),
     );
+    expect(uploadFileToSignedStorageUrl).toHaveBeenCalledWith(
+      "http://storage.local/upload-2",
+      file,
+      "0".repeat(64),
+    );
     await waitFor(() =>
       expect(
         screen.queryByRole("dialog", { name: "Upload tender files" }),

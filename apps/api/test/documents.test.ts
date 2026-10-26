@@ -1,5 +1,25 @@
-import { DeleteObjectCommand } from "@aws-sdk/client-s3";
-import { ConflictException, NotFoundException } from "@nestjs/common";
+const { getSignedUrlMock } = vi.hoisted(() => ({
+  getSignedUrlMock: vi
+    .fn()
+    .mockResolvedValue(
+      "https://signed.example/upload?X-Amz-SignedHeaders=host%3Bx-amz-meta-sha256",
+    ),
+}));
+
+vi.mock("@aws-sdk/s3-request-presigner", () => ({
+  getSignedUrl: getSignedUrlMock,
+}));
+
+import {
+  DeleteObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { DocumentsService } from "../src/documents/documents.service.js";
 
@@ -8,6 +28,142 @@ const environment = {
   DOCUMENT_UPLOAD_TTL_SECONDS: 300,
   S3_BUCKET: "private-test",
 } as never;
+
+describe("company document direct upload", () => {
+  const checksum = "a".repeat(64);
+  const input = {
+    category: "GST",
+    checksum_sha256: checksum,
+    filename: "company.pdf",
+    mime_type: "application/pdf",
+    size_bytes: 100,
+  } as const;
+
+  it("requires the SHA-256 metadata as a signed upload header", async () => {
+    const transaction = {
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+      document: { create: vi.fn().mockResolvedValue({ id: "document-a" }) },
+      documentVersion: {
+        count: vi.fn().mockResolvedValue(0),
+        create: vi.fn().mockResolvedValue({ id: "version-a" }),
+      },
+      uploadSession: { create: vi.fn().mockResolvedValue({ id: "session-a" }) },
+    };
+    const database = {
+      $transaction: vi.fn(
+        async (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+      document: { count: vi.fn().mockResolvedValue(0) },
+      documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+    };
+    const service = new DocumentsService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+
+    const result = (await service.createUploadSession(
+      "organisation-a",
+      "user-a",
+      input,
+      "request-a",
+    )) as { upload_url: string };
+
+    expect(
+      new URL(result.upload_url).searchParams.get("X-Amz-SignedHeaders"),
+    ).toContain("x-amz-meta-sha256");
+    expect(
+      new URL(result.upload_url).searchParams.has("x-amz-meta-sha256"),
+    ).toBe(false);
+    expect(getSignedUrlMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(PutObjectCommand),
+      { expiresIn: 300, unhoistableHeaders: new Set(["x-amz-meta-sha256"]) },
+    );
+    expect(
+      (getSignedUrlMock.mock.calls.at(-1)?.[1] as PutObjectCommand).input,
+    ).toMatchObject({
+      ContentLength: 100,
+      ContentType: "application/pdf",
+      Metadata: { sha256: checksum },
+    });
+  });
+
+  it.each([
+    ["matching", { sha256: checksum }, true],
+    ["missing", undefined, false],
+    ["tampered", { sha256: "b".repeat(64) }, false],
+  ])(
+    "handles %s HeadObject SHA-256 metadata",
+    async (_case, metadata, accepted) => {
+      const session = {
+        documentVersion: {
+          declaredMimeType: "application/pdf",
+          documentId: "document-a",
+          id: "version-a",
+          quarantineObjectKey: "quarantine/organisation-a/version-a",
+          sha256: checksum,
+          sizeBytes: 100n,
+        },
+        expiresAt: new Date(Date.now() + 60_000),
+        id: "session-a",
+      };
+      const database = {
+        $transaction: vi.fn().mockResolvedValue([]),
+        auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+        document: { update: vi.fn().mockResolvedValue(undefined) },
+        uploadSession: {
+          findFirst: vi.fn().mockResolvedValue(session),
+          update: vi.fn().mockResolvedValue(undefined),
+        },
+      };
+      const storage = {
+        send: vi.fn().mockResolvedValue({
+          ContentLength: 100,
+          ContentType: "application/pdf",
+          Metadata: metadata,
+        }),
+      };
+      const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+      const service = new DocumentsService(
+        database as never,
+        storage as never,
+        jobs as never,
+        environment,
+      );
+      const action = service.completeUpload(
+        "organisation-a",
+        "session-a",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      );
+      if (accepted) {
+        await expect(action).resolves.toEqual({
+          document_id: "document-a",
+          status: "UPLOADED",
+        });
+        expect(jobs.add).toHaveBeenCalledOnce();
+      } else {
+        await expect(action).rejects.toBeInstanceOf(BadRequestException);
+        expect(database.$transaction).not.toHaveBeenCalled();
+        expect(jobs.add).not.toHaveBeenCalled();
+      }
+      expect(storage.send).toHaveBeenCalledWith(expect.any(HeadObjectCommand));
+      expect(database.uploadSession.findFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: {
+            id: "session-a",
+            organisationId: "organisation-a",
+            status: "PENDING",
+          },
+        }),
+      );
+    },
+  );
+});
 
 describe("document vault authorisation", () => {
   it("rejects an exact duplicate with a bounded public conflict", async () => {

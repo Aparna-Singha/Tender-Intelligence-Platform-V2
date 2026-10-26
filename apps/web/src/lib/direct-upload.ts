@@ -11,6 +11,7 @@ export class DirectUploadError extends Error {
 export async function uploadFileToSignedStorageUrl(
   uploadUrl: string,
   file: File,
+  checksumSha256: string,
 ): Promise<void> {
   let response: Response;
   try {
@@ -18,6 +19,7 @@ export async function uploadFileToSignedStorageUrl(
       body: file,
       headers: {
         "content-type": file.type || "application/octet-stream",
+        "x-amz-meta-sha256": checksumSha256,
       },
       method: "PUT",
     });

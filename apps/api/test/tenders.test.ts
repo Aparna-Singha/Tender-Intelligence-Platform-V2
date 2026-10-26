@@ -2,7 +2,7 @@ const { getSignedUrlMock } = vi.hoisted(() => ({
   getSignedUrlMock: vi
     .fn()
     .mockResolvedValue(
-      "https://signed.example/upload?X-Amz-SignedHeaders=content-length%3Bhost&x-amz-meta-sha256=expected-checksum",
+      "https://signed.example/upload?X-Amz-SignedHeaders=host%3Bx-amz-meta-sha256",
     ),
 }));
 
@@ -37,7 +37,7 @@ beforeEach(() => {
   vi.setSystemTime(fixedTestTime);
   vi.clearAllMocks();
   getSignedUrlMock.mockResolvedValue(
-    "https://signed.example/upload?X-Amz-SignedHeaders=content-length%3Bhost&x-amz-meta-sha256=expected-checksum",
+    "https://signed.example/upload?X-Amz-SignedHeaders=host%3Bx-amz-meta-sha256",
   );
 });
 
@@ -1597,7 +1597,7 @@ describe("corrigendum inherited object compensation", () => {
 });
 
 describe("tender direct upload contract", () => {
-  it("presigns tender uploads with sha256 metadata in the URL-backed contract", async () => {
+  it("presigns tender uploads with SHA-256 metadata as a required header", async () => {
     const database = {
       auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
       tenderDocument: {
@@ -1632,8 +1632,17 @@ describe("tender direct upload contract", () => {
       "request-a",
     )) as { readonly upload_url: string };
 
-    expect(result.upload_url).toContain("x-amz-meta-sha256=expected-checksum");
+    expect(
+      new URL(result.upload_url).searchParams.get("X-Amz-SignedHeaders"),
+    ).toContain("x-amz-meta-sha256");
+    expect(
+      new URL(result.upload_url).searchParams.has("x-amz-meta-sha256"),
+    ).toBe(false);
     expect(getSignedUrlMock).toHaveBeenCalledTimes(1);
+    expect(getSignedUrlMock.mock.calls[0]?.[2]).toMatchObject({
+      expiresIn: 300,
+      unhoistableHeaders: new Set(["x-amz-meta-sha256"]),
+    });
     const command = getSignedUrlMock.mock.calls[0]?.[1];
     expect(command).toBeInstanceOf(PutObjectCommand);
     expect((command as PutObjectCommand).input).toMatchObject({
@@ -1720,52 +1729,55 @@ describe("tender direct upload contract", () => {
     );
   });
 
-  it("rejects tender upload completion when the stored object metadata sha256 does not match", async () => {
-    const storage = {
-      send: vi.fn().mockResolvedValue({
-        ContentLength: 1024,
-        ContentType: "application/pdf",
-        Metadata: {
-          sha256:
-            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-        },
-      }),
-    };
-    const jobs = { add: vi.fn() };
-    const database = {
-      processingJob: { findUnique: vi.fn().mockResolvedValue(null) },
-      tenderDocument: {
-        findFirst: vi.fn().mockResolvedValue({
-          declaredMimeType: "application/pdf",
-          id: "document-a",
-          quarantineObjectKey: "tender-quarantine/organisation-a/document-a",
-          sha256:
-            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          sizeBytes: BigInt(1024),
-          tenderVersionId: "version-a",
-          uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+  it.each([
+    ["missing", undefined],
+    ["tampered", { sha256: "b".repeat(64) }],
+  ])(
+    "rejects tender upload completion when SHA-256 metadata is %s",
+    async (_case, metadata) => {
+      const storage = {
+        send: vi.fn().mockResolvedValue({
+          ContentLength: 1024,
+          ContentType: "application/pdf",
+          Metadata: metadata,
         }),
-      },
-    };
-    const service = new TendersService(
-      database as never,
-      storage as never,
-      jobs as never,
-      environment,
-    );
+      };
+      const jobs = { add: vi.fn() };
+      const database = {
+        processingJob: { findUnique: vi.fn().mockResolvedValue(null) },
+        tenderDocument: {
+          findFirst: vi.fn().mockResolvedValue({
+            declaredMimeType: "application/pdf",
+            id: "document-a",
+            quarantineObjectKey: "tender-quarantine/organisation-a/document-a",
+            sha256:
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            sizeBytes: BigInt(1024),
+            tenderVersionId: "version-a",
+            uploadSessionExpiresAt: new Date("2026-08-22T23:59:59.000Z"),
+          }),
+        },
+      };
+      const service = new TendersService(
+        database as never,
+        storage as never,
+        jobs as never,
+        environment,
+      );
 
-    await expect(
-      service.completeUpload(
-        "organisation-a",
-        "tender-a",
-        "document-a",
-        "user-a",
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-        "request-a",
-      ),
-    ).rejects.toBeInstanceOf(BadRequestException);
-    expect(jobs.add).not.toHaveBeenCalled();
-  });
+      await expect(
+        service.completeUpload(
+          "organisation-a",
+          "tender-a",
+          "document-a",
+          "user-a",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "request-a",
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(jobs.add).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects tender upload completion when the upload session has expired", async () => {
     const storage = { send: vi.fn() };
