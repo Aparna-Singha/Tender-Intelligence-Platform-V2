@@ -3,6 +3,15 @@
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const safeMethods = new Set(["GET", "HEAD", "OPTIONS"]);
 let csrfToken: string | null = null;
+const sharedReads = new Map<string, Promise<unknown>>();
+let readGeneration = 0;
+const sharedReadPath =
+  /^(?:\/auth\/session|\/organisations|\/organisations\/[^/?]+\/tenders)$/;
+
+function invalidateSharedReads(): void {
+  readGeneration += 1;
+  sharedReads.clear();
+}
 
 interface ErrorEnvelope {
   readonly error?: { readonly code?: unknown; readonly message?: unknown };
@@ -144,6 +153,35 @@ export async function apiRequest<T>(
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  const method = init.method?.toUpperCase() ?? "GET";
+  if (!safeMethods.has(method)) invalidateSharedReads();
+  if (
+    method === "GET" &&
+    sharedReadPath.test(path) &&
+    init.body === undefined &&
+    init.headers === undefined &&
+    init.signal === undefined &&
+    Object.keys(init).every((key) => key === "method")
+  ) {
+    const existing = sharedReads.get(path);
+    if (existing !== undefined) return existing as Promise<T>;
+    const generation = readGeneration;
+    const pending = request<T>(path, init, true)
+      .then((result) => {
+        if (generation !== readGeneration)
+          throw new PublicApiError(
+            "The workspace changed. Refresh to see current data.",
+            0,
+            "STALE_RESPONSE",
+          );
+        return result;
+      })
+      .finally(() => {
+        if (sharedReads.get(path) === pending) sharedReads.delete(path);
+      });
+    sharedReads.set(path, pending);
+    return pending;
+  }
   return request<T>(path, init, true);
 }
 
@@ -156,4 +194,5 @@ export function formatApiError(error: unknown, fallback: string): string {
 
 export function clearCsrfToken(): void {
   csrfToken = null;
+  invalidateSharedReads();
 }

@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./dashboard";
@@ -65,6 +65,77 @@ describe("dashboard organisation flow", () => {
 
       return Promise.reject(new Error(`Unexpected request: ${path}`));
     });
+  });
+
+  it("keeps a late prior-organisation tender response out of the dashboard", async () => {
+    let activeOrganisation = "org-1";
+    let releaseOld!: (value: unknown) => void;
+    const oldTenders = new Promise((resolve) => {
+      releaseOld = resolve;
+    });
+    const guidance = { recommendations: [] };
+    const tender = (id: string, title: string): Record<string, unknown> => ({
+      buyer: "Synthetic buyer",
+      id,
+      isDemonstration: false,
+      lifecycleStatus: "SOURCE_READY",
+      sourceTenderNumber: id,
+      submissionDeadline: "2026-11-20T11:30:00.000Z",
+      title,
+      workflowState: {
+        actionLabel: "Review",
+        code: "ANALYSIS_READY",
+        detail: "Review required.",
+        isCompleted: false,
+        isDraft: false,
+        isInProgress: false,
+        needsAttention: true,
+        onHold: false,
+        statusLabel: "Review tender",
+        tone: "warning",
+      },
+      workspace: { processingProgress: 100, status: "READY" },
+    });
+    apiRequest.mockImplementation((path: string) => {
+      if (path === "/auth/session")
+        return Promise.resolve({
+          active_organisation_id: activeOrganisation,
+          user: { display_name: "Dinesh" },
+        });
+      if (path === "/organisations")
+        return Promise.resolve([
+          {
+            organisation: { id: "org-1", name: "First", type: "MSME" },
+            role: "OWNER",
+          },
+          {
+            organisation: { id: "org-2", name: "Second", type: "MSME" },
+            role: "OWNER",
+          },
+        ]);
+      if (path.endsWith("/dashboard-recommendations"))
+        return Promise.resolve(guidance);
+      if (path === "/organisations/org-1/tenders") return oldTenders;
+      if (path === "/organisations/org-2/tenders")
+        return Promise.resolve([tender("new", "Second organisation tender")]);
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+
+    render(<Dashboard />);
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith("/organisations/org-1/tenders"),
+    );
+    activeOrganisation = "org-2";
+    act(() => {
+      window.dispatchEvent(new Event("organisation-changed"));
+    });
+    expect(
+      (await screen.findAllByText("Second organisation tender")).length,
+    ).toBeGreaterThan(0);
+    act(() => {
+      releaseOld([tender("old", "First organisation tender")]);
+    });
+    expect(screen.queryAllByText("First organisation tender")).toHaveLength(0);
   });
 
   it("shows the empty state and creates an organisation without a stale form reference", async () => {

@@ -10,7 +10,11 @@ export default async function TenderWorkspacePage({
   const { organisationId, tenderId } = await params;
   return (
     <AppShell>
-      <TenderWorkspace organisationId={organisationId} tenderId={tenderId} />
+      <TenderWorkspace
+        key={`${organisationId}:${tenderId}`}
+        organisationId={organisationId}
+        tenderId={tenderId}
+      />
     </AppShell>
   );
 }

@@ -15,7 +15,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Drawer, IconButton, Select, humanizeEnum } from "@tender/ui";
-import { apiRequest } from "../lib/api";
+import { apiRequest, PublicApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
 import { describeTender, type TenderSummary } from "./tender-presentation";
 
@@ -377,6 +377,9 @@ export function AppShell({
   const [session, setSession] = useState<Session | null>(null);
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
+  const [tendersOrganisationId, setTendersOrganisationId] = useState<
+    string | null
+  >(null);
 
   const pathOrganisationId =
     /^\/(?:assistant|onboarding|documents|settings|tenders)\/([^/]+)/.exec(
@@ -390,7 +393,9 @@ export function AppShell({
 
   useEffect(() => {
     let active = true;
+    let latestLoad = 0;
     const loadShell = (): void => {
+      const token = ++latestLoad;
       void Promise.all([
         apiRequest<Session>("/auth/session"),
         apiRequest<Membership[]>("/organisations"),
@@ -407,19 +412,34 @@ export function AppShell({
               : await apiRequest<TenderSummary[]>(
                   `/organisations/${nextOrganisationId}/tenders`,
                 ).catch(() => []);
-          if (!active) return;
+          if (!active || token !== latestLoad) return;
           setSession(nextSession);
           setMemberships(nextMemberships);
           setTenders(nextTenders);
+          setTendersOrganisationId(nextOrganisationId);
         })
-        .catch(() => router.replace("/login"));
+        .catch((error: unknown) => {
+          if (
+            active &&
+            token === latestLoad &&
+            error instanceof PublicApiError &&
+            error.status === 401
+          )
+            router.replace("/login");
+        });
     };
 
     loadShell();
-    window.addEventListener("organisation-changed", loadShell);
+    const organisationChanged = (): void => {
+      setTenders([]);
+      setTendersOrganisationId(null);
+      loadShell();
+    };
+    window.addEventListener("organisation-changed", organisationChanged);
     return () => {
       active = false;
-      window.removeEventListener("organisation-changed", loadShell);
+      latestLoad += 1;
+      window.removeEventListener("organisation-changed", organisationChanged);
     };
   }, [pathOrganisationId, router]);
 
@@ -453,7 +473,7 @@ export function AppShell({
       pathname={pathname}
       searchStage={searchParams.get("stage")}
       session={session}
-      tenders={tenders}
+      tenders={tendersOrganisationId === organisationId ? tenders : []}
     />
   );
 

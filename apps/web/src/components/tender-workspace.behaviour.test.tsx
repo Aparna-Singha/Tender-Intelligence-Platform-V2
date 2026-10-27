@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { PublicApiError } from "../lib/api";
 import { TenderWorkspace } from "./tender-workspace";
 
 const baseWorkspace = {
@@ -150,6 +151,15 @@ vi.mock("next/navigation", () => ({
 vi.mock("../lib/api", () => ({
   apiRequest,
   formatApiError: (_error: unknown, fallback: string) => fallback,
+  PublicApiError: class PublicApiError extends Error {
+    public constructor(
+      message: string,
+      public readonly status: number,
+      public readonly code: string,
+    ) {
+      super(message);
+    }
+  },
 }));
 vi.mock("../lib/direct-upload", () => ({
   uploadFileToSignedStorageUrl,
@@ -217,6 +227,164 @@ beforeEach(() => {
 });
 
 describe("tender workspace stages", () => {
+  it.each([
+    [404, "/risk-analyses/current", false],
+    [503, "/risk-analyses/current", true],
+    [404, "/risk-analyses", true],
+  ])(
+    "surfaces HTTP %i for %s unless it is an expected current-result 404",
+    async (status, endpoint, showsError) => {
+      const defaultApi = apiRequest.getMockImplementation()!;
+      const source = {
+        ...baseWorkspace,
+        versions: [
+          {
+            ...baseWorkspace.versions[0],
+            documents: [{ id: "source-a", status: "READY" }],
+          },
+        ],
+      };
+      apiRequest.mockImplementation((path: string): unknown => {
+        if (path === "/organisations/org-1/tenders/tender-1") return source;
+        if (path.includes("/final-readiness?"))
+          return { items: [], next_cursor: null };
+        if (path.includes("/controlled-review-packages"))
+          return { items: [], next_cursor: null };
+        if (path.endsWith(endpoint))
+          throw new PublicApiError("Unavailable", status, "TEST_ERROR");
+        return [];
+      });
+      try {
+        render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+        await screen.findByRole("heading", { name: "Assessment summary" });
+        await waitFor(() =>
+          expect(apiRequest).toHaveBeenCalledWith(
+            `/organisations/org-1/tenders/tender-1/versions/version-1${endpoint}`,
+          ),
+        );
+        if (showsError)
+          expect(
+            await screen.findByText("Unable to refresh tender analysis."),
+          ).toBeInTheDocument();
+        else
+          expect(
+            screen.queryByText("Unable to refresh tender analysis."),
+          ).not.toBeInTheDocument();
+      } finally {
+        apiRequest.mockImplementation(defaultApi);
+      }
+    },
+  );
+  it("measures stable Overview requests over a 20-second idle window", async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() =>
+        expect(
+          apiRequest.mock.calls.filter(
+            ([path]) => path === "/organisations/org-1/tenders/tender-1",
+          ).length,
+        ).toBeGreaterThan(0),
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      const initial = apiRequest.mock.calls.map(([path]) => String(path));
+      await vi.advanceTimersByTimeAsync(20_000);
+      const all = apiRequest.mock.calls.map(([path]) => String(path));
+      expect({
+        initial: initial.length,
+        initialDuplicates: initial.length - new Set(initial).size,
+        idle: all.length - initial.length,
+        workspaceInitial: initial.filter(
+          (path) => path === "/organisations/org-1/tenders/tender-1",
+        ).length,
+        workspaceIdle: all
+          .slice(initial.length)
+          .filter((path) => path === "/organisations/org-1/tenders/tender-1")
+          .length,
+      }).toEqual({
+        initial: 9,
+        initialDuplicates: 0,
+        idle: 0,
+        workspaceInitial: 1,
+        workspaceIdle: 0,
+      });
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(apiRequest.mock.calls.length - all.length).toBe(9);
+      view.unmount();
+      const afterUnmount = apiRequest.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(apiRequest.mock.calls).toHaveLength(afterUnmount);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("measures active source processing requests over 20 seconds", async () => {
+    const defaultApi = apiRequest.getMockImplementation()!;
+    apiRequest.mockImplementation((path: string) =>
+      path === "/organisations/org-1/tenders/tender-1"
+        ? inProgressWorkspace
+        : defaultApi(path),
+    );
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      const initial = apiRequest.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(20_000);
+      const idle = apiRequest.mock.calls.length - initial;
+      expect({ initial, idle }).toEqual({ initial: 9, idle: 44 });
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not overlap workspace polling while an active refresh is pending", async () => {
+    const defaultApi = apiRequest.getMockImplementation()!;
+    const pendingWorkspace = createDeferred<typeof inProgressWorkspace>();
+    let workspaceReads = 0;
+    apiRequest.mockImplementation((path: string) => {
+      if (path === "/organisations/org-1/tenders/tender-1") {
+        workspaceReads += 1;
+        return workspaceReads === 1
+          ? inProgressWorkspace
+          : pendingWorkspace.promise;
+      }
+      return defaultApi(path);
+    });
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(workspaceReads).toBe(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(workspaceReads).toBe(2);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(workspaceReads).toBe(2);
+      pendingWorkspace.resolve(inProgressWorkspace);
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(workspaceReads).toBe(3);
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("defaults a missing stage to Overview while retaining explicit and invalid stage handling", async () => {
     const view = render(
       <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
@@ -302,12 +470,15 @@ describe("tender workspace stages", () => {
 
       await vi.advanceTimersByTimeAsync(0);
       await vi.waitFor(() => expect(extractionRequests).toBe(1));
+      await vi.waitFor(() =>
+        expect(screen.getByText("Office equipment tender")).toBeInTheDocument(),
+      );
 
       await vi.advanceTimersByTimeAsync(10_000);
       expect(extractionRequests).toBe(1);
 
       extractionDeferred.resolve([]);
-      await vi.waitFor(() => expect(extractionRequests).toBeGreaterThan(1));
+      await vi.waitFor(() => expect(extractionRequests).toBe(2));
     } finally {
       vi.useRealTimers();
     }

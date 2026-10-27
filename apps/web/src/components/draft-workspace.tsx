@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
   type FormEvent,
   type JSX,
@@ -245,6 +246,8 @@ export function DraftWorkspace({
   const [creationFailure, setCreationFailure] =
     useState<DraftFailurePresentation | null>(null);
   const [retryingGeneration, setRetryingGeneration] = useState(false);
+  const draftPollInFlight = useRef(false);
+  const draftLoadToken = useRef(0);
   const [draftingDataLoaded, setDraftingDataLoaded] = useState(false);
   const [status, setStatus] = useState("Loading drafting workspace…");
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -279,6 +282,7 @@ export function DraftWorkspace({
   }
 
   const load = useCallback(async (): Promise<void> => {
+    const token = ++draftLoadToken.current;
     try {
       const [loadedTemplates, loadedRuns, loadedDrafts] = await Promise.all([
         apiRequest<readonly Template[]>(
@@ -287,6 +291,7 @@ export function DraftWorkspace({
         apiRequest<readonly Run[]>(`${base}/draft-generation-runs`),
         apiRequest<readonly Draft[]>(`${base}/drafts`),
       ]);
+      if (token !== draftLoadToken.current) return;
       setTemplates(loadedTemplates);
       setRuns(loadedRuns);
       setDrafts(loadedDrafts);
@@ -296,6 +301,7 @@ export function DraftWorkspace({
       );
       setStatus("");
     } catch {
+      if (token !== draftLoadToken.current) return;
       setDraftingDataLoaded(true);
       setStatus("Drafting data is unavailable or not authorised.");
     }
@@ -326,8 +332,36 @@ export function DraftWorkspace({
 
   useEffect(() => {
     void load();
-    const timer = window.setInterval(() => void load(), 5_000);
+    return () => {
+      draftLoadToken.current += 1;
+    };
+  }, [load]);
+
+  const draftRunActive = runs.some(
+    (run) => !["COMPLETE", "FAILED", "CANCELLED"].includes(run.status),
+  );
+  useEffect(() => {
+    if (!draftRunActive) return;
+    const timer = window.setInterval(() => {
+      if (draftPollInFlight.current) return;
+      draftPollInFlight.current = true;
+      void load().finally(() => {
+        draftPollInFlight.current = false;
+      });
+    }, 5_000);
     return () => window.clearInterval(timer);
+  }, [draftRunActive, load]);
+
+  useEffect(() => {
+    const refresh = (): void => {
+      if (document.visibilityState === "visible") void load();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+    };
   }, [load]);
 
   useEffect(() => {

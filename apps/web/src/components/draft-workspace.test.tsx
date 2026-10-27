@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { PublicApiError } from "../lib/api";
@@ -50,6 +50,78 @@ function installApi(): void {
 }
 
 describe("draft workspace safety", () => {
+  it("measures stable draft-stage requests over 20 seconds", async () => {
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <DraftWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      const initial = apiRequest.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect({
+        initial,
+        idle: apiRequest.mock.calls.length - initial,
+      }).toEqual({ initial: 3, idle: 0 });
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(apiRequest.mock.calls).toHaveLength(initial + 3);
+      view.unmount();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(apiRequest.mock.calls).toHaveLength(initial + 3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("polls a queued draft until it reaches a terminal state", async () => {
+    const defaultApi = apiRequest.getMockImplementation()!;
+    let runReads = 0;
+    apiRequest.mockImplementation((path: string) => {
+      if (path.endsWith("/draft-generation-runs")) {
+        runReads += 1;
+        return Promise.resolve([
+          {
+            citationCount: 0,
+            currentStage: runReads === 1 ? "Queued" : "Complete",
+            draftId: null,
+            id: "run-a",
+            placeholderCount: 0,
+            progressPercentage: runReads === 1 ? 0 : 100,
+            safeFailureCode: null,
+            sourceMode: "TENDER_ONLY",
+            status: runReads === 1 ? "QUEUED" : "COMPLETE",
+            title: "Synthetic draft",
+            validatedClaimCount: 0,
+          },
+        ]);
+      }
+      return defaultApi(path) as unknown;
+    });
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <DraftWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(runReads).toBe(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(runReads).toBe(2);
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(runReads).toBe(2);
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+      apiRequest.mockImplementation(defaultApi);
+    }
+  });
   it("keeps draft action status visible in the readiness rail", () => {
     expect(source).toContain('className="draft-rail__status"');
   });

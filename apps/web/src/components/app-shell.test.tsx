@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./app-shell";
 
@@ -22,6 +22,14 @@ vi.mock("next/navigation", () => ({
 }));
 vi.mock("../lib/api", () => ({
   apiRequest,
+  PublicApiError: class PublicApiError extends Error {
+    public constructor(
+      message: string,
+      public readonly status: number,
+    ) {
+      super(message);
+    }
+  },
 }));
 
 const tenderFixtures = [
@@ -110,6 +118,64 @@ describe("app shell assistant and sidebar semantics", () => {
       }
       return Promise.reject(new Error(`Unexpected request: ${path}`));
     });
+  });
+
+  it("ignores an older organisation response after switching", async () => {
+    pathnameState.current = "/dashboard";
+    let activeOrganisation = "org-1";
+    let releaseOld!: (value: typeof tenderFixtures) => void;
+    const oldTenders = new Promise<typeof tenderFixtures>((resolve) => {
+      releaseOld = resolve;
+    });
+    apiRequest.mockImplementation((path: string) => {
+      if (path === "/auth/session")
+        return Promise.resolve({
+          active_organisation_id: activeOrganisation,
+          user: { display_name: "Aparna", email: "aparna@example.test" },
+        });
+      if (path === "/organisations")
+        return Promise.resolve([
+          {
+            organisation: { id: "org-1", name: "First", type: "MSME" },
+            role: "OWNER",
+          },
+          {
+            organisation: { id: "org-2", name: "Second", type: "MSME" },
+            role: "OWNER",
+          },
+        ]);
+      if (path === "/organisations/org-1/tenders") return oldTenders;
+      if (path === "/organisations/org-2/tenders")
+        return Promise.resolve([
+          {
+            ...tenderFixtures[0],
+            id: "second-tender",
+            title: "Second organisation tender",
+          },
+        ]);
+      return Promise.reject(new Error(`Unexpected request: ${path}`));
+    });
+
+    render(
+      <AppShell>
+        <div>Dashboard content</div>
+      </AppShell>,
+    );
+    await waitFor(() =>
+      expect(apiRequest).toHaveBeenCalledWith("/organisations/org-1/tenders"),
+    );
+    activeOrganisation = "org-2";
+    act(() => {
+      window.dispatchEvent(new Event("organisation-changed"));
+    });
+    expect(
+      (await screen.findAllByText("Second organisation tender")).length,
+    ).toBeGreaterThan(0);
+    act(() => {
+      releaseOld(tenderFixtures);
+    });
+    expect(screen.queryAllByText(tenderFixtures[0].title)).toHaveLength(0);
+    expect(routerState.replace).not.toHaveBeenCalled();
   });
 
   it("shows AI Chat as a primary destination and keeps tender chat shortcuts tender-scoped", async () => {
