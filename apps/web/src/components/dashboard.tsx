@@ -222,7 +222,6 @@ export function Dashboard(): JSX.Element {
       });
       form.reset();
       window.dispatchEvent(new Event("organisation-changed"));
-      await load();
       setCreateOpen(false);
       setCreating(false);
     } catch (caught) {

@@ -49,12 +49,15 @@ const inProgressWorkspace = {
 function createDeferred<T>(): {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (error: Error) => void;
 } {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((value) => {
+  let reject!: (error: Error) => void;
+  const promise = new Promise<T>((value, failure) => {
     resolve = value;
+    reject = failure;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 const failedUploadWorkspace = {
@@ -479,6 +482,105 @@ describe("tender workspace stages", () => {
 
       extractionDeferred.resolve([]);
       await vi.waitFor(() => expect(extractionRequests).toBe(2));
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("handles a rejected in-flight support load and runs one queued refresh", async () => {
+    const defaultApi = apiRequest.getMockImplementation()!;
+    const extractionDeferred = createDeferred<readonly []>();
+    let extractionReads = 0;
+    apiRequest.mockImplementation((path: string): unknown => {
+      if (path === "/organisations/org-1/tenders/tender-1")
+        return inProgressWorkspace;
+      if (path.endsWith("/versions/version-1/extractions")) {
+        extractionReads += 1;
+        return extractionReads === 1 ? extractionDeferred.promise : [];
+      }
+      return defaultApi(path);
+    });
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(extractionReads).toBe(1);
+      await vi.advanceTimersByTimeAsync(5_000);
+      extractionDeferred.reject(new Error("Synthetic support failure"));
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(extractionReads).toBe(2);
+      expect(
+        screen.queryByText("Unable to refresh tender analysis."),
+      ).not.toBeInTheDocument();
+      view.unmount();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("loads new-version support and ignores late old-version results", async () => {
+    const defaultApi = apiRequest.getMockImplementation()!;
+    const oldExtraction =
+      createDeferred<
+        readonly { id: string; public_message: string; status: string }[]
+      >();
+    const newWorkspace = {
+      ...inProgressWorkspace,
+      versions: [
+        {
+          ...baseWorkspace.versions[0],
+          id: "version-2",
+          versionNumber: 2,
+        },
+      ],
+    };
+    let workspaceReads = 0;
+    apiRequest.mockImplementation((path: string): unknown => {
+      if (path === "/organisations/org-1/tenders/tender-1") {
+        workspaceReads += 1;
+        return workspaceReads === 1 ? inProgressWorkspace : newWorkspace;
+      }
+      if (path.endsWith("/versions/version-1/extractions"))
+        return oldExtraction.promise;
+      if (path.endsWith("/versions/version-2/extractions"))
+        return [
+          {
+            id: "new-extraction",
+            public_message: "New-version extraction",
+            status: "FAILED",
+          },
+        ];
+      return defaultApi(path);
+    });
+    search = new URLSearchParams("stage=activity");
+    vi.useFakeTimers();
+    try {
+      const view = render(
+        <TenderWorkspace organisationId="org-1" tenderId="tender-1" />,
+      );
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(workspaceReads).toBe(2);
+      oldExtraction.resolve([
+        {
+          id: "old-extraction",
+          public_message: "Old-version extraction",
+          status: "COMPLETE",
+        },
+      ]);
+      for (let step = 0; step < 5; step += 1)
+        await vi.advanceTimersByTimeAsync(0);
+      expect(apiRequest).toHaveBeenCalledWith(
+        "/organisations/org-1/tenders/tender-1/versions/version-2/extractions",
+      );
+      expect(screen.getByText("New-version extraction")).toBeInTheDocument();
+      expect(screen.queryByText("Old-version extraction")).toBeNull();
+      view.unmount();
     } finally {
       vi.useRealTimers();
     }

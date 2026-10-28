@@ -50,3 +50,20 @@ The reported Mumbai Vercel-region improvement is infrastructure work and is
 not attributed to this change. The historical 80-network-request capture is
 not used as an initial API-request count. Intermittent 502 investigation and
 deployed-browser readiness timing remain separate.
+
+## Follow-up correctness review (2026-10-28)
+
+- Prisma and the draft backend include `INVALIDATED` among terminal generation
+  states. Draft polling now stops for that state as it already did for complete,
+  failed, and cancelled runs.
+- A second support refresh could await a rejected in-flight load outside the
+  owner's catch block. The waiter now observes the rejection safely, and the
+  owner runs one queued retry while the same version remains current.
+- An unsafe request invalidates pending shared reads. If a session or
+  organisation read consequently fails with `STALE_RESPONSE`, AppShell now makes
+  one fresh attempt. Other errors retain their existing handling.
+- Workspace polling can discover a new tender version. It now clears old
+  version support immediately, rejects late old-version results, and loads the
+  new version's support once the previous load settles.
+- Organisation creation dispatched a reload event and called Dashboard's load
+  directly. The event alone now starts the immediate refresh.

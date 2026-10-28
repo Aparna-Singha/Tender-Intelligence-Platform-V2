@@ -44,7 +44,11 @@ Exact request totals after CONTINUE and across stage navigation were not
 measured: those tests simulate specific transitions and mock mounted child
 workspaces, so a single aggregate count would misrepresent browser traffic.
 The pre-change full regression suite was not run as part of this comparison;
-the revised source passed the full suite, including 154 web tests. These
-results establish behavior coverage, not a before/after failure-rate metric.
+the revised source passed the full suite. These results establish behavior
+coverage, not a before/after failure-rate metric. On 2026-10-28, the four
+request-count cases were rerun against the original base in a disposable
+detached worktree with the same test files. Their failures showed the original
+17/36 and 17/76 Overview counts, 3/12 stable draft count, and duplicate
+dashboard requests. All four revised-source count assertions passed again.
 Actual staging latency, 502 frequency, and deployed-browser request counts
 require a separate controlled browser capture after review and deployment.

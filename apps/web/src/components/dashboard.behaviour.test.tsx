@@ -148,6 +148,9 @@ describe("dashboard organisation flow", () => {
         name: "Good morning, Dinesh",
       }),
     ).toBeInTheDocument();
+    const initialSessionReads = apiRequest.mock.calls.filter(
+      ([path]) => path === "/auth/session",
+    ).length;
 
     await user.click(
       screen.getAllByRole("button", { name: /Create organisation/ })[0]!,
@@ -178,6 +181,14 @@ describe("dashboard organisation flow", () => {
     expect(
       await screen.findByRole("link", { name: /Add tender/ }),
     ).toHaveAttribute("href", "/tenders/org-1");
+    expect(
+      apiRequest.mock.calls.filter(([path]) => path === "/auth/session").length,
+    ).toBe(initialSessionReads + 1);
+    expect(
+      apiRequest.mock.calls.filter(([path]) =>
+        String(path).endsWith("/dashboard-recommendations"),
+      ),
+    ).toHaveLength(1);
 
     expect(
       screen.queryByRole("dialog", { name: "Create organisation" }),

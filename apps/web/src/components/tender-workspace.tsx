@@ -1334,6 +1334,7 @@ export function TenderWorkspace({
   const workspaceLoadToken = useRef(0);
   const workspacePollPromise = useRef<Promise<void> | null>(null);
   const supportLoadPromise = useRef<Promise<void> | null>(null);
+  const supportLoadVersionId = useRef("");
   const supportRefreshQueued = useRef(false);
   const supportLoadToken = useRef(0);
   const currentVersionIdRef = useRef("");
@@ -1370,10 +1371,17 @@ export function TenderWorkspace({
         `/organisations/${organisationId}/tenders/${tenderId}`,
       );
       if (workspaceLoadToken.current !== token) return;
+      const latestVersionId = loaded.versions[0]?.id ?? "";
+      const versionChanged = currentVersionIdRef.current !== latestVersionId;
+      if (versionChanged) {
+        currentVersionIdRef.current = latestVersionId;
+        supportLoadToken.current += 1;
+        setSupport(emptySupportData);
+        setSupportError("");
+      }
       setWorkspace(loaded);
       setMessage("");
-      const latestVersionId = loaded.versions[0]?.id ?? "";
-      if (refreshSupport && latestVersionId !== "") {
+      if ((refreshSupport || versionChanged) && latestVersionId !== "") {
         void refreshSupportData(
           latestVersionId,
           (loaded.versions[0]?.documents.length ?? 0) > 0,
@@ -1552,25 +1560,42 @@ export function TenderWorkspace({
     fetchCurrentResults = true,
   ): Promise<void> {
     if (supportLoadPromise.current !== null) {
-      supportRefreshQueued.current = true;
-      await supportLoadPromise.current;
+      const pending = supportLoadPromise.current;
+      const sameVersion = supportLoadVersionId.current === versionId;
+      if (sameVersion) supportRefreshQueued.current = true;
+      try {
+        await pending;
+      } catch {
+        // The owning refresh reports the error and handles a queued retry.
+      }
+      if (
+        !sameVersion &&
+        currentVersionIdRef.current === versionId &&
+        activeScopeRef.current === `${organisationId}:${tenderId}`
+      )
+        await refreshSupportData(versionId, fetchCurrentResults);
       return;
     }
     do {
       supportRefreshQueued.current = false;
       const pending = loadSupportData(versionId, fetchCurrentResults);
       supportLoadPromise.current = pending;
+      supportLoadVersionId.current = versionId;
       try {
         await pending;
       } catch (error) {
-        if (activeScopeRef.current === `${organisationId}:${tenderId}`)
+        if (
+          activeScopeRef.current === `${organisationId}:${tenderId}` &&
+          currentVersionIdRef.current === versionId
+        )
           setSupportError(
             formatApiError(error, "Unable to refresh tender analysis."),
           );
-        return;
+        if (!supportRefreshQueued.current) return;
       } finally {
         if (supportLoadPromise.current === pending) {
           supportLoadPromise.current = null;
+          supportLoadVersionId.current = "";
         }
       }
     } while (
@@ -1589,6 +1614,7 @@ export function TenderWorkspace({
       workspacePollPromise.current = null;
       supportLoadToken.current += 1;
       supportLoadPromise.current = null;
+      supportLoadVersionId.current = "";
       supportRefreshQueued.current = false;
     };
   }, [organisationId, tenderId]);

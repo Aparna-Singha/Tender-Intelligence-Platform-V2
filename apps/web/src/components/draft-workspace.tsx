@@ -338,7 +338,8 @@ export function DraftWorkspace({
   }, [load]);
 
   const draftRunActive = runs.some(
-    (run) => !["COMPLETE", "FAILED", "CANCELLED"].includes(run.status),
+    (run) =>
+      !["COMPLETE", "FAILED", "CANCELLED", "INVALIDATED"].includes(run.status),
   );
   useEffect(() => {
     if (!draftRunActive) return;

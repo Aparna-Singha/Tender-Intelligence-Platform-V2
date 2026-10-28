@@ -78,50 +78,53 @@ describe("draft workspace safety", () => {
     }
   });
 
-  it("polls a queued draft until it reaches a terminal state", async () => {
-    const defaultApi = apiRequest.getMockImplementation()!;
-    let runReads = 0;
-    apiRequest.mockImplementation((path: string) => {
-      if (path.endsWith("/draft-generation-runs")) {
-        runReads += 1;
-        return Promise.resolve([
-          {
-            citationCount: 0,
-            currentStage: runReads === 1 ? "Queued" : "Complete",
-            draftId: null,
-            id: "run-a",
-            placeholderCount: 0,
-            progressPercentage: runReads === 1 ? 0 : 100,
-            safeFailureCode: null,
-            sourceMode: "TENDER_ONLY",
-            status: runReads === 1 ? "QUEUED" : "COMPLETE",
-            title: "Synthetic draft",
-            validatedClaimCount: 0,
-          },
-        ]);
+  it.each(["COMPLETE", "INVALIDATED"])(
+    "stops polling a queued draft after %s",
+    async (terminalStatus) => {
+      const defaultApi = apiRequest.getMockImplementation()!;
+      let runReads = 0;
+      apiRequest.mockImplementation((path: string) => {
+        if (path.endsWith("/draft-generation-runs")) {
+          runReads += 1;
+          return Promise.resolve([
+            {
+              citationCount: 0,
+              currentStage: runReads === 1 ? "Queued" : "Complete",
+              draftId: null,
+              id: "run-a",
+              placeholderCount: 0,
+              progressPercentage: runReads === 1 ? 0 : 100,
+              safeFailureCode: null,
+              sourceMode: "TENDER_ONLY",
+              status: runReads === 1 ? "QUEUED" : terminalStatus,
+              title: "Synthetic draft",
+              validatedClaimCount: 0,
+            },
+          ]);
+        }
+        return defaultApi(path) as unknown;
+      });
+      vi.useFakeTimers();
+      try {
+        const view = render(
+          <DraftWorkspace organisationId="org-1" tenderId="tender-1" />,
+        );
+        for (let step = 0; step < 5; step += 1)
+          await vi.advanceTimersByTimeAsync(0);
+        expect(runReads).toBe(1);
+        await vi.advanceTimersByTimeAsync(5_000);
+        expect(runReads).toBe(2);
+        for (let step = 0; step < 5; step += 1)
+          await vi.advanceTimersByTimeAsync(0);
+        await vi.advanceTimersByTimeAsync(20_000);
+        expect(runReads).toBe(2);
+        view.unmount();
+      } finally {
+        vi.useRealTimers();
+        apiRequest.mockImplementation(defaultApi);
       }
-      return defaultApi(path) as unknown;
-    });
-    vi.useFakeTimers();
-    try {
-      const view = render(
-        <DraftWorkspace organisationId="org-1" tenderId="tender-1" />,
-      );
-      for (let step = 0; step < 5; step += 1)
-        await vi.advanceTimersByTimeAsync(0);
-      expect(runReads).toBe(1);
-      await vi.advanceTimersByTimeAsync(5_000);
-      expect(runReads).toBe(2);
-      for (let step = 0; step < 5; step += 1)
-        await vi.advanceTimersByTimeAsync(0);
-      await vi.advanceTimersByTimeAsync(20_000);
-      expect(runReads).toBe(2);
-      view.unmount();
-    } finally {
-      vi.useRealTimers();
-      apiRequest.mockImplementation(defaultApi);
-    }
-  });
+    },
+  );
   it("keeps draft action status visible in the readiness rail", () => {
     expect(source).toContain('className="draft-rail__status"');
   });

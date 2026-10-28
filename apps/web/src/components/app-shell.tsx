@@ -394,7 +394,7 @@ export function AppShell({
   useEffect(() => {
     let active = true;
     let latestLoad = 0;
-    const loadShell = (): void => {
+    const loadShell = (retryStale = true): void => {
       const token = ++latestLoad;
       void Promise.all([
         apiRequest<Session>("/auth/session"),
@@ -411,7 +411,14 @@ export function AppShell({
               ? []
               : await apiRequest<TenderSummary[]>(
                   `/organisations/${nextOrganisationId}/tenders`,
-                ).catch(() => []);
+                ).catch((error: unknown) => {
+                  if (
+                    error instanceof PublicApiError &&
+                    error.code === "STALE_RESPONSE"
+                  )
+                    throw error;
+                  return [];
+                });
           if (!active || token !== latestLoad) return;
           setSession(nextSession);
           setMemberships(nextMemberships);
@@ -419,12 +426,16 @@ export function AppShell({
           setTendersOrganisationId(nextOrganisationId);
         })
         .catch((error: unknown) => {
+          if (!active || token !== latestLoad) return;
           if (
-            active &&
-            token === latestLoad &&
+            retryStale &&
             error instanceof PublicApiError &&
-            error.status === 401
-          )
+            error.code === "STALE_RESPONSE"
+          ) {
+            loadShell(false);
+            return;
+          }
+          if (error instanceof PublicApiError && error.status === 401)
             router.replace("/login");
         });
     };
