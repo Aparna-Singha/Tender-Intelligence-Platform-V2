@@ -4,7 +4,14 @@ import { ContextualAssistant } from "./contextual-assistant";
 
 import { Building2, Plus, Sparkles, X } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type FormEvent,
+  type JSX,
+} from "react";
 import {
   Alert,
   Button,
@@ -131,8 +138,11 @@ export function Dashboard(): JSX.Element {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const loadToken = useRef(0);
+  const loadedOrganisationId = useRef<string | null>(null);
 
   async function load(): Promise<void> {
+    const token = ++loadToken.current;
     try {
       const [nextSession, nextMemberships] = await Promise.all([
         apiRequest<Session>("/auth/session"),
@@ -142,6 +152,12 @@ export function Dashboard(): JSX.Element {
         nextSession.active_organisation_id ??
         nextMemberships[0]?.organisation.id ??
         null;
+      if (token !== loadToken.current) return;
+      if (loadedOrganisationId.current !== organisationId) {
+        loadedOrganisationId.current = organisationId;
+        setGuidance(null);
+        setTenders([]);
+      }
       setSession(nextSession);
       setMemberships(nextMemberships);
       setSelectedId(organisationId);
@@ -158,12 +174,14 @@ export function Dashboard(): JSX.Element {
             `/organisations/${organisationId}/tenders`,
           ),
         ]);
+        if (token !== loadToken.current) return;
         setGuidance(nextGuidance);
         setTenders(nextTenders);
       }
 
       setError("");
     } catch (caught) {
+      if (token !== loadToken.current) return;
       setError(
         formatApiError(
           caught,
@@ -171,12 +189,20 @@ export function Dashboard(): JSX.Element {
         ),
       );
     } finally {
-      setLoading(false);
+      if (token === loadToken.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     void load();
+    const reload = (): void => {
+      void load();
+    };
+    window.addEventListener("organisation-changed", reload);
+    return () => {
+      loadToken.current += 1;
+      window.removeEventListener("organisation-changed", reload);
+    };
   }, []);
 
   async function create(event: FormEvent<HTMLFormElement>): Promise<void> {
@@ -195,7 +221,6 @@ export function Dashboard(): JSX.Element {
         method: "POST",
       });
       form.reset();
-      await load();
       window.dispatchEvent(new Event("organisation-changed"));
       setCreateOpen(false);
       setCreating(false);

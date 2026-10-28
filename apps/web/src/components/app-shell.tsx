@@ -14,8 +14,15 @@ import {
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
-import { Drawer, IconButton, Select, humanizeEnum } from "@tender/ui";
-import { apiRequest } from "../lib/api";
+import {
+  Alert,
+  Button,
+  Drawer,
+  IconButton,
+  Select,
+  humanizeEnum,
+} from "@tender/ui";
+import { apiRequest, PublicApiError } from "../lib/api";
 import { assistantHref } from "../lib/assistant";
 import { describeTender, type TenderSummary } from "./tender-presentation";
 
@@ -377,6 +384,13 @@ export function AppShell({
   const [session, setSession] = useState<Session | null>(null);
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
+  const [tendersOrganisationId, setTendersOrganisationId] = useState<
+    string | null
+  >(null);
+  const [shellLoadError, setShellLoadError] = useState<
+    "recoverable" | "forbidden" | null
+  >(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   const pathOrganisationId =
     /^\/(?:assistant|onboarding|documents|settings|tenders)\/([^/]+)/.exec(
@@ -390,7 +404,9 @@ export function AppShell({
 
   useEffect(() => {
     let active = true;
-    const loadShell = (): void => {
+    let latestLoad = 0;
+    const loadShell = (retryStale = true): void => {
+      const token = ++latestLoad;
       void Promise.all([
         apiRequest<Session>("/auth/session"),
         apiRequest<Membership[]>("/organisations"),
@@ -406,22 +422,57 @@ export function AppShell({
               ? []
               : await apiRequest<TenderSummary[]>(
                   `/organisations/${nextOrganisationId}/tenders`,
-                ).catch(() => []);
-          if (!active) return;
+                );
+          if (!active || token !== latestLoad) return;
           setSession(nextSession);
           setMemberships(nextMemberships);
           setTenders(nextTenders);
+          setTendersOrganisationId(nextOrganisationId);
+          setShellLoadError(null);
         })
-        .catch(() => router.replace("/login"));
+        .catch((error: unknown) => {
+          if (!active || token !== latestLoad) return;
+          if (error instanceof PublicApiError) {
+            if (error.status === 401 || error.status === 403) {
+              setSession(null);
+              setMemberships([]);
+              setTenders([]);
+              setTendersOrganisationId(null);
+              if (error.status === 401) {
+                setShellLoadError(null);
+                router.replace("/login");
+              } else setShellLoadError("forbidden");
+              return;
+            }
+            if (
+              retryStale &&
+              error.status === 0 &&
+              error.code === "STALE_RESPONSE"
+            ) {
+              loadShell(false);
+              return;
+            }
+          }
+          setShellLoadError("recoverable");
+        });
     };
 
     loadShell();
-    window.addEventListener("organisation-changed", loadShell);
+    const organisationChanged = (): void => {
+      setShellLoadError(null);
+      setSession(null);
+      setMemberships([]);
+      setTenders([]);
+      setTendersOrganisationId(null);
+      loadShell();
+    };
+    window.addEventListener("organisation-changed", organisationChanged);
     return () => {
       active = false;
-      window.removeEventListener("organisation-changed", loadShell);
+      latestLoad += 1;
+      window.removeEventListener("organisation-changed", organisationChanged);
     };
-  }, [pathOrganisationId, router]);
+  }, [pathOrganisationId, retryKey, router]);
 
   const mobileTitle = useMemo(() => {
     if (pathname.startsWith("/assistant/")) return "AI Chat";
@@ -453,7 +504,7 @@ export function AppShell({
       pathname={pathname}
       searchStage={searchParams.get("stage")}
       session={session}
-      tenders={tenders}
+      tenders={tendersOrganisationId === organisationId ? tenders : []}
     />
   );
 
@@ -473,7 +524,29 @@ export function AppShell({
             <small>{session?.user.display_name ?? "Loading"}</small>
           </div>
         </header>
-        <main className="workspace-content">{children}</main>
+        <main className="workspace-content">
+          {shellLoadError === "recoverable" ? (
+            <Alert title="Workspace navigation unavailable" tone="danger">
+              <p>Navigation could not be loaded. Please try again.</p>
+              <Button
+                onClick={() => {
+                  setShellLoadError(null);
+                  setRetryKey((key) => key + 1);
+                }}
+                type="button"
+                variant="secondary"
+              >
+                Try loading workspace again
+              </Button>
+            </Alert>
+          ) : null}
+          {shellLoadError === "forbidden" ? (
+            <Alert title="Workspace access denied" tone="danger">
+              <p>You do not have permission to load this workspace.</p>
+            </Alert>
+          ) : null}
+          {children}
+        </main>
       </div>
       {mobileOpen ? (
         <Drawer label="Navigation" onClose={() => setMobileOpen(false)}>

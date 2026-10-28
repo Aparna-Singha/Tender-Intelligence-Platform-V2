@@ -22,7 +22,7 @@ import {
   Textarea,
   humanizeEnum,
 } from "@tender/ui";
-import { apiRequest, formatApiError } from "../lib/api";
+import { apiRequest, formatApiError, PublicApiError } from "../lib/api";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
 import { ActionChecklist } from "./action-checklist";
 import { ControlledReviewPackageWorkspace } from "./controlled-review-package-workspace";
@@ -1206,11 +1206,20 @@ async function sha256(file: File): Promise<string> {
     .join("");
 }
 
-async function safeApi<T>(path: string): Promise<T | null> {
+async function safeApi<T>(
+  path: string,
+  allowNotFound = false,
+): Promise<T | null> {
   try {
     return await apiRequest<T>(path);
-  } catch {
-    return null;
+  } catch (error) {
+    if (
+      allowNotFound &&
+      error instanceof PublicApiError &&
+      error.status === 404
+    )
+      return null;
+    throw error;
   }
 }
 
@@ -1303,6 +1312,7 @@ export function TenderWorkspace({
 }): JSX.Element {
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [support, setSupport] = useState<SupportData>(emptySupportData);
+  const [supportError, setSupportError] = useState("");
   const [message, setMessage] = useState("Loading workspace...");
   const [selectedRequirementId, setSelectedRequirementId] = useState("");
   const [eligibilityFilter, setEligibilityFilter] = useState("ALL");
@@ -1322,10 +1332,13 @@ export function TenderWorkspace({
     useState(0);
   const [riskRetrying, setRiskRetrying] = useState(false);
   const workspaceLoadToken = useRef(0);
+  const workspacePollPromise = useRef<Promise<void> | null>(null);
   const supportLoadPromise = useRef<Promise<void> | null>(null);
+  const supportLoadVersionId = useRef("");
   const supportRefreshQueued = useRef(false);
   const supportLoadToken = useRef(0);
   const currentVersionIdRef = useRef("");
+  const activeScopeRef = useRef("");
   const evidenceDetailsRef = useRef<HTMLDetailsElement | null>(null);
   const automaticChecklistAttempts = useRef(new Set<string>());
   const [pendingFileRemoval, setPendingFileRemoval] = useState<null | {
@@ -1350,7 +1363,7 @@ export function TenderWorkspace({
     router.push(`${pathname}${next.size === 0 ? "" : `?${next.toString()}`}`);
   }
 
-  async function loadWorkspace(): Promise<void> {
+  async function loadWorkspace(refreshSupport = true): Promise<void> {
     const token = workspaceLoadToken.current + 1;
     workspaceLoadToken.current = token;
     try {
@@ -1358,19 +1371,38 @@ export function TenderWorkspace({
         `/organisations/${organisationId}/tenders/${tenderId}`,
       );
       if (workspaceLoadToken.current !== token) return;
+      const latestVersionId = loaded.versions[0]?.id ?? "";
+      const versionChanged = currentVersionIdRef.current !== latestVersionId;
+      if (versionChanged) {
+        currentVersionIdRef.current = latestVersionId;
+        supportLoadToken.current += 1;
+        setSupport(emptySupportData);
+        setSupportError("");
+      }
       setWorkspace(loaded);
       setMessage("");
-      const latestVersionId = loaded.versions[0]?.id ?? "";
-      if (latestVersionId !== "") {
+      if ((refreshSupport || versionChanged) && latestVersionId !== "") {
         void refreshSupportData(
           latestVersionId,
           (loaded.versions[0]?.documents.length ?? 0) > 0,
         );
       }
-    } catch {
+    } catch (error) {
       if (workspaceLoadToken.current !== token) return;
-      setMessage("Unable to load this tender workspace.");
+      setMessage(
+        formatApiError(error, "Unable to load this tender workspace."),
+      );
     }
+  }
+
+  function refreshWorkspaceIfIdle(refreshSupport: boolean): void {
+    if (workspacePollPromise.current !== null) return;
+    const pending = loadWorkspace(refreshSupport);
+    workspacePollPromise.current = pending;
+    void pending.finally(() => {
+      if (workspacePollPromise.current === pending)
+        workspacePollPromise.current = null;
+    });
   }
 
   async function loadSupportData(
@@ -1421,11 +1453,13 @@ export function TenderWorkspace({
         ? Promise.resolve(null)
         : safeApi<unknown>(
             `${base}/versions/${versionId}/risk-analyses/current`,
+            true,
           ),
       !fetchCurrentResults
         ? Promise.resolve(null)
         : safeApi<unknown>(
             `${base}/versions/${versionId}/eligibility-assessments/current`,
+            true,
           ),
     ]);
 
@@ -1492,7 +1526,12 @@ export function TenderWorkspace({
         : safeApi<unknown>(`${base}/checklists/${currentChecklist.id}/items`),
     ]);
 
-    if (supportLoadToken.current !== token) return;
+    if (
+      supportLoadToken.current !== token ||
+      activeScopeRef.current !== `${organisationId}:${tenderId}`
+    )
+      return;
+    setSupportError("");
     setSupport({
       assessmentRun: currentAssessment,
       checklistItems: isChecklistResultValue(checklist) ? checklist.items : [],
@@ -1521,45 +1560,69 @@ export function TenderWorkspace({
     fetchCurrentResults = true,
   ): Promise<void> {
     if (supportLoadPromise.current !== null) {
-      supportRefreshQueued.current = true;
-      await supportLoadPromise.current;
+      const pending = supportLoadPromise.current;
+      const sameVersion = supportLoadVersionId.current === versionId;
+      if (sameVersion) supportRefreshQueued.current = true;
+      try {
+        await pending;
+      } catch {
+        // The owning refresh reports the error and handles a queued retry.
+      }
+      if (
+        !sameVersion &&
+        currentVersionIdRef.current === versionId &&
+        activeScopeRef.current === `${organisationId}:${tenderId}`
+      )
+        await refreshSupportData(versionId, fetchCurrentResults);
       return;
     }
     do {
       supportRefreshQueued.current = false;
       const pending = loadSupportData(versionId, fetchCurrentResults);
       supportLoadPromise.current = pending;
+      supportLoadVersionId.current = versionId;
       try {
         await pending;
+      } catch (error) {
+        if (
+          activeScopeRef.current === `${organisationId}:${tenderId}` &&
+          currentVersionIdRef.current === versionId
+        )
+          setSupportError(
+            formatApiError(error, "Unable to refresh tender analysis."),
+          );
+        if (!supportRefreshQueued.current) return;
       } finally {
         if (supportLoadPromise.current === pending) {
           supportLoadPromise.current = null;
+          supportLoadVersionId.current = "";
         }
       }
     } while (
       supportRefreshQueued.current &&
-      currentVersionIdRef.current === versionId
+      currentVersionIdRef.current === versionId &&
+      activeScopeRef.current === `${organisationId}:${tenderId}`
     );
   }
 
   useEffect(() => {
+    activeScopeRef.current = `${organisationId}:${tenderId}`;
     void loadWorkspace();
-    const timer = window.setInterval(() => void loadWorkspace(), 5000);
-    return () => window.clearInterval(timer);
+    return () => {
+      activeScopeRef.current = "";
+      workspaceLoadToken.current += 1;
+      workspacePollPromise.current = null;
+      supportLoadToken.current += 1;
+      supportLoadPromise.current = null;
+      supportLoadVersionId.current = "";
+      supportRefreshQueued.current = false;
+    };
   }, [organisationId, tenderId]);
 
   const currentVersionId = workspace?.versions[0]?.id ?? "";
-  const currentVersionHasDocuments =
-    (workspace?.versions[0]?.documents.length ?? 0) > 0;
-
   useEffect(() => {
     currentVersionIdRef.current = currentVersionId;
   }, [currentVersionId]);
-
-  useEffect(() => {
-    if (currentVersionId === "") return;
-    void refreshSupportData(currentVersionId, currentVersionHasDocuments);
-  }, [currentVersionHasDocuments, currentVersionId, organisationId, tenderId]);
 
   const supportAutoRefreshNeeded =
     currentVersionId !== "" &&
@@ -1574,6 +1637,29 @@ export function TenderWorkspace({
         support.assessmentRun.status !== "COMPLETE") ||
       (support.assessmentRun?.status === "COMPLETE" &&
         support.checklistRun === null));
+
+  useEffect(() => {
+    if (!supportAutoRefreshNeeded) return;
+    const timer = window.setInterval(
+      () => refreshWorkspaceIfIdle(false),
+      5_000,
+    );
+    return () => window.clearInterval(timer);
+  }, [organisationId, tenderId, supportAutoRefreshNeeded]);
+
+  useEffect(() => {
+    const refresh = (): void => {
+      if (document.visibilityState === "visible") refreshWorkspaceIfIdle(true);
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [organisationId, tenderId]);
 
   useEffect(() => {
     if (!supportAutoRefreshNeeded) return;
@@ -1757,7 +1843,7 @@ export function TenderWorkspace({
       form.reset();
       setMessage("Upload accepted. Security processing is in progress.");
       setShowFileUpload(false);
-      await loadWorkspace();
+      await loadWorkspace(true);
       setDecisionFeedback("");
     } catch (caught) {
       setMessage(
@@ -1796,7 +1882,7 @@ export function TenderWorkspace({
               })),
             },
       );
-      await loadWorkspace();
+      await loadWorkspace(true);
       setMessage(pendingFileRemoval.successMessage);
       setPendingFileRemoval(null);
       setDecisionFeedback("");
@@ -2381,6 +2467,11 @@ export function TenderWorkspace({
             </nav>
           </div>
         </header>
+      ) : null}
+      {supportError !== "" ? (
+        <Alert tone="warning">
+          <p role="status">{supportError}</p>
+        </Alert>
       ) : null}
 
       {activeSurface === "overview" ? (
