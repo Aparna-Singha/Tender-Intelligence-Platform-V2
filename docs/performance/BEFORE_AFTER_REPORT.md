@@ -50,5 +50,7 @@ request-count cases were rerun against the original base in a disposable
 detached worktree with the same test files. Their failures showed the original
 17/36 and 17/76 Overview counts, 3/12 stable draft count, and duplicate
 dashboard requests. All four revised-source count assertions passed again.
+The 2026-10-28 AppShell recovery change adds no request on the successful
+initial-load path; the same four count assertions passed after that change.
 Actual staging latency, 502 frequency, and deployed-browser request counts
 require a separate controlled browser capture after review and deployment.

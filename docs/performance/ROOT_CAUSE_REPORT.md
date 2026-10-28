@@ -61,9 +61,19 @@ deployed-browser readiness timing remain separate.
   owner runs one queued retry while the same version remains current.
 - An unsafe request invalidates pending shared reads. If a session or
   organisation read consequently fails with `STALE_RESPONSE`, AppShell now makes
-  one fresh attempt. Other errors retain their existing handling.
+  one fresh attempt.
 - Workspace polling can discover a new tender version. It now clears old
   version support immediately, rejects late old-version results, and loads the
   new version's support once the previous load settles.
 - Organisation creation dispatched a reload event and called Dashboard's load
   directly. The event alone now starts the immediate refresh.
+
+## Initial navigation failure recovery (2026-10-28)
+
+A transient failure in AppShell's initial session or organisation read left its
+sidebar uninitialized because the catch handler ignored errors other than 401
+and the bounded stale-response retry. A deterministic 502 test reproduced the
+missing recovery path. AppShell now shows a manual retry control for recoverable
+failures, with no timer or automatic repeat. HTTP 401 still redirects to login;
+HTTP 403 shows access denied without retry. A failed tender-list read also
+reaches this error state instead of silently appearing as an empty list.
