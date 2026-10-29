@@ -8,6 +8,7 @@
   "globalPassThroughEnv": [
     "API_HOST",
     "API_PORT",
+    "API_TENDER_LATENCY_DIAGNOSTICS",
     "CF_ACCESS_CLIENT_ID",
     "CF_ACCESS_CLIENT_SECRET",
     "DATABASE_URL",

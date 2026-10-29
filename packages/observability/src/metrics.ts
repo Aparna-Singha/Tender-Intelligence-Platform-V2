@@ -22,9 +22,25 @@ export interface ApiMetrics {
   readonly registry: ServiceMetricsRegistry;
   requestStarted(): void;
   requestFinished(labels: ApiRequestLabels, durationSeconds: number): void;
+  tenderDetailStageFinished(
+    stage: TenderDetailStage,
+    durationSeconds: number,
+  ): void;
   unexpectedError(route: string): void;
   dependencyUnavailable(route: string): void;
 }
+
+export type TenderDetailStage =
+  | "session_authentication"
+  | "organisation_authorization"
+  | "tender_primary_query"
+  | "processing_jobs_query"
+  | "decorator_parallel_queries"
+  | "decorator_draft_version_query"
+  | "response_mapping"
+  | "post_handler_pre_send"
+  | "send_to_response"
+  | "unattributed";
 
 export interface WorkerJobLabels {
   readonly jobName: string;
@@ -81,6 +97,13 @@ export function createApiMetrics(): ApiMetrics {
     name: "tip_api_request_duration_seconds",
     registers: [registry],
   });
+  const tenderDetailStages = new Histogram({
+    buckets: durationBuckets,
+    help: "Opt-in tender detail stage duration in seconds; fixed stage labels only.",
+    labelNames: ["stage"] as const,
+    name: "tip_api_tender_detail_stage_duration_seconds",
+    registers: [registry],
+  });
   const active = new Gauge({
     help: "Currently in-flight API requests.",
     name: "tip_api_in_flight_requests",
@@ -114,6 +137,8 @@ export function createApiMetrics(): ApiMetrics {
       durations.observe(metricLabels, durationSeconds);
     },
     requestStarted: () => active.inc(),
+    tenderDetailStageFinished: (stage, durationSeconds) =>
+      tenderDetailStages.observe({ stage }, durationSeconds),
     unexpectedError: (route) => unexpectedErrors.inc({ route }),
   };
 }

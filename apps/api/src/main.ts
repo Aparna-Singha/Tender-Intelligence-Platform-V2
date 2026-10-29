@@ -18,6 +18,7 @@ import {
   createApiMetrics,
   createLogger,
   type ApiMetrics,
+  type TenderDetailStage,
 } from "@tender/observability";
 import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { Logger } from "nestjs-pino";
@@ -28,6 +29,11 @@ import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { ApiResponseInterceptor } from "./common/api-response.interceptor.js";
 import { metricRouteForRequest } from "./common/metric-routes.js";
 import { resolveRequestId } from "./common/request-id.js";
+import {
+  beginTenderDetailTiming,
+  finishTenderDetailTiming,
+  markTenderDetailOnSend,
+} from "./common/tender-detail-timing.js";
 import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
 
 const requestStartTimes = new WeakMap<FastifyRequest, bigint>();
@@ -70,13 +76,25 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
   app.enableCors(corsOptions(environment));
   fastify.addHook("onRequest", (request, _reply, done) => {
-    requestStartTimes.set(request, process.hrtime.bigint());
+    const startedAt = process.hrtime.bigint();
+    requestStartTimes.set(request, startedAt);
+    beginTenderDetailTiming(
+      request,
+      environment.API_TENDER_LATENCY_DIAGNOSTICS,
+      startedAt,
+    );
     metrics.requestStarted();
     done();
   });
+  if (environment.API_TENDER_LATENCY_DIAGNOSTICS)
+    fastify.addHook("onSend", (request, _reply, payload, done) => {
+      markTenderDetailOnSend(request);
+      done(null, payload);
+    });
   fastify.addHook("onResponse", (request, reply, done) => {
     const route = metricRouteForRequest(request);
     const duration = elapsedSeconds(requestStartTimes.get(request));
+    const tenderTiming = finishTenderDetailTiming(request);
     metrics.requestFinished(
       {
         method: request.method,
@@ -85,6 +103,25 @@ async function bootstrap(): Promise<void> {
       },
       duration,
     );
+    if (tenderTiming !== null) {
+      for (const [stage, durationMs] of Object.entries(tenderTiming.stagesMs))
+        metrics.tenderDetailStageFinished(
+          stage as TenderDetailStage,
+          durationMs / 1_000,
+        );
+      operationalLogger.info(
+        {
+          duration_ms: tenderTiming.durationMs,
+          event: "tender_detail_stage_timing",
+          method: request.method,
+          request_id: request.id,
+          route,
+          stages_ms: tenderTiming.stagesMs,
+          status_code: reply.statusCode,
+        },
+        "Tender detail stage timing",
+      );
+    }
     if (reply.statusCode === 503) {
       metrics.dependencyUnavailable(route);
     }

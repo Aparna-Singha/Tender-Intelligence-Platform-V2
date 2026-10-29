@@ -878,11 +878,13 @@ describe("tender workspace tenant isolation", () => {
       environment,
     );
 
+    const stages: string[] = [];
     const result = (await service.get(
       "organisation-a",
       "tender-a",
       "user-a",
       "request-a",
+      (stage) => stages.push(stage),
     )) as {
       processingJobs: readonly { readonly id: string }[];
     };
@@ -910,6 +912,12 @@ describe("tender workspace tenant isolation", () => {
     });
     expect(result.processingJobs).toEqual([
       expect.objectContaining({ id: "job-current" }),
+    ]);
+    expect(stages).toEqual([
+      "tender_primary_query",
+      "processing_jobs_query",
+      "decorator_parallel_queries",
+      "response_mapping",
     ]);
   });
 

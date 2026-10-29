@@ -11,6 +11,7 @@ export type {
   ApiRequestLabels,
   ServiceMetricsRegistry,
   ServiceName,
+  TenderDetailStage,
   WorkerJobLabels,
   WorkerJobResultLabels,
   WorkerMetrics,

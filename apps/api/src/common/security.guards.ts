@@ -24,6 +24,10 @@ import {
 import type { AuthenticatedRequest } from "./authenticated-request.js";
 import { CookieService } from "./cookies.js";
 import { RateLimitService } from "./rate-limit.service.js";
+import {
+  measureTenderDetailStage,
+  tenderDetailStageRecorder,
+} from "./tender-detail-timing.js";
 
 @Injectable()
 export class AccessGuard implements CanActivate {
@@ -44,36 +48,47 @@ export class AccessGuard implements CanActivate {
     if (policy === undefined) throw new ForbiddenException();
 
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
-    request.authenticatedUser = await this.sessions.authenticate(
-      this.cookies.readSession(request),
+    const recordStage = tenderDetailStageRecorder(request);
+    request.authenticatedUser = await measureTenderDetailStage(
+      recordStage,
+      "session_authentication",
+      () => this.sessions.authenticate(this.cookies.readSession(request)),
     );
     if (policy.kind === "authenticated") return true;
 
     const organisationId = (request.params as { organisationId?: string })
       .organisationId;
     if (organisationId === undefined) throw new ForbiddenException();
-    const membership = await this.database.organisationMembership.findFirst({
-      select: { id: true, role: true },
-      where: {
-        organisationId,
-        revokedAt: null,
-        userId: request.authenticatedUser.userId,
+    return measureTenderDetailStage(
+      recordStage,
+      "organisation_authorization",
+      async () => {
+        const membership = await this.database.organisationMembership.findFirst(
+          {
+            select: { id: true, role: true },
+            where: {
+              organisationId,
+              revokedAt: null,
+              userId: request.authenticatedUser.userId,
+            },
+          },
+        );
+        if (
+          membership === null ||
+          !isOrganisationRole(membership.role) ||
+          !hasPermission(membership.role, policy.permission)
+        ) {
+          throw new ForbiddenException();
+        }
+        request.organisationPrincipal = {
+          membershipId: membership.id,
+          organisationId,
+          role: membership.role,
+          userId: request.authenticatedUser.userId,
+        };
+        return true;
       },
-    });
-    if (
-      membership === null ||
-      !isOrganisationRole(membership.role) ||
-      !hasPermission(membership.role, policy.permission)
-    ) {
-      throw new ForbiddenException();
-    }
-    request.organisationPrincipal = {
-      membershipId: membership.id,
-      organisationId,
-      role: membership.role,
-      userId: request.authenticatedUser.userId,
-    };
-    return true;
+    );
   }
 }
 

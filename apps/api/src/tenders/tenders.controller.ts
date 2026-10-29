@@ -24,6 +24,10 @@ import { Observable } from "rxjs";
 
 import { RequireOrganisationPermission } from "../common/access-control.js";
 import type { AuthenticatedRequest } from "../common/authenticated-request.js";
+import {
+  markTenderDetailHandlerDone,
+  tenderDetailStageRecorder,
+} from "../common/tender-detail-timing.js";
 import { TendersService } from "./tenders.service.js";
 
 @ApiCookieAuth("session")
@@ -76,17 +80,20 @@ export class TendersController {
 
   @RequireOrganisationPermission("TENDER_READ")
   @Get(":tenderId")
-  public get(
+  public async get(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,
     @Req() request: AuthenticatedRequest,
   ): Promise<unknown> {
-    return this.tenders.get(
+    const result = await this.tenders.get(
       organisationId,
       tenderId,
       request.authenticatedUser.userId,
       request.id,
+      tenderDetailStageRecorder(request),
     );
+    markTenderDetailHandlerDone(request);
+    return result;
   }
 
   @RequireOrganisationPermission("TENDER_READ")

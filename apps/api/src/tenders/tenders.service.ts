@@ -45,6 +45,11 @@ import {
   S3_CLIENT,
 } from "../infrastructure.tokens.js";
 import {
+  measureTenderDetailStage,
+  measureTenderDetailSync,
+  type TenderDetailStageRecorder,
+} from "../common/tender-detail-timing.js";
+import {
   deriveTenderWorkflowState,
   resolveSubmissionDeadline,
 } from "./tender-user-facing.js";
@@ -142,10 +147,11 @@ export class TendersService {
     tenderId: string,
     _userId: string,
     _requestId: string,
+    recordStage?: TenderDetailStageRecorder,
   ): Promise<unknown> {
     void _userId;
     void _requestId;
-    const tender = await this.database.tender.findFirst({
+    const tenderQuery = this.database.tender.findFirst({
       include: {
         corrigenda: { orderBy: { ingestedAt: "desc" } },
         currentVersion: {
@@ -213,11 +219,17 @@ export class TendersService {
       },
       where: { deletedAt: null, id: tenderId, organisationId },
     });
+    const tender = await measureTenderDetailStage(
+      recordStage,
+      "tender_primary_query",
+      () => tenderQuery,
+    );
     if (tender === null) throw new NotFoundException();
-    const processingJobs =
-      tender.currentVersionId === null
-        ? []
-        : await this.database.processingJob.findMany({
+    const currentVersionId = tender.currentVersionId;
+    const processingJobsQuery =
+      currentVersionId === null
+        ? null
+        : this.database.processingJob.findMany({
             orderBy: { createdAt: "desc" },
             select: {
               completedAt: true,
@@ -235,16 +247,27 @@ export class TendersService {
             where: {
               organisationId,
               tenderId,
-              tenderVersionId: tender.currentVersionId,
+              tenderVersionId: currentVersionId,
             },
           });
-    const [decorated] = (await this.decorateTenders([
-      {
-        ...tender,
-        processingJobs,
-      },
-    ])) as readonly Record<string, unknown>[];
-    return {
+    const processingJobs =
+      processingJobsQuery === null
+        ? []
+        : await measureTenderDetailStage(
+            recordStage,
+            "processing_jobs_query",
+            () => processingJobsQuery,
+          );
+    const [decorated] = (await this.decorateTenders(
+      [
+        {
+          ...tender,
+          processingJobs,
+        },
+      ],
+      recordStage,
+    )) as readonly Record<string, unknown>[];
+    return measureTenderDetailSync(recordStage, "response_mapping", () => ({
       ...decorated,
       versions: tender.versions.map((version) => ({
         ...version,
@@ -253,7 +276,7 @@ export class TendersService {
           sizeBytes: document.sizeBytes.toString(),
         })),
       })),
-    };
+    }));
   }
 
   public async listVersions(
@@ -1468,7 +1491,10 @@ export class TendersService {
         readonly status?: string;
       } | null;
     },
-  >(tenders: readonly TTender[]): Promise<readonly unknown[]> {
+  >(
+    tenders: readonly TTender[],
+    recordStage?: TenderDetailStageRecorder,
+  ): Promise<readonly unknown[]> {
     if (tenders.length === 0) return [];
     const extractionIds = tenders
       .map((tender) => tender.currentVersion?.activeExtractionRun?.id ?? null)
@@ -1480,7 +1506,8 @@ export class TendersService {
       .map((tender) => tender.currentVersion?.id ?? null)
       .filter((id): id is string => id !== null);
     const tenderIds = tenders.map((tender) => tender.id);
-    const [deadlineFields, decisions, drafts, draftRuns] = await Promise.all([
+    const parallelStartedAt = recordStage ? process.hrtime.bigint() : undefined;
+    const parallelQueries = Promise.all([
       extractionIds.length === 0
         ? Promise.resolve([])
         : this.database.extractedTenderField.findMany({
@@ -1544,13 +1571,20 @@ export class TendersService {
             },
           }),
     ]);
+    const [deadlineFields, decisions, drafts, draftRuns] =
+      await measureTenderDetailStage(
+        recordStage,
+        "decorator_parallel_queries",
+        () => parallelQueries,
+        parallelStartedAt,
+      );
     const currentDraftVersionIds = drafts
       .map((draft) => draft.currentVersionId)
       .filter((id): id is string => id !== null);
-    const currentDraftVersions =
+    const currentDraftVersionQuery =
       currentDraftVersionIds.length === 0
-        ? []
-        : await this.database.draftVersion.findMany({
+        ? null
+        : this.database.draftVersion.findMany({
             select: {
               tenderId: true,
               tenderVersionId: true,
@@ -1562,6 +1596,14 @@ export class TendersService {
               tenderVersionId: { in: versionIds },
             },
           });
+    const currentDraftVersions =
+      currentDraftVersionQuery === null
+        ? []
+        : await measureTenderDetailStage(
+            recordStage,
+            "decorator_draft_version_query",
+            () => currentDraftVersionQuery,
+          );
     const deadlineByExtractionRunId = new Map<
       string,
       ReturnType<typeof selectSubmissionDeadline>
