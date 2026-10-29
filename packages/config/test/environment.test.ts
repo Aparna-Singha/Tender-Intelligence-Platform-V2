@@ -32,8 +32,17 @@ describe("parseEnvironment", () => {
     expect(result.API_PORT).toBe(4000);
     expect(result.API_METRICS_HOST).toBe("127.0.0.1");
     expect(result.API_METRICS_PORT).toBe(4100);
+    expect(result.API_TENDER_LATENCY_DIAGNOSTICS).toBe(false);
     expect(result.REQUEST_ID_HEADER).toBe("x-request-id");
     expect(result.S3_FORCE_PATH_STYLE).toBe(true);
+  });
+
+  it("enables tender detail diagnostics only when explicitly requested", () => {
+    const result = parseEnvironment("api", apiEnvironmentSchema, {
+      ...validEnvironment,
+      API_TENDER_LATENCY_DIAGNOSTICS: "true",
+    });
+    expect(result.API_TENDER_LATENCY_DIAGNOSTICS).toBe(true);
   });
 
   it("rejects missing required settings without exposing supplied values", () => {

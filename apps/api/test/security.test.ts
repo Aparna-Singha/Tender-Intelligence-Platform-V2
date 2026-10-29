@@ -13,6 +13,11 @@ import {
   RateLimitGuard,
 } from "../src/common/security.guards.js";
 import { SessionService } from "../src/auth/session.service.js";
+import {
+  beginTenderDetailTiming,
+  finishTenderDetailTiming,
+  tenderDetailRoute,
+} from "../src/common/tender-detail-timing.js";
 
 const webOrigin = "https://app.example.test";
 const environment = {
@@ -166,14 +171,22 @@ describe("deny-by-default organisation access", () => {
       { authenticate: vi.fn().mockResolvedValue(user) } as never,
       database as never,
     );
+    const request = {
+      headers: {},
+      method: "GET",
+      params: { organisationId: "organisation-b" },
+      routeOptions: { url: tenderDetailRoute },
+    };
+    beginTenderDetailTiming(request as never, true);
     await expect(
-      guard.canActivate(
-        httpContext({
-          headers: {},
-          params: { organisationId: "organisation-b" },
-        }),
-      ),
+      guard.canActivate(httpContext(request)),
     ).rejects.toBeInstanceOf(ForbiddenException);
+    expect(finishTenderDetailTiming(request as never)?.stagesMs).toEqual(
+      expect.objectContaining({
+        session_authentication: expect.any(Number),
+        organisation_authorization: expect.any(Number),
+      }),
+    );
     expect(database.organisationMembership.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: {

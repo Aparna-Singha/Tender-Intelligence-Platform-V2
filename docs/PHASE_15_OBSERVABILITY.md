@@ -96,6 +96,10 @@ API metrics:
 - `tip_api_in_flight_requests`
 - `tip_api_unexpected_errors_total{route}`
 - `tip_api_dependency_unavailable_total{route}`
+- `tip_api_tender_detail_stage_duration_seconds{stage}` is collected only when
+  `API_TENDER_LATENCY_DIAGNOSTICS=true` for a bounded diagnostic run. Its stage
+  labels are fixed, and the request-correlated timing record stays in private
+  Pino logs. See [Tender detail stage diagnostics](performance/TENDER_DETAIL_STAGE_DIAGNOSTICS.md).
 
 Worker metrics:
 

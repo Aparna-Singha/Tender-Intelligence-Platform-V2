@@ -136,6 +136,7 @@ export const apiEnvironmentSchema = serviceBaseSchema
     API_PORT: portSchema.default(4000),
     API_METRICS_HOST: nonEmptyStringSchema.default("127.0.0.1"),
     API_METRICS_PORT: portSchema.default(4100),
+    API_TENDER_LATENCY_DIAGNOSTICS: z.stringbool().default(false),
     AUTH_RATE_LIMIT_MAX: z.coerce.number().int().min(1).max(1_000).default(10),
     AUTH_RATE_LIMIT_WINDOW_SECONDS: z.coerce
       .number()
