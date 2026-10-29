@@ -99,170 +99,217 @@ client. No new cold/warm samples, p50/p95, error rate, or before/after speedup
 are available. Authentication, connection/network overhead, relation loading,
 SQL execution, response processing, and host contention remain alternatives.
 
-## Operator deployment and rollback: approval required, not executed
+## Operator deployment and rollback: separate approval required
 
-These steps require separate explicit authorization for an API build,
-recreation, and temporary diagnostics. Schedule a short staging maintenance
-window: API recreation can interrupt in-flight requests. Confirm the existing
-environment targets approved staging data and choose an already approved
-synthetic tender/session. Do not copy credentials into the build worktree.
+The original local Markdown contained executable PowerShell source, not the
+`[*0*]`, `*@*`, bold delimiters or HTML entities seen in the pasted copy.
+Those were paste artifacts. The substantive corrections below remove
+session-dependent rollback and strengthen the operational gates.
 
-Run in PowerShell on the verified laptop. Capture the current image and Compose
-paths from the container, preserving the existing staging checkout and files:
+The supporting [operator script](../../tools/operations/tender-diagnostics.ps1)
+requires Windows PowerShell 5.1+, Python 3.9+ (`python` on PATH, standard library
+only), Docker Desktop's `desktop-linux` context and
+this exact reviewed revision. It does not modify Compose files or environment
+files. Its `Capture` and `Preflight` actions are read-only against Docker.
+`Stage`, `Enable`, `Disable`, `Rollback` and `Correlate` require explicit
+operator approval; the `-Approved` argument records that approval, it does
+not grant it. Do not execute those actions under this documentation-review task.
 
-```powershell
-$apiName = 'tender-intelligence-staging-api-1'
-$before = (docker inspect $apiName | ConvertFrom-Json)[0]
-$originalContainerId = $before.Id
-$oldImageId = $before.Image
-$stagingRoot = $before.Config.Labels.'com.docker.compose.project.working_dir'
-$composeFiles = $before.Config.Labels.'com.docker.compose.project.config_files'.Split(',')
-if ($composeFiles.Count -ne 2) { throw 'Re-review the deployment configuration' }
-$envFile = Join-Path $stagingRoot '.env.staging'
-if (-not (Test-Path -LiteralPath $envFile)) { throw 'Staging environment file missing' }
-Remove-Variable before
+The earlier `tender-intelligence-staging-20261030` bundle is preserved unchanged.
+It predates the final checks and is **not approved for deployment**. All commands
+below use a new `-final-review` bundle; do not copy scripts into the old bundle
+or bypass its checksums. Capture the new bundle before any approved Stage.
 
-$approved = 'e264f2722f4f2f187fcbaae6b5501ca0bbd55049'
-$buildRoot = Join-Path (Split-Path $stagingRoot -Parent) 'BidVeda-api-diagnostics-e264f27'
-if (Test-Path -LiteralPath $buildRoot) { throw 'Choose a fresh build worktree path' }
-git -C $stagingRoot worktree add --detach $buildRoot $approved
-if ($LASTEXITCODE -ne 0) { throw 'Worktree creation failed' }
-$candidateImage = "tender-api:$approved"
-$rollbackImage = 'tender-api:before-stage-diagnostics-20261029'
-docker image tag $oldImageId $rollbackImage
-if ($LASTEXITCODE -ne 0) { throw 'Rollback image preservation failed' }
-docker build --label "org.opencontainers.image.revision=$approved" --tag $candidateImage --file (Join-Path $buildRoot 'infrastructure/docker/api.Dockerfile') $buildRoot
-if ($LASTEXITCODE -ne 0) { throw 'Candidate build failed; leave the running API untouched' }
-```
+### Persistent preparation, without changing containers
 
-The image build runs no migrations. The source diff from the running image's
-tag to the approved revision contains no schema or migration changes. Retain
-the old image; do not prune it. Before replacing the API, verify the candidate
-contains the hook without starting the application or supplying credentials:
+Run the following from the measured-performance worktree only after reviewing
+the script. `Capture` refuses an existing bundle; never delete or overwrite an
+older recovery bundle to bypass that check. The default location is stable,
+outside Git and outside temporary storage:
+`%LOCALAPPDATA%\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review`.
 
 ```powershell
-@'
-const fs = require('node:fs');
-if (!fs.existsSync('/app/dist/common/tender-detail-timing.js') ||
-    !fs.readFileSync('/app/dist/main.js', 'utf8').includes('beginTenderDetailTiming'))
-  process.exit(1);
-console.log('Diagnostic artifact present');
-'@ | docker run --rm -i --network none --entrypoint node $candidateImage
-if ($LASTEXITCODE -ne 0) { throw 'Candidate artifact verification failed' }
-
-$operationDir = Join-Path ([IO.Path]::GetTempPath()) ('bidveda-diagnostics-' + [guid]::NewGuid())
-New-Item -ItemType Directory -Path $operationDir | Out-Null
-$diagnosticFile = Join-Path $operationDir 'diagnostics.yml'
-$disabledFile = Join-Path $operationDir 'disabled.yml'
-$rollbackFile = Join-Path $operationDir 'rollback.yml'
-@"
-services:
-  api:
-    image: $candidateImage
-    environment:
-      API_TENDER_LATENCY_DIAGNOSTICS: "true"
-"@ | Set-Content -LiteralPath $diagnosticFile -Encoding ascii
-@"
-services:
-  api:
-    image: $candidateImage
-    environment:
-      API_TENDER_LATENCY_DIAGNOSTICS: "false"
-"@ | Set-Content -LiteralPath $disabledFile -Encoding ascii
-@"
-services:
-  api:
-    image: $rollbackImage
-"@ | Set-Content -LiteralPath $rollbackFile -Encoding ascii
-$composeArgs = @('--project-name', 'tender-intelligence-staging', '--project-directory', $stagingRoot, '--env-file', $envFile, '-f', $composeFiles[0], '-f', $composeFiles[1])
-docker compose @composeArgs -f $diagnosticFile config --quiet
-if ($LASTEXITCODE -ne 0) { throw 'Compose validation failed' }
-# Compare privately in memory: refuse unrelated environment drift.
-$resolved = docker compose @composeArgs -f $diagnosticFile config --format json | ConvertFrom-Json
-if ($LASTEXITCODE -ne 0) { throw 'Compose resolution failed' }
-$candidate = (docker image inspect $candidateImage | ConvertFrom-Json)[0]
-$live = (docker inspect $apiName | ConvertFrom-Json)[0]
-$expectedEnv = @{}
-foreach ($entry in $candidate.Config.Env) {
-  $pair = $entry.Split('=', 2)
-  $expectedEnv[$pair[0]] = $pair[1]
-}
-foreach ($entry in $resolved.services.api.environment.PSObject.Properties) {
-  $expectedEnv[$entry.Name] = [string]$entry.Value
-}
-$actualEnv = @{}
-foreach ($entry in $live.Config.Env) {
-  $pair = $entry.Split('=', 2)
-  $actualEnv[$pair[0]] = $pair[1]
-}
-$keys = @($expectedEnv.Keys) + @($actualEnv.Keys) | Sort-Object -Unique
-$drift = @($keys | Where-Object {
-  $_ -ne 'API_TENDER_LATENCY_DIAGNOSTICS' -and
-  ($expectedEnv.ContainsKey($_) -ne $actualEnv.ContainsKey($_) -or
-   $expectedEnv[$_] -cne $actualEnv[$_])
-})
-if ($drift.Count -ne 0) { throw 'Environment drift detected; private review required before recreation' }
-Remove-Variable resolved,candidate,live,expectedEnv,actualEnv,entry,pair,keys,drift
-if ((docker inspect $apiName --format '{{.Id}}').Trim() -ne $originalContainerId) {
-  throw 'Another operation replaced the API; reassess before deployment'
-}
-docker compose @composeArgs -f $diagnosticFile up -d --no-build --no-deps --wait --wait-timeout 120 api
-if ($LASTEXITCODE -ne 0) { throw 'API unhealthy: use rollback below' }
+& .\tools\operations\tender-diagnostics.ps1 -Action Capture
+if ($LASTEXITCODE -ne 0) { throw 'Capture failed; stop.' }
+& "$env:LOCALAPPDATA\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review\Operator.ps1" -Action Preflight
+if ($LASTEXITCODE -ne 0) { throw 'Preflight failed; stop.' }
 ```
 
-No existing environment file is edited. Temporary overrides contain no secrets;
-`--no-deps` limits recreation to API. Never print the full resolved Compose
-configuration or Docker environment. Keep the staging environment file unchanged
-throughout the capture and rollback window. Verify the running image ID against the
-candidate image ID, recheck the actual Node process flag (as below), and confirm
-one authenticated request produces its correlated timing event. Use that request
-as the first-request observation below. Health alone
-does not prove instrumentation or authentication. Preserve Cloudflare Access,
-host-only cookies, tenant checks and existing proxy behavior.
+The bundle holds `baseline.json`, an independent `Operator.ps1`, a standalone
+`Rollback.ps1`, `verify-image-archive.py`, and `rollback.yml`. The verifier's
+checksum is checked along with the scripts. ACL inheritance is disabled at the bundle
+root; only the current Windows user and SYSTEM receive access, inherited by
+files. It contains paths, immutable image/container IDs and SHA-256 digests,
+not environment values, cookies, tokens or resolved Compose configuration.
+Treat even these local operational identifiers and digests as private; do not
+upload the bundle. Do not run these commands under a transcript/debug trace.
+Raw native output and exceptions are suppressed; failures emit fixed messages.
+
+Preflight rejects a different Docker engine/context/project, multiple API
+replicas, the wrong service identity, or changes to the original input files.
+It compares resolved Compose configuration privately with the captured running
+API: environment, command/entrypoint, user, loopback-only port, resource limits,
+health check, logging, networks, mounts and security options. Unsupported API
+settings fail closed. Subsequent full configuration fingerprints permit only
+the approved image and diagnostic flag to change, including checks on the
+other services and top-level networks/volumes. Runtime fingerprints also guard
+against changes outside Compose. No full config, environment or log is printed.
+
+**Capture alone is not rollback readiness.** Before any replacement, the
+original image must also be archived and its checksum verified in the next
+step. Keep the original checkout, `.env.staging`, Compose files, Docker engine,
+network identities, and worker/Redis/ClamAV containers intact. A Windows reboot
+may change their start times; it must not replace their identities or config.
+If these prerequisites drift, stop for private review rather than weakening
+assertions or restoring secrets from an old snapshot.
+
+### Approved candidate preparation and preservation
+
+A separate approved build must produce a local Linux/amd64 API image from
+`e264f2722f4f2f187fcbaae6b5501ca0bbd55049`, using the repository API Dockerfile
+and OCI label `org.opencontainers.image.revision` set to that full SHA. Use a
+clean build worktree with no staging secrets; do not build from the dirty
+staging checkout. No build, image pull or migration is part of this procedure.
+The label is an assertion by the builder, not cryptographic source attestation:
+review source checkout/build provenance before approving the candidate.
+The expected local tag below must resolve to that approved artifact.
 
 ```powershell
-@'
-const fs = require('node:fs');
-let found = false;
-for (const pid of fs.readdirSync('/proc').filter(x => /^\d+$/.test(x))) {
-  try {
-    if (fs.readFileSync(`/proc/${pid}/comm`, 'utf8').trim() !== 'node') continue;
-    const args = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0');
-    if (!args.some(x => /(^|\/)dist\/main\.js$/.test(x))) continue;
-    found = true;
-    const env = fs.readFileSync(`/proc/${pid}/environ`, 'utf8').split('\0');
-    console.log(env.includes('API_TENDER_LATENCY_DIAGNOSTICS=true') ? 'DIAGNOSTICS_ENABLED' : 'DIAGNOSTICS_NOT_ENABLED');
-  } catch {}
-}
-if (!found) process.exit(1);
-'@ | docker exec -i $apiName node
+& "$env:LOCALAPPDATA\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review\Operator.ps1" -Action Stage -CandidateImage 'tender-api:e264f2722f4f2f187fcbaae6b5501ca0bbd55049' -Approved
+if ($LASTEXITCODE -ne 0) { throw 'Staging failed; do not replace API.' }
 ```
 
-After the approved capture, disable diagnostics on the reviewed image:
+`Stage` rejects revision, platform, image command/user/security-policy or
+environment drift. Before writing candidate artifacts it runs a disposable
+inspection container pinned to the immutable candidate ID, with `--network none`,
+no mounts, environment arguments or published ports, a read-only filesystem,
+non-root user, dropped capabilities and bounded CPU/memory/process limits.
+Its overridden Node entrypoint only reads compiled files: it never imports or
+starts the API and needs no credentials. It requires the compiled diagnostic
+module export, the main-module import and the expected `onRequest` hook and
+flag-controlled `beginTenderDetailTiming(request, ..., startedAt)` call.
+Missing instrumentation fails Stage before overrides, archive or candidate
+manifest creation. These are static artifact checks, not proof of runtime hook
+execution; the authenticated correlation gate remains mandatory.
+
+It pins the candidate's immutable image ID, writes only
+API image/flag overrides, validates the Compose merge in memory, and saves
+`original-image.tar` with its checksum in `preservation.json`. The archive is
+an image, not a container export: no runtime environment or volume is copied.
+Image layers must already satisfy the repository's no-secret build rules;
+checking image environment keys cannot prove historical layers are secret-free.
+Do not prune/delete the archive. `candidate.json`, `enabled.yml` and
+`disabled.yml` are also non-secret. Generated `.yml` files use JSON syntax,
+which is valid YAML, avoiding PowerShell interpolation/quoting ambiguities.
+An interrupted Stage requires review; artifacts are never silently overwritten.
+
+The read-only Python verifier checks the saved tar structure, complete member
+payloads and tar terminator, rejects duplicate/unsafe/link members, and requires
+one Docker-save manifest. The referenced configuration's SHA-256 must equal the
+captured original image ID; every referenced layer must match its configuration
+`rootfs.diff_ids` (including gzip decompression when needed). OCI SHA-256 blob
+paths are verified too. No files are extracted. Unexpected archive formats fail
+closed. Stage writes `preservation.json` only after validation; recovery and API
+replacement repeat both whole-archive checksum and structure/content checks.
+
+**Load recovery remains UNVERIFIED.** Both available Docker contexts (`default`
+and `desktop-linux`) identify the same engine; no separate disposable daemon was
+available and no load rehearsal was performed. Do not load an archive into the
+active engine as a rehearsal. A future rehearsal requires an independently
+isolated daemon/storage and approval; it must recover the captured image ID.
+Until then, every Enable/Disable requires the explicit
+`-AcknowledgeUnrehearsedRecovery` switch as well as `-Approved`. This acknowledges
+that structural/content verification cannot prove Docker load compatibility,
+disk capacity or successful runtime recovery. It does not convert the result
+to PASS. Emergency rollback does not require this additional acknowledgement.
+
+### Approved API-only replacement and mandatory gates
+
+Obtain explicit authorization for the maintenance window, API recreation,
+temporary diagnostics, bounded authenticated reads and automatic rollback on
+failure. Confirm the fixture/session is approved and synthetic. API recreation
+interrupts in-flight requests. Reserve disk space for the image archive before
+beginning and prevent concurrent operator changes during the window.
 
 ```powershell
-docker compose @composeArgs -f $disabledFile up -d --no-build --no-deps --wait --wait-timeout 120 api
-if ($LASTEXITCODE -ne 0) { throw 'API unhealthy: use rollback below' }
+& "$env:LOCALAPPDATA\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review\Operator.ps1" -Action Enable -Approved -AcknowledgeUnrehearsedRecovery
+if ($LASTEXITCODE -ne 0) { throw 'Enable failed; no workload permitted.' }
 ```
 
-If deployment, authentication, or response behavior regresses, restore the
-preserved image with the original environment-file configuration:
+All recreation commands target exactly `api` with `--no-deps --no-build
+--pull never --wait --wait-timeout 120`. There is no `down`, volume removal,
+migration, worker restart or resource provisioning. Original-image archive
+integrity and candidate identity are checked before replacement. The script
+checks API image/configuration, loopback binding, Docker health and internal
+`/ready` status, then checks the **actual Node API process** flag through
+`/proc` and the compiled timing hook. Worker, Redis and ClamAV IDs/configuration
+and start times must be unchanged across the operation. Failure attempts
+original-image rollback and prohibits workload; a rollback failure requires
+private operator intervention, never changes to other services to force success.
+
+Health is not proof of authentication. Before any workload, use the normal
+Vercel -> Access -> Tunnel browser path with the existing approved session:
+
+1. Confirm session and organisation context initialize normally. Do not copy
+   cookies, export HAR files, bypass Access, or authenticate with the service
+   token as a user. Confirm no unexpected redirects, cookie changes or errors.
+2. Make exactly one approved tender-detail GET as described in the measurement
+   plan below, supplying a fresh UUID request ID. Require HTTP 200, the expected
+   response shape and tenant/fixture, and matching response request ID. Keep
+   contents private. This is the first-request observation, not an extra probe.
+3. Supply only that UUID twice and numeric status to the following gate. It
+   reads at most 1,000 log lines from the last five minutes in memory, requires
+   exactly one matching fixed-route stage event, and prints no log records.
+   Missing, duplicate, invalid, or mismatched evidence triggers rollback.
 
 ```powershell
-docker compose @composeArgs -f $rollbackFile up -d --no-build --no-deps --wait --wait-timeout 120 api
-if ($LASTEXITCODE -ne 0) { throw 'Rollback unhealthy; investigate without changing other services' }
-$restored = (docker inspect $apiName | ConvertFrom-Json)[0]
-if ($restored.Image -ne $oldImageId) { throw 'Rollback image mismatch' }
-$restored.State.Health.Status
-Remove-Variable restored
+# Enter identifiers/status only; never paste cookies or response bodies.
+$requestId = Read-Host 'Fresh request UUID sent by browser'
+$responseId = Read-Host 'Matching response request UUID'
+$status = [int](Read-Host 'Browser HTTP status')
+& "$env:LOCALAPPDATA\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review\Operator.ps1" -Action Correlate -RequestId $requestId -ResponseRequestId $responseId -BrowserStatus $status -Approved
+if ($LASTEXITCODE -ne 0) { throw 'Gate failed; no workload permitted.' }
 ```
 
-Verify login/session and the same approved GET through the normal browser path.
-Do not run `down`, remove volumes, migrate databases, restart the worker, or
-change Tunnel/DNS. Preserve temporary rollback instructions until validation
-finishes. A normal future Compose recreation must select the intended reviewed
-image explicitly; these temporary overrides do not update persistent deployment
-configuration.
+If login/session/response semantics fail before this gate, or during workload,
+stop and run the standalone rollback below. Do not retry 401/403 or increase
+load. Only start the bounded workload within five minutes of a successful gate
+on the unchanged API. Keep the first request separate from warmed samples.
+The script validates timing correlation, not response semantics or external
+routing: those remain mandatory operator checks.
+
+After a successful capture, disable diagnostics on the same reviewed image:
+
+```powershell
+& "$env:LOCALAPPDATA\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review\Operator.ps1" -Action Disable -Approved -AcknowledgeUnrehearsedRecovery
+if ($LASTEXITCODE -ne 0) { throw 'Disable failed; inspect rollback outcome privately.' }
+```
+
+Verify login/session and the approved GET again. Normal future Compose
+operations must explicitly select the intended image; these local overrides
+are not a persistent deployment configuration change.
+
+### Standalone rollback after shell closure or Windows restart
+
+Sign in as the Windows user who captured the bundle. Start Docker Desktop
+normally and confirm the same engine is available. This command needs no
+variables from an earlier session and no repository script to be present:
+
+```powershell
+& "$env:LOCALAPPDATA\BidVeda\TenderDiagnostics\tender-intelligence-staging-20261030-final-review\Rollback.ps1" -Approved
+if ($LASTEXITCODE -ne 0) { throw 'Rollback failed; stop and investigate privately.' }
+```
+
+The launcher reads the durable manifest, checks ACLs, script checksums, original
+input-file checksums and protected service identities, verifies the image
+archive and loads it if needed, and restores only the API with its original
+image ID and original unset diagnostic flag. An unrelated API replacement is
+rejected. It verifies readiness, actual process flag, full runtime policy and
+unchanged protected services. Finally verify session/authentication and the
+same approved GET through the browser. If the engine, files or protected
+services have changed, rollback intentionally stops; review privately instead
+of discarding data or bypassing checks. Keep the bundle until the operator has
+accepted recovery. Do not delete review artifacts or modify `.env.staging`.
 
 ## Bounded measurement plan after readiness passes
 
@@ -315,9 +362,50 @@ by actual correlated stage evidence. No performance-fix PR is justified yet.
 
 ## Recovered verification and final disposition
 
+### Operator hardening and final safety validation, 2026-10-30
+
+The earlier review's read-only Capture/Preflight passed and its restricted
+bundle remains unchanged at the original path (without `-final-review`). The
+final review does not promote that older script copy to deployment-ready.
+The new bundle has not been captured; operators must run Capture using the
+revised script and the new default path before approved candidate preparation.
+No Stage, Enable, Disable, Rollback or Correlate action was executed.
+
+- **PASS:** 44 offline PowerShell assertions, including Stage failing on missing
+  instrumentation before artifact writes, network-disabled immutable-image
+  inspection arguments, and refusal to recreate without recovery acknowledgement.
+  All native Docker boundaries in these tests are mocked.
+- **PASS:** nine Python unittest methods, including six isolated Node-probe
+  cases and synthetic Docker-save archives: valid/plain and gzip layers,
+  wrong image ID, missing/tampered layer or config, invalid manifest/linkage,
+  unsafe paths, truncation, missing terminator, duplicate members and links.
+  No Docker commands, credentials or real image archive are used.
+- **PASS:** PowerShell syntax checks for the procedure fences and supporting
+  scripts; Python syntax and isolated execution of the candidate Node probe.
+  Static syntax validation does not prove native Docker execution.
+- The earlier three synthetic Compose override syntax checks remain applicable;
+  this follow-up does not change override structure or API-only Compose commands.
+- **NOT RUN:** candidate inspection against a real image, original-image save or
+  archive validation against that image, load rehearsal, live replacement,
+  rollback after restart, external authentication/correlation and workload.
+  Both available Docker contexts use the same engine, not isolated daemons.
+- Full application gates below are historical and unchanged; they were not
+  rerun for documentation/operator-only changes. No latency improvement is claimed.
+
+Run the deterministic safety tests without touching Docker or staging:
+
+```powershell
+powershell -NoProfile -File tools/operations/test-tender-diagnostics.ps1
+if ($LASTEXITCODE -ne 0) { throw 'Operator safety tests failed.' }
+python -I -B tools/operations/test-image-archive.py
+if ($LASTEXITCODE -ne 0) { throw 'Archive/probe safety tests failed.' }
+```
+
+### Previously recovered application verification
+
 The interrupted command completed successfully and its existing logs were
 recovered. No branch, worktree, source implementation, or test was recreated.
-The only repository addition is this report. Application source, CI,
+At that assessment, the only repository addition was this report. Application source, CI,
 environment files, and staging containers were not changed.
 
 The initial full test invocation incorrectly supplied `NEXT_PUBLIC_API_URL=/api`.
