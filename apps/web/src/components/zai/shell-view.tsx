@@ -2,6 +2,7 @@
 
 import {
   useState,
+  useRef,
   useContext,
   createContext,
   type ReactNode,
@@ -109,9 +110,10 @@ function ShellLayout({
   children: React.ReactNode;
 }): React.JSX.Element {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const navigationOpener = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div className="min-h-screen bg-mesh">
+    <div className="zai-app-shell min-h-screen bg-mesh">
       {/* Ambient aurora glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
         <div className="absolute -top-40 -left-40 h-[480px] w-[480px] rounded-full bg-[#FF5722]/8 blur-3xl animate-aurora" />
@@ -127,7 +129,14 @@ function ShellLayout({
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <SheetContent
           side="left"
-          className="w-72 p-0 bg-[var(--brand-nav)] border-0"
+          className="w-72 p-0 bg-[var(--brand-nav)] border-0 z-[70]"
+          overlayClassName="z-[70]"
+          onCloseAutoFocus={(event) => {
+            if (navigationOpener.current?.isConnected) {
+              event.preventDefault();
+              navigationOpener.current.focus();
+            }
+          }}
         >
           <SheetHeader className="px-5 pt-5">
             <SheetTitle className="text-white">Navigation</SheetTitle>
@@ -142,7 +151,12 @@ function ShellLayout({
       </Sheet>
 
       <div className="lg:pl-64">
-        <Topbar onOpenMobileNav={() => setMobileNavOpen(true)} />
+        <Topbar
+          onOpenMobileNav={(opener) => {
+            navigationOpener.current = opener;
+            setMobileNavOpen(true);
+          }}
+        />
         <main className="px-4 sm:px-6 lg:px-10 py-8 max-w-[1600px] mx-auto">
           <AnimatePresence mode="wait">
             <motion.div
@@ -518,7 +532,7 @@ function SidebarContent({
 function Topbar({
   onOpenMobileNav,
 }: {
-  onOpenMobileNav: () => void;
+  onOpenMobileNav: (opener: HTMLButtonElement) => void;
 }): React.JSX.Element {
   const {
     page,
@@ -572,7 +586,7 @@ function Topbar({
       <div className="h-full px-4 sm:px-6 lg:px-10 flex items-center gap-3">
         <button
           aria-label="Open navigation"
-          onClick={onOpenMobileNav}
+          onClick={(event) => onOpenMobileNav(event.currentTarget)}
           className="lg:hidden h-9 w-9 inline-flex items-center justify-center rounded-lg hover:bg-[#F3F4F6] text-[#111827] transition-colors"
         >
           <Menu className="h-5 w-5" />

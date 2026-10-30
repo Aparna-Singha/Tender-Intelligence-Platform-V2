@@ -627,3 +627,11 @@
 .zai-workspace .modal {
   border-radius: 16px;
 }
+
+/* Legacy assistant: the Z.ai shell has a 4rem topbar and 2rem main padding
+   on each side vertically. Keep its internal scroll areas inside the viewport. */
+@media (min-width: 901px) {
+  .zai-app-shell .assistant-page {
+    height: max(0px, calc(100dvh - 8rem));
+  }
+}

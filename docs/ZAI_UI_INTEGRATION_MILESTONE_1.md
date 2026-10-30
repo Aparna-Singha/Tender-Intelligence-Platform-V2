@@ -201,3 +201,28 @@ pre-existing dependency advisories and unperformed live integration checks discl
 - `docs/DESIGN_SYSTEM.md`
 - `docs/ZAI_UI_INTEGRATION_MILESTONE_1.md`
 - `pnpm-lock.yaml`
+
+## Post-commit shell compatibility follow-up
+
+Based on committed milestone `68b7302`, the desktop legacy assistant receives a
+shell-scoped height correction: viewport minus the unchanged 4rem topbar and
+2rem top/bottom main padding. The existing internal scrolling and mobile layout
+remain in place. This replaces the old 76px shell assumption without changing
+legacy.css or the original page-transition animation.
+
+Only the navigation sheet and backdrop now use stacking level 70, above the
+contextual assistant's 60. Radix retains modal focus trapping, background hiding,
+Escape and outside-click dismissal. Explicit close-focus restoration returns to
+the external navigation opener. The assistant remains mounted with its state intact.
+
+A component regression test exercises an already-open assistant, forward/reverse
+Tab confinement, Escape, close button, backdrop dismissal and opener focus.
+These are DOM accessibility checks, not browser geometry measurements. Browser
+preview execution remains BLOCKED by the previously reported execution policy;
+neither suspected visual failure was reproduced in this follow-up. Desktop bounds,
+390px/768px overlap and visual stacking still require a permitted browser preview.
+
+Follow-up verification: all 173 frontend tests across 28 files PASS; frontend
+lint, strict typecheck and production build with dummy process values PASS.
+Changed-file formatting, Markdown lint and diff whitespace checks PASS.
+No live backend, staging or browser deployment verification was performed.
