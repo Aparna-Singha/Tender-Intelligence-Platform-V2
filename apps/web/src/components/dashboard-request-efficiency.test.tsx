@@ -78,7 +78,7 @@ describe("dashboard and shell request counts", () => {
       </AppShell>,
     );
     expect(
-      await screen.findByRole("heading", { name: "Good morning, Aparna" }),
+      await screen.findByRole("heading", { name: "Welcome back, Aparna." }),
     ).toBeInTheDocument();
     await waitFor(() =>
       expect(

@@ -3,7 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Dashboard } from "./dashboard";
 
-const { apiRequest } = vi.hoisted(() => ({ apiRequest: vi.fn() }));
+const { apiRequest, router } = vi.hoisted(() => ({
+  apiRequest: vi.fn(),
+  router: { push: vi.fn() },
+}));
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 vi.mock("../lib/api", () => ({
   apiRequest,
@@ -138,6 +142,24 @@ describe("dashboard organisation flow", () => {
     expect(screen.queryAllByText("First organisation tender")).toHaveLength(0);
   });
 
+  it("shows a recoverable API error instead of fabricated zero metrics", async () => {
+    apiRequest.mockRejectedValueOnce(new Error("Unavailable"));
+    render(<Dashboard />);
+    expect(
+      await screen.findByText("Workspace unavailable"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("group", { name: "Workspace summary" }),
+    ).not.toBeInTheDocument();
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Try again" }));
+    expect(
+      await screen.findByRole("heading", { name: "Welcome back, Dinesh." }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Workspace unavailable")).not.toBeInTheDocument();
+  });
+
   it("shows the empty state and creates an organisation without a stale form reference", async () => {
     const user = userEvent.setup();
 
@@ -145,7 +167,7 @@ describe("dashboard organisation flow", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Good morning, Dinesh",
+        name: "Welcome back, Dinesh.",
       }),
     ).toBeInTheDocument();
     const initialSessionReads = apiRequest.mock.calls.filter(
@@ -178,9 +200,12 @@ describe("dashboard organisation flow", () => {
       ),
     );
 
-    expect(
-      await screen.findByRole("link", { name: /Add tender/ }),
-    ).toHaveAttribute("href", "/tenders/org-1");
+    await user.click(
+      (
+        await screen.findAllByRole("button", { name: "Analyse new tender" })
+      )[0]!,
+    );
+    expect(router.push).toHaveBeenCalledWith("/tenders/org-1");
     expect(
       apiRequest.mock.calls.filter(([path]) => path === "/auth/session").length,
     ).toBe(initialSessionReads + 1);
@@ -309,7 +334,7 @@ describe("dashboard home parity behavior", () => {
     });
   });
 
-  it("shows deadline text, removes helper copy, and hides in-progress when no real work exists", async () => {
+  it("shows real deadlines, attention counts, filters and an honest empty processing state", async () => {
     vi.useFakeTimers({
       toFake: ["Date"],
     });
@@ -320,12 +345,12 @@ describe("dashboard home parity behavior", () => {
 
       expect(
         await screen.findByRole("heading", {
-          name: "Good morning, Dinesh",
+          name: "Welcome back, Dinesh.",
         }),
       ).toBeInTheDocument();
 
-      expect(screen.getAllByText("3 days left")).toHaveLength(2);
-      expect(screen.getAllByText("6 days overdue")).toHaveLength(2);
+      expect(screen.getAllByText("3 days left")).toHaveLength(1);
+      expect(screen.getAllByText("6 days overdue")).toHaveLength(1);
 
       expect(
         screen.queryByText(
@@ -349,29 +374,21 @@ describe("dashboard home parity behavior", () => {
         screen.queryByText("Active work that is still processing."),
       ).not.toBeInTheDocument();
 
-      const summaryGrid = screen
-        .getByText("Need attention")
-        .closest(".tender-summary-grid");
-
-      expect(summaryGrid).toBeInstanceOf(HTMLElement);
-
-      if (!(summaryGrid instanceof HTMLElement)) {
-        throw new Error("Expected summary grid to render");
-      }
+      const summaryGrid = screen.getByRole("group", {
+        name: "Workspace summary",
+      });
 
       expect(within(summaryGrid).getByText("4")).toBeInTheDocument();
 
       const attentionHeading = screen.getByRole("heading", {
-        name: "Needs your attention",
+        name: "Needs attention",
       });
 
       const attentionSection = attentionHeading.closest("section");
 
       expect(attentionSection).not.toBeNull();
 
-      expect(within(attentionSection!).getAllByRole("listitem")).toHaveLength(
-        3,
-      );
+      expect(within(attentionSection!).getAllByRole("button")).toHaveLength(4);
 
       const tendersHeading = screen.getByRole("heading", {
         name: "Your tenders",
@@ -406,43 +423,44 @@ describe("dashboard home parity behavior", () => {
       ).toBeInTheDocument();
 
       expect(
-        within(tendersSection!).getByText("Review required"),
+        within(tendersSection!).getByText("Needs review"),
       ).toBeInTheDocument();
       expect(
-        within(tendersSection!).getByText("Issue detected"),
+        within(tendersSection!).getByText("Needs attention"),
       ).toBeInTheDocument();
       expect(
         within(tendersSection!).queryByText(
           "Risk summary available for review.",
         ),
-      ).not.toBeInTheDocument();
+      ).toBeInTheDocument();
       expect(
         within(tendersSection!).queryByText("Upload needs attention."),
-      ).not.toBeInTheDocument();
+      ).toBeInTheDocument();
 
       expect(
         screen.queryByRole("heading", {
           name: "In progress",
         }),
-      ).not.toBeInTheDocument();
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText("Nothing processing right now"),
+      ).toBeInTheDocument();
 
       expect(
         screen.queryByText("No background processing is currently running."),
       ).not.toBeInTheDocument();
 
+      await userEvent
+        .setup()
+        .click(screen.getByRole("button", { name: "Ask about my workspace" }));
       expect(
-        screen.getByRole("link", {
-          name: "AI Assistant",
-        }),
-      ).toHaveAttribute("href", "/assistant/org-1");
-
+        screen.getByRole("link", { name: "Open in AI Chat" }),
+      ).toHaveAttribute("href", "/assistant/org-1?conversation=new");
       expect(
         screen
-          .getByRole("link", {
-            name: "AI Assistant",
-          })
+          .getByRole("link", { name: "Open in AI Chat" })
           .getAttribute("href"),
-      ).not.toContain("?stage=ask");
+      ).not.toContain("stage=ask");
     } finally {
       vi.useRealTimers();
     }
