@@ -129,7 +129,7 @@ function ShellLayout({
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <SheetContent
           side="left"
-          className="w-72 p-0 bg-[var(--brand-nav)] border-0 z-[70]"
+          className="w-72 p-0 bg-[var(--brand-nav)] border-0 z-[70] text-white"
           overlayClassName="z-[70]"
           onCloseAutoFocus={(event) => {
             if (navigationOpener.current?.isConnected) {
