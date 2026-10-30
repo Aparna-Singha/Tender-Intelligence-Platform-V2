@@ -1,6 +1,21 @@
 # Design System
 
-## Principles
+## Z.ai integration, milestone 1
+
+Landing, login, registration, the application shell and dashboard now use the
+original Z.ai source components under `apps/web/src/components/zai`. Their visual
+foundation is `apps/web/src/app/zai.css`: orange `#FF5722`, charcoal `#1E1F22`,
+Parkinsans, JetBrains Mono, original textures, shadows and Motion transitions.
+The shell uses a 256 px desktop sidebar, 64 px topbar and 1024 px drawer breakpoint.
+See [the integration record](ZAI_UI_INTEGRATION_MILESTONE_1.md) for provenance,
+functional adaptations, visual evidence and limitations.
+
+The sections below describe the legacy primitives retained for routes outside this
+milestone. Their stylesheet is preserved in `apps/web/src/app/legacy.css`; it is
+layered below the new component styles. They are not the design reference for new
+milestone screens.
+
+## Legacy principles
 
 The interface is calm, evidence-led and independent. It uses a light grey-blue
 background, white surfaces, restrained blue actions, compact status badges and an

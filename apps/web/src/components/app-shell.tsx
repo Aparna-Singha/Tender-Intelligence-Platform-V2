@@ -1,36 +1,20 @@
 "use client";
-
-import {
-  ChevronRight,
-  CircleHelp,
-  Files,
-  Home,
-  Menu,
-  MessageSquare,
-  Sparkles,
-  Settings,
-  X,
-} from "lucide-react";
-import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
+import { Alert, Button, humanizeEnum } from "@tender/ui";
 import {
-  Alert,
-  Button,
-  Drawer,
-  IconButton,
-  Select,
-  humanizeEnum,
-} from "@tender/ui";
-import { apiRequest, PublicApiError } from "../lib/api";
+  apiRequest,
+  clearCsrfToken,
+  formatApiError,
+  PublicApiError,
+} from "../lib/api";
 import { assistantHref } from "../lib/assistant";
 import { describeTender, type TenderSummary } from "./tender-presentation";
-
+import { ShellView } from "./zai/shell-view";
 interface Session {
   readonly active_organisation_id: string | null;
   readonly user: { readonly display_name: string; readonly email: string };
 }
-
 interface Membership {
   readonly organisation: {
     readonly id: string;
@@ -39,339 +23,6 @@ interface Membership {
   };
   readonly role: string;
 }
-
-interface ShellNavigationItem {
-  readonly href: string | null;
-  readonly icon: typeof Home;
-  readonly label: string;
-}
-
-function matchesPath(pathname: string, href: string): boolean {
-  return (
-    pathname === href ||
-    (href !== "/dashboard" && pathname.startsWith(`${href}/`))
-  );
-}
-
-function WorkspaceNavItem({
-  href,
-  icon: Icon,
-  label,
-  onNavigate,
-  pathname,
-}: {
-  readonly href: string | null;
-  readonly icon: typeof Home;
-  readonly label: string;
-  readonly onNavigate?: () => void;
-  readonly pathname: string;
-}): JSX.Element {
-  if (href === null) {
-    return (
-      <span
-        aria-disabled="true"
-        className="workspace-sidebar__nav-link workspace-sidebar__nav-link--disabled"
-      >
-        <Icon aria-hidden="true" size={16} />
-        <span>{label}</span>
-      </span>
-    );
-  }
-
-  return (
-    <Link
-      className={`workspace-sidebar__nav-link ${matchesPath(pathname, href) ? "workspace-sidebar__nav-link--active" : ""}`}
-      href={href}
-      {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-    >
-      <Icon aria-hidden="true" size={16} />
-      <span>{label}</span>
-    </Link>
-  );
-}
-
-function SidebarSection({
-  children,
-  title,
-}: {
-  readonly children: ReactNode;
-  readonly title: string;
-}): JSX.Element {
-  return (
-    <section className="workspace-sidebar__section">
-      <h2 className="workspace-sidebar__section-title">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function QuickAccessLink({
-  active = false,
-  href,
-  title,
-}: {
-  readonly active?: boolean;
-  readonly href: string;
-  readonly title: string;
-}): JSX.Element {
-  return (
-    <Link
-      aria-label={title}
-      className={`workspace-sidebar__quick-link ${active ? "workspace-sidebar__quick-link--active" : ""}`}
-      href={href}
-    >
-      <span>{title}</span>
-    </Link>
-  );
-}
-
-function SidebarContents({
-  memberships,
-  onNavigate,
-  onSwitchOrganisation,
-  organisationId,
-  pathname,
-  searchStage,
-  session,
-  tenders,
-}: {
-  readonly memberships: readonly Membership[];
-  readonly onNavigate?: () => void;
-  readonly onSwitchOrganisation: (id: string) => void;
-  readonly organisationId: string | null;
-  readonly pathname: string;
-  readonly searchStage: string | null;
-  readonly session: Session | null;
-  readonly tenders: readonly TenderSummary[];
-}): JSX.Element {
-  const organisation = memberships.find(
-    ({ organisation: memberOrganisation }) =>
-      memberOrganisation.id === organisationId,
-  );
-  const pathTenderId =
-    /^\/tenders\/[^/]+\/([^/?]+)/.exec(pathname)?.[1] ?? null;
-  const navItems: readonly ShellNavigationItem[] = [
-    { href: "/dashboard", icon: Home, label: "Home" },
-    {
-      href: organisationId === null ? null : `/tenders/${organisationId}`,
-      icon: Files,
-      label: "Tenders",
-    },
-    {
-      href: organisationId === null ? null : `/documents/${organisationId}`,
-      icon: Settings,
-      label: "Company Docs",
-    },
-    {
-      href: organisationId === null ? null : assistantHref(organisationId),
-      icon: Sparkles,
-      label: "AI Chat",
-    },
-  ];
-  const recentTenders = [...tenders]
-    .sort((left, right) =>
-      (left.submissionDeadline ?? "").localeCompare(
-        right.submissionDeadline ?? "",
-      ),
-    )
-    .slice(0, 3);
-  const recentDrafts = tenders
-    .filter((tender) => describeTender(tender).isDraft)
-    .slice(0, 2);
-  const currentTender = tenders.find((tender) => tender.id === pathTenderId);
-  const chatSeed =
-    currentTender === undefined
-      ? recentTenders
-      : [currentTender, ...recentTenders];
-  const seen = new Set<string>();
-  const chatShortcuts = chatSeed
-    .filter((tender) => {
-      if (seen.has(tender.id)) return false;
-      seen.add(tender.id);
-      return true;
-    })
-    .slice(0, 3);
-  const rawInitials = session?.user.display_name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? "")
-    .join("");
-  const accountInitials = rawInitials === "" ? "TI" : rawInitials;
-
-  return (
-    <div className="workspace-sidebar__inner">
-      <div className="workspace-sidebar__brand-block">
-        <Link
-          className="workspace-sidebar__brand"
-          href="/dashboard"
-          {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-        >
-          <span className="workspace-sidebar__brand-mark" aria-hidden="true">
-            TI
-          </span>
-          <span>
-            Tender Intelligence
-            <small>Workspace</small>
-          </span>
-        </Link>
-        <label className="workspace-sidebar__organisation-picker">
-          <span>Workspace</span>
-          <Select
-            aria-label="Current organisation"
-            disabled={memberships.length === 0}
-            onChange={(event) => onSwitchOrganisation(event.target.value)}
-            value={organisationId ?? ""}
-          >
-            <option value="">No organisation selected</option>
-            {memberships.map(({ organisation: memberOrganisation }) => (
-              <option key={memberOrganisation.id} value={memberOrganisation.id}>
-                {memberOrganisation.name}
-              </option>
-            ))}
-          </Select>
-        </label>
-      </div>
-
-      <nav aria-label="Primary" className="workspace-sidebar__nav">
-        {navItems.map((item) => (
-          <WorkspaceNavItem
-            href={item.href}
-            icon={item.icon}
-            key={item.label}
-            label={item.label}
-            pathname={pathname}
-            {...(onNavigate === undefined ? {} : { onNavigate })}
-          />
-        ))}
-      </nav>
-
-      <div className="workspace-sidebar__content">
-        <SidebarSection title="Recent Tenders">
-          {recentTenders.length === 0 ? (
-            <p className="workspace-sidebar__empty">
-              No tender workspaces yet.
-            </p>
-          ) : (
-            recentTenders.map((tender) => (
-              <QuickAccessLink
-                href={`/tenders/${organisationId ?? ""}/${tender.id}?stage=overview`}
-                key={tender.id}
-                title={tender.title}
-              />
-            ))
-          )}
-        </SidebarSection>
-
-        <SidebarSection title="Recent Drafts">
-          {recentDrafts.length === 0 ? (
-            <p className="workspace-sidebar__empty">
-              Draft work appears here when a tender reaches the drafting flow.
-            </p>
-          ) : (
-            recentDrafts.map((tender) => {
-              return (
-                <QuickAccessLink
-                  active={pathTenderId === tender.id && searchStage === "draft"}
-                  href={`/tenders/${organisationId ?? ""}/${tender.id}?stage=draft`}
-                  key={tender.id}
-                  title={tender.title}
-                />
-              );
-            })
-          )}
-        </SidebarSection>
-
-        <SidebarSection title="Chats">
-          {chatShortcuts.length === 0 ? (
-            <p className="workspace-sidebar__empty">
-              Tender chat stays tender-scoped and appears once a workspace
-              exists.
-            </p>
-          ) : (
-            <>
-              {chatShortcuts.map((tender, index) => (
-                <Link
-                  className={`workspace-sidebar__chat-link ${pathTenderId === tender.id && searchStage === "ask" ? "workspace-sidebar__chat-link--active" : ""}`}
-                  href={`/tenders/${organisationId ?? ""}/${tender.id}?stage=ask`}
-                  key={tender.id}
-                  {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-                >
-                  <span
-                    className={`workspace-sidebar__chat-indicator ${index === 0 ? "workspace-sidebar__chat-indicator--pinned" : ""}`}
-                  >
-                    <MessageSquare aria-hidden="true" size={12} />
-                  </span>
-                  <span>{tender.title}</span>
-                </Link>
-              ))}
-            </>
-          )}
-          {organisationId !== null ? (
-            <Link
-              className="workspace-sidebar__view-all"
-              href={assistantHref(organisationId ?? "")}
-              {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-            >
-              Browse tender chats <ChevronRight aria-hidden="true" size={12} />
-            </Link>
-          ) : null}
-        </SidebarSection>
-
-        <div className="workspace-sidebar__footer-links">
-          <WorkspaceNavItem
-            href={
-              organisationId === null
-                ? null
-                : `/settings/${organisationId}?section=organisation`
-            }
-            icon={Settings}
-            label="Settings"
-            pathname={pathname}
-            {...(onNavigate === undefined ? {} : { onNavigate })}
-          />
-          <span className="workspace-sidebar__nav-link workspace-sidebar__nav-link--disabled">
-            <CircleHelp aria-hidden="true" size={16} />
-            <span>Help</span>
-          </span>
-        </div>
-      </div>
-
-      <div className="workspace-sidebar__footer">
-        <Link
-          className="workspace-sidebar__account-card"
-          href={
-            organisationId === null
-              ? "/dashboard"
-              : `/onboarding/${organisationId}`
-          }
-          {...(onNavigate === undefined ? {} : { onClick: onNavigate })}
-        >
-          <div className="workspace-sidebar__account-summary">
-            <span
-              className="workspace-sidebar__account-mark"
-              aria-hidden="true"
-            >
-              {accountInitials}
-            </span>
-            <div>
-              <strong>
-                {organisation?.organisation.name ?? "Tender Intelligence"}
-              </strong>
-              <small>
-                {session?.user.display_name ?? "Loading user"}
-                {organisation === undefined
-                  ? ""
-                  : ` · ${humanizeEnum(organisation.role)}`}
-              </small>
-            </div>
-          </div>
-        </Link>
-      </div>
-    </div>
-  );
-}
-
 export function AppShell({
   children,
 }: {
@@ -380,7 +31,8 @@ export function AppShell({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [mobileOpen, setMobileOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState("");
   const [session, setSession] = useState<Session | null>(null);
   const [memberships, setMemberships] = useState<readonly Membership[]>([]);
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
@@ -488,80 +140,133 @@ export function AppShell({
   }, [pathname, searchParams]);
 
   async function switchOrganisation(id: string): Promise<void> {
-    await apiRequest(`/organisations/${id}/select`, { method: "POST" });
-    window.dispatchEvent(new Event("organisation-changed"));
-    setMobileOpen(false);
-    router.push("/dashboard");
-    router.refresh();
+    if (busy || !memberships.some((member) => member.organisation.id === id))
+      return;
+    setBusy(true);
+    setActionError("");
+    try {
+      await apiRequest(`/organisations/${id}/select`, { method: "POST" });
+      window.dispatchEvent(new Event("organisation-changed"));
+      router.push("/dashboard");
+      router.refresh();
+    } catch (error) {
+      setActionError(formatApiError(error, "Unable to switch organisation."));
+    } finally {
+      setBusy(false);
+    }
   }
-
-  const sidebar = (
-    <SidebarContents
-      memberships={memberships}
-      onNavigate={() => setMobileOpen(false)}
-      onSwitchOrganisation={(id) => void switchOrganisation(id)}
-      organisationId={organisationId}
-      pathname={pathname}
-      searchStage={searchParams.get("stage")}
-      session={session}
-      tenders={tendersOrganisationId === organisationId ? tenders : []}
-    />
-  );
-
+  async function logout(): Promise<void> {
+    if (busy) return;
+    setBusy(true);
+    setActionError("");
+    try {
+      await apiRequest("/auth/logout", { method: "POST" });
+      clearCsrfToken();
+      setSession(null);
+      setMemberships([]);
+      setTenders([]);
+      router.replace("/login");
+      router.refresh();
+    } catch (error) {
+      setActionError(
+        formatApiError(error, "Unable to sign out. Please try again."),
+      );
+      setBusy(false);
+    }
+  }
+  const hrefFor = (page: string): string | null => {
+    if (page === "dashboard") return "/dashboard";
+    if (page === "account") return "/account";
+    if (page === "help") return "/#faq";
+    if (page === "add-organisation") return "/dashboard?create=organisation";
+    if (organisationId === null) return null;
+    if (page.startsWith("tender:")) {
+      const [, id, stage] = page.split(":");
+      return `/tenders/${organisationId}/${id}?stage=${stage}`;
+    }
+    if (page === "onboarding") return `/onboarding/${organisationId}`;
+    if (page === "company-docs") return `/documents/${organisationId}`;
+    if (page === "ai-chat") return assistantHref(organisationId);
+    if (page === "settings")
+      return `/settings/${organisationId}?section=organisation`;
+    return `/tenders/${organisationId}`;
+  };
   return (
-    <div className="workspace-shell">
-      <aside className="workspace-sidebar">{sidebar}</aside>
-      <div className="workspace-main">
-        <header className="workspace-mobilebar">
-          <IconButton
-            label="Open navigation"
-            onClick={() => setMobileOpen(true)}
+    <ShellView
+      data={{
+        page:
+          mobileTitle === "Home"
+            ? "dashboard"
+            : mobileTitle === "Company Docs"
+              ? "company-docs"
+              : mobileTitle === "AI Chat"
+                ? "ai-chat"
+                : mobileTitle.toLowerCase(),
+        activeStage: searchParams.get("stage"),
+        pathname,
+        activeOrgId: organisationId,
+        activeTenderId:
+          /^\/tenders\/[^/]+\/([^/?]+)/.exec(pathname)?.[1] ?? null,
+        organizations: memberships.map(({ organisation, role }) => ({
+          id: organisation.id,
+          name: organisation.name,
+          role: humanizeEnum(role),
+          initials: organisation.name
+            .split(/\s+/)
+            .slice(0, 2)
+            .map((part) => part[0])
+            .join(""),
+          color: "#FF5722",
+        })),
+        tenders:
+          tendersOrganisationId === organisationId
+            ? tenders.map((tender) => ({
+                ...tender,
+                isDraft: describeTender(tender).isDraft,
+              }))
+            : [],
+        userName: session?.user.display_name ?? "Loading user",
+        userEmail: session?.user.email ?? "",
+        busy,
+        setPage: (page) => {
+          const href = hrefFor(page);
+          if (href) router.push(href);
+        },
+        hrefFor,
+        setActiveOrg: (id) => void switchOrganisation(id),
+        openTender: (id) => {
+          if (organisationId)
+            router.push(`/tenders/${organisationId}/${id}?stage=overview`);
+        },
+        signOut: () => void logout(),
+      }}
+    >
+      {actionError && (
+        <Alert title="Account action failed" tone="danger">
+          {actionError}
+        </Alert>
+      )}
+      {shellLoadError === "recoverable" && (
+        <Alert title="Workspace navigation unavailable" tone="danger">
+          <p>Navigation could not be loaded. Please try again.</p>
+          <Button
+            onClick={() => {
+              setShellLoadError(null);
+              setRetryKey((key) => key + 1);
+            }}
+            type="button"
+            variant="secondary"
           >
-            <Menu aria-hidden="true" size={18} />
-          </IconButton>
-          <div>
-            <strong>{mobileTitle}</strong>
-            <small>{session?.user.display_name ?? "Loading"}</small>
-          </div>
-        </header>
-        <main className="workspace-content">
-          {shellLoadError === "recoverable" ? (
-            <Alert title="Workspace navigation unavailable" tone="danger">
-              <p>Navigation could not be loaded. Please try again.</p>
-              <Button
-                onClick={() => {
-                  setShellLoadError(null);
-                  setRetryKey((key) => key + 1);
-                }}
-                type="button"
-                variant="secondary"
-              >
-                Try loading workspace again
-              </Button>
-            </Alert>
-          ) : null}
-          {shellLoadError === "forbidden" ? (
-            <Alert title="Workspace access denied" tone="danger">
-              <p>You do not have permission to load this workspace.</p>
-            </Alert>
-          ) : null}
-          {children}
-        </main>
-      </div>
-      {mobileOpen ? (
-        <Drawer label="Navigation" onClose={() => setMobileOpen(false)}>
-          <div className="workspace-drawer__header">
-            <strong>Workspace</strong>
-            <IconButton
-              label="Close navigation"
-              onClick={() => setMobileOpen(false)}
-            >
-              <X aria-hidden="true" size={18} />
-            </IconButton>
-          </div>
-          {sidebar}
-        </Drawer>
-      ) : null}
-    </div>
+            Try loading workspace again
+          </Button>
+        </Alert>
+      )}
+      {shellLoadError === "forbidden" && (
+        <Alert title="Workspace access denied" tone="danger">
+          <p>You do not have permission to load this workspace.</p>
+        </Alert>
+      )}
+      {children}
+    </ShellView>
   );
 }

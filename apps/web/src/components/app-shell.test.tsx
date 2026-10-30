@@ -1,4 +1,5 @@
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./app-shell";
 
@@ -193,37 +194,29 @@ describe("app shell assistant and sidebar semantics", () => {
       "href",
       "/documents/org-1",
     );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Account menu" }));
     expect(
-      screen.getByRole("link", { name: /Tender Ops.*Aparna/ }),
+      screen.getByRole("menuitem", { name: "Company profile" }),
     ).toHaveAttribute("href", "/onboarding/org-1");
-    expect(screen.getByRole("link", { name: "Settings" })).toHaveAttribute(
-      "href",
+    await user.click(screen.getByRole("menuitem", { name: "Settings" }));
+    expect(routerState.push).toHaveBeenCalledWith(
       "/settings/org-1?section=organisation",
     );
+    await user.click(
+      screen.getByRole("button", {
+        name: `Actions for ${tenderFixtures[0].title}`,
+      }),
+    );
     expect(
-      screen.getByRole("link", { name: /Browse tender chats/ }),
-    ).toHaveAttribute("href", "/assistant/org-1");
-
-    const chatsSection = await screen.findByRole("heading", {
-      name: "Chats",
-    });
-    const chats = within(chatsSection.closest("section")!);
-
+      screen.getByRole("menuitem", { name: "Tender chat" }),
+    ).toHaveAttribute("href", "/tenders/org-1/tender-1?stage=ask");
     expect(
-      chats.getByText(
-        "AI-Enabled Municipal Video Analytics System - Supply, Installation and 3-Year Support",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      chats.getByText("Urban CCTV operations and analytics support"),
-    ).toBeInTheDocument();
-    expect(chats.queryByText("Tender chat")).not.toBeInTheDocument();
-    expect(
-      chats.queryByRole("link", { name: /AI Chat/ }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("menuitem", { name: "Continue draft" }),
+    ).toHaveAttribute("href", "/tenders/org-1/tender-1?stage=draft");
   });
 
-  it("renders Recent Drafts with title-only copy and highlights the active draft route", async () => {
+  it("keeps the draft shortcut scoped to its tender and marks the active draft route", async () => {
     pathnameState.current = "/tenders/org-1/tender-1";
     searchState.current = "stage=draft";
 
@@ -233,24 +226,19 @@ describe("app shell assistant and sidebar semantics", () => {
       </AppShell>,
     );
 
-    const draftsHeading = await screen.findByRole("heading", {
-      name: "Recent Drafts",
-    });
-    const draftsSection = draftsHeading.closest("section");
-    expect(draftsSection).not.toBeNull();
-    const drafts = within(draftsSection!);
-
-    const draftLink = drafts.getByRole("link", {
-      name: "AI-Enabled Municipal Video Analytics System - Supply, Installation and 3-Year Support",
-    });
+    const user = userEvent.setup();
+    await user.click(
+      await screen.findByRole("button", {
+        name: `Actions for ${tenderFixtures[0].title}`,
+      }),
+    );
+    const draftLink = screen.getByRole("menuitem", { name: "Continue draft" });
     expect(draftLink).toHaveAttribute(
       "href",
       "/tenders/org-1/tender-1?stage=draft",
     );
-    expect(draftLink.className).toContain(
-      "workspace-sidebar__quick-link--active",
-    );
-    expect(drafts.queryByText("Preparing draft...")).not.toBeInTheDocument();
+    expect(draftLink).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByText("Preparing draft...")).not.toBeInTheDocument();
   });
 
   it("uses an explicit Overview stage for Recent Tender links", async () => {
@@ -260,19 +248,20 @@ describe("app shell assistant and sidebar semantics", () => {
       </AppShell>,
     );
 
-    const recentTenders = within(
-      (await screen.findByRole("heading", { name: "Recent Tenders" })).closest(
-        "section",
-      )!,
+    expect(
+      await screen.findByRole("link", { name: tenderFixtures[0].title }),
+    ).toHaveAttribute("href", "/tenders/org-1/tender-1?stage=overview");
+    const user = userEvent.setup();
+    await user.click(
+      screen.getByRole("button", {
+        name: `Actions for ${tenderFixtures[1].title}`,
+      }),
     );
     expect(
-      recentTenders.getByRole("link", {
-        name: "AI-Enabled Municipal Video Analytics System - Supply, Installation and 3-Year Support",
-      }),
-    ).toHaveAttribute("href", "/tenders/org-1/tender-1?stage=overview");
+      screen.getByRole("menuitem", { name: "Tender chat" }),
+    ).toHaveAttribute("href", "/tenders/org-1/tender-2?stage=ask");
     expect(
-      recentTenders.queryByText(/Karnataka Municipal Technology Authority/),
+      screen.queryByRole("menuitem", { name: "Continue draft" }),
     ).not.toBeInTheDocument();
-    expect(recentTenders.queryByText(/days left/)).not.toBeInTheDocument();
   });
 });

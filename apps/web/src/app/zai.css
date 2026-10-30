@@ -1,0 +1,629 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-parkinsans);
+  --font-mono: var(--font-jetbrains);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* ---------- Industrial palette (orange + charcoal) ---------- */
+  --background: #f4f4f4; /* cool light gray canvas */
+  --foreground: #111827; /* near-black ink */
+  --card: #ffffff; /* pure white surface */
+  --card-foreground: #111827;
+  --popover: #ffffff;
+  --popover-foreground: #111827;
+  --primary: #ff5722; /* vibrant safety orange — hero accent */
+  --primary-foreground: #ffffff;
+  --secondary: #fff3ed; /* light orange tint */
+  --secondary-foreground: #9a3412;
+  --muted: #f3f4f6; /* subtle gray */
+  --muted-foreground: #6b7280; /* slate gray body */
+  --accent: #fff3ed;
+  --accent-foreground: #9a3412;
+  --destructive: #ef4444;
+  --border: #e5e7eb; /* light gray border */
+  --input: #e5e7eb;
+  --ring: #ff5722;
+
+  /* Brand-specific tokens */
+  --brand-nav: #1e1f22; /* charcoal — industrial dark */
+  --brand-nav-elevated: #26282c;
+  --brand-nav-foreground: #c7c9ce;
+  --brand-nav-muted: #6e7178;
+  --brand-orange: #ff5722;
+  --brand-orange-soft: #fff3ed;
+  --brand-orange-deep: #c2410c;
+  --brand-amber: #b8860b;
+  --brand-amber-soft: #fbf3dc;
+  --brand-amber-deep: #8b6508;
+  --brand-navy: #0f2a4a;
+  --brand-navy-soft: #e8eef5;
+  --brand-navy-deep: #0a1f38;
+  --brand-cyan: #0ea5e9; /* electric cyan — info/AI secondary */
+  --brand-cyan-soft: #e0f2fe;
+  --brand-ink: #111827;
+  --brand-ink-soft: #374151;
+  --brand-success: #10b981;
+  --brand-success-soft: #ecfdf5;
+  --brand-warning: #f59e0b;
+  --brand-warning-soft: #fffbeb;
+  --brand-danger: #ef4444;
+  --brand-danger-soft: #fef2f2;
+
+  --chart-1: #ff5722;
+  --chart-2: #0ea5e9;
+  --chart-3: #10b981;
+  --chart-4: #f59e0b;
+  --chart-5: #ef4444;
+
+  --sidebar: #1e1f22;
+  --sidebar-foreground: #e5e7eb;
+  --sidebar-primary: #ff5722;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #26282c;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2a2c30;
+  --sidebar-ring: #ff5722;
+}
+
+.dark {
+  --background: #16181c;
+  --foreground: #e5e7eb;
+  --card: #1e1f22;
+  --card-foreground: #e5e7eb;
+  --popover: #1e1f22;
+  --popover-foreground: #e5e7eb;
+  --primary: #ff6b3d;
+  --primary-foreground: #ffffff;
+  --secondary: #2a2c30;
+  --secondary-foreground: #fcd9c5;
+  --muted: #2a2c30;
+  --muted-foreground: #9ca3af;
+  --accent: #2a2c30;
+  --accent-foreground: #fcd9c5;
+  --destructive: #f87171;
+  --border: #2a2c30;
+  --input: #2a2c30;
+  --ring: #ff6b3d;
+
+  --brand-nav: #111315;
+  --brand-nav-elevated: #1e1f22;
+  --brand-nav-foreground: #c7c9ce;
+  --brand-nav-muted: #6e7178;
+  --brand-orange: #ff6b3d;
+  --brand-orange-soft: #2a1a14;
+  --brand-orange-deep: #fb923c;
+  --brand-amber: #d4a017;
+  --brand-amber-soft: #2a2008;
+  --brand-amber-deep: #fbbf24;
+  --brand-navy: #3b82f6;
+  --brand-navy-soft: #0c1e36;
+  --brand-navy-deep: #1d4ed8;
+  --brand-cyan: #38bdf8;
+  --brand-cyan-soft: #0c1f2a;
+  --brand-success: #34d399;
+  --brand-success-soft: #0c2a1e;
+  --brand-warning: #fbbf24;
+  --brand-warning-soft: #2a2008;
+  --brand-danger: #f87171;
+  --brand-danger-soft: #2a1414;
+
+  --sidebar: #111315;
+  --sidebar-foreground: #e5e7eb;
+  --sidebar-primary: #ff6b3d;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #1e1f22;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #2a2c30;
+  --sidebar-ring: #ff6b3d;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  /* Parkinsans is a wide font — tighten letter-spacing slightly for body legibility */
+  body,
+  p,
+  li,
+  dd,
+  dt,
+  blockquote {
+    letter-spacing: -0.011em;
+  }
+  /* Headings — uppercase industrial style with negative tracking */
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
+  }
+}
+
+/* ---------- Industrial shadow system (very soft, diffuse) ---------- */
+.shadow-soft {
+  box-shadow:
+    0 1px 2px rgba(17, 24, 39, 0.04),
+    0 4px 16px rgba(17, 24, 39, 0.04);
+}
+.shadow-soft-lg {
+  box-shadow:
+    0 2px 4px rgba(17, 24, 39, 0.03),
+    0 16px 40px -8px rgba(17, 24, 39, 0.08);
+}
+.shadow-glow-orange {
+  box-shadow: 0 8px 28px rgba(255, 87, 34, 0.22);
+}
+.shadow-glow-navy {
+  box-shadow: 0 8px 28px rgba(15, 42, 74, 0.2);
+}
+.shadow-glow-amber {
+  box-shadow: 0 8px 28px rgba(184, 134, 11, 0.22);
+}
+.shadow-glow-cyan {
+  box-shadow: 0 8px 28px rgba(14, 165, 233, 0.18);
+}
+.shadow-card-hover {
+  box-shadow:
+    0 4px 8px rgba(17, 24, 39, 0.04),
+    0 20px 48px -8px rgba(17, 24, 39, 0.1);
+}
+
+/* ---------- Glassmorphism ---------- */
+.glass {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+.glass-dark {
+  background: rgba(30, 31, 34, 0.78);
+  backdrop-filter: blur(16px) saturate(180%);
+  -webkit-backdrop-filter: blur(16px) saturate(180%);
+}
+
+/* ---------- Scrollbars ---------- */
+.scroll-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scroll-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
+.scroll-thin::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.5);
+  border-radius: 999px;
+}
+.scroll-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.7);
+}
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ---------- Industrial background patterns ---------- */
+/* Graph-paper grid (Axon hero) */
+.bg-grid {
+  background-image:
+    linear-gradient(to right, rgba(17, 24, 39, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(17, 24, 39, 0.05) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+.bg-grid-dark {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+/* Fine dotted texture */
+.bg-dots {
+  background-image: radial-gradient(
+    rgba(255, 87, 34, 0.18) 1px,
+    transparent 1px
+  );
+  background-size: 20px 20px;
+}
+.bg-dots-dark {
+  background-image: radial-gradient(
+    rgba(255, 255, 255, 0.06) 1px,
+    transparent 1px
+  );
+  background-size: 20px 20px;
+}
+/* Mesh gradient (soft aurora) */
+.bg-mesh {
+  background-color: #f4f4f4;
+  background-image:
+    radial-gradient(at 0% 0%, rgba(255, 87, 34, 0.06) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.03) 0px, transparent 50%);
+}
+/* Diagonal hazard stripes (industrial) */
+.bg-hazard {
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(17, 24, 39, 0.04),
+    rgba(17, 24, 39, 0.04) 10px,
+    transparent 10px,
+    transparent 20px
+  );
+}
+
+/* Brand gradient text */
+.text-gradient-orange {
+  background: linear-gradient(95deg, #c2410c 0%, #a16207 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.text-gradient-amber {
+  background: linear-gradient(95deg, #b8860b 0%, #d4a017 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.text-gradient-brand {
+  background: linear-gradient(95deg, #c2410c 0%, #0369a1 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* ---------- Focus ring ---------- */
+.focus-ring {
+  @apply outline-none ring-2 ring-ring/40 ring-offset-2 ring-offset-background;
+}
+
+/* ---------- Animated underline ---------- */
+.nav-underline {
+  position: relative;
+}
+.nav-underline::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -2px;
+  height: 2px;
+  width: 0;
+  background: var(--primary);
+  transition: width 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.nav-underline:hover::after {
+  width: 100%;
+}
+
+/* ---------- Industrial label (uppercase tracked) ---------- */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b7280;
+}
+.label-mono-orange {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #ff5722;
+}
+.label-mono-navy {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #0f2a4a;
+}
+.label-mono-amber {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #8b6508;
+}
+
+/* ---------- Industrial heading (uppercase bold tracked) ---------- */
+.heading-industrial {
+  text-transform: uppercase;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+/* ---------- Status dot ---------- */
+.status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+}
+
+/* ---------- Shimmer (skeleton) ---------- */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, #f3f4f6 0%, #fafbfc 50%, #f3f4f6 100%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+}
+
+/* ---------- Soft pulse ---------- */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.92);
+  }
+}
+.animate-pulse-soft {
+  animation: pulse-soft 1.8s ease-in-out infinite;
+}
+
+/* ---------- Fade up ---------- */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.animate-fade-up {
+  animation: fade-up 0.4s ease-out both;
+}
+
+/* ---------- Aurora glow ---------- */
+@keyframes aurora {
+  0%,
+  100% {
+    transform: translate(0, 0) scale(1);
+    opacity: 0.65;
+  }
+  33% {
+    transform: translate(30px, -20px) scale(1.05);
+    opacity: 0.85;
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.98);
+    opacity: 0.5;
+  }
+}
+.animate-aurora {
+  animation: aurora 14s ease-in-out infinite;
+}
+
+/* ---------- Gradient shift ---------- */
+@keyframes gradient-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+.animate-gradient {
+  background-size: 200% 200%;
+  animation: gradient-shift 6s ease infinite;
+}
+
+/* ---------- Premium card hover ---------- */
+.card-premium {
+  transition:
+    transform 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.3s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.3s ease;
+}
+.card-premium:hover {
+  transform: translateY(-3px);
+  box-shadow:
+    0 4px 8px rgba(17, 24, 39, 0.04),
+    0 20px 48px -8px rgba(17, 24, 39, 0.1);
+}
+
+/* ---------- Industrial button (sharp left orange accent) ---------- */
+.btn-industrial {
+  position: relative;
+  background: #111827;
+  color: #ffffff;
+  border-radius: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 12px;
+  padding: 12px 24px;
+  transition: all 0.2s ease;
+}
+.btn-industrial::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: #ff5722;
+}
+
+/* ---------- Smooth list stagger (CSS) ---------- */
+@keyframes list-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ---------- Marquee for logo strips ---------- */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+.animate-marquee {
+  animation: marquee 30s linear infinite;
+}
+
+/* Accessibility adaptations: retain the original motion unless reduction is requested. */
+:focus-visible {
+  outline: 2px solid #c2410c;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Keep legacy route styles from overriding the prototype's Tailwind preflight. */
+@layer components {
+  .zai-design :where(h1, h2, h3, h4, p) {
+    margin: 0;
+    font-size: inherit;
+    font-weight: inherit;
+    letter-spacing: inherit;
+    line-height: inherit;
+    color: inherit;
+  }
+  .zai-design :where(a) {
+    color: inherit;
+    text-decoration: inherit;
+  }
+  .zai-design :where(a:hover) {
+    text-decoration: inherit;
+  }
+}
+
+/* Approved contrast correction: brand backgrounds and motion remain unchanged. */
+.zai-design :not(svg)[class~="bg-[#FF5722]"],
+.zai-design :not(svg)[class~="bg-[var(--brand-orange)]"],
+.zai-design :not(svg)[class~="bg-primary"],
+.zai-design a[aria-current="page"],
+.zai-design a[aria-current="page"] [aria-hidden="true"],
+.zai-design [data-slot="avatar-fallback"] {
+  color: #1e1f22;
+}
+.zai-design :not(svg)[class~="text-[#FF5722]"],
+.zai-design :not(svg)[class~="text-[var(--brand-orange)]"] {
+  color: #c2410c;
+}
+.zai-design :not(svg)[class~="text-[#9CA3AF]"],
+.zai-design :not(svg)[class~="text-[#6B7280]"] {
+  color: #606875;
+}
+.zai-design :not(svg)[class~="text-white/30"],
+.zai-design :not(svg)[class~="text-white/40"] {
+  color: rgb(255 255 255 / 65%);
+}
+.zai-design :not(svg)[class~="text-[var(--brand-success)]"] {
+  color: #047857;
+}
+.zai-design :not(svg)[class~="text-[var(--brand-danger)]"] {
+  color: #b91c1c;
+}
+.zai-design :not(svg)[class~="text-[var(--brand-warning)]"] {
+  color: #92400e;
+}
+.zai-design :not(svg)[class~="text-[var(--brand-cyan)]"] {
+  color: #0369a1;
+}
+.zai-design input {
+  border-color: #858b94;
+}
+.zai-design :is(button, a)[class~="hover:bg-[#E64A19]"]:hover {
+  color: #111111;
+}
+/* Existing functional dialogs and assistant launcher inherit the new palette. */
+.zai-workspace {
+  --brand: #ff5722;
+  --brand-dark: #1e1f22;
+}
+.zai-workspace .button--primary {
+  color: #1e1f22;
+}
+.zai-workspace .button--primary:hover {
+  color: #111111;
+  background: #e64a19;
+}
+.zai-workspace .workspace-floating-ai > span {
+  color: #1e1f22;
+}
+.zai-workspace .modal {
+  border-radius: 16px;
+}
