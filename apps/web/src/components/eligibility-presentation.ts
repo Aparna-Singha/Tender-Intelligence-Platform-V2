@@ -1,6 +1,10 @@
 import { humanizeEnum } from "@tender/ui";
 
 export interface EligibilityViewRequirement {
+  readonly currentEvidence?: {
+    readonly status: "CURRENT" | "REASSESSMENT_REQUIRED";
+    readonly reasonCodes: readonly string[];
+  } | null;
   readonly extractionConfidence?: string;
   readonly assessmentId: string | null;
   readonly categoryLabel: string;
@@ -180,6 +184,20 @@ export function requirementPresentation(
     needsSourceReview(statement, requirement.extractionConfidence) ||
     needsSourceReview(exactSource) ||
     requirement.title === "Requirement needs source review";
+  if (requirement.currentEvidence?.status === "REASSESSMENT_REQUIRED")
+    return {
+      actionLabel: "Review evidence",
+      applicabilityQuestion: null,
+      displayTitle: requirement.title,
+      evidenceEmptyLabel: "Current supporting evidence requires review.",
+      evidenceNeeded: "Reassess the current source and accepted facts.",
+      kindLabel: null,
+      statusLabel: "Reassessment required",
+      statusTone: "warning",
+      whatThisMeans: requirementDisplaySummary(requirement),
+      filterKey: "NEED_REVIEW",
+      sourceReview: false,
+    };
   if (sourceReview)
     return {
       actionLabel: "Review source",

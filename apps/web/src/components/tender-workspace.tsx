@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, MoreHorizontal, Trash2 } from "lucide-react";
+import { Download, Trash2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
@@ -40,6 +40,7 @@ import { EvidenceMatrix } from "./evidence-matrix";
 import { FinalReadinessWorkspace } from "./final-readiness-workspace";
 import { RagChatbot } from "./rag-chatbot";
 import { ContextualAssistant } from "./contextual-assistant";
+import { RequirementEvidence } from "./requirement-evidence";
 import { formatDeadline, formatDeadlineCountdown } from "./tender-presentation";
 
 const SHOW_INTERNAL_ELIGIBILITY_TOOLS = false;
@@ -228,6 +229,11 @@ interface AssessmentRun {
 
 interface MatrixItem {
   readonly currentState: string;
+  readonly currentEvidence?: {
+    readonly checkedAt: string;
+    readonly reasonCodes: readonly string[];
+    readonly status: "CURRENT" | "REASSESSMENT_REQUIRED";
+  } | null;
   readonly evidenceLinks: readonly {
     readonly evidenceCitation: {
       readonly boundedExcerpt: string;
@@ -687,6 +693,17 @@ function bestAssessmentLabel(matrix: MatrixResult | null): {
     };
   }
 
+  const staleVerified = matrix.items.filter(
+    (item) => item.currentEvidence?.status === "REASSESSMENT_REQUIRED",
+  ).length;
+  if (staleVerified > 0) {
+    return {
+      detail: `${staleVerified} historically verified requirement${staleVerified === 1 ? "" : "s"} need fresh evidence and human reassessment.`,
+      label: "Reassessment required",
+      tone: "warning",
+    };
+  }
+
   const counts = new Map(
     matrix.counts.map((item) => [item.currentState, item._count]),
   );
@@ -719,8 +736,16 @@ function bestAssessmentLabel(matrix: MatrixResult | null): {
     (counts.get("VERIFIED") ?? 0) > 0 ||
     (counts.get("LIKELY_MET") ?? 0) > 0
   ) {
+    if (matrix.items.length < matrix.total) {
+      return {
+        detail:
+          "Review all assessment pages before relying on the evidence status.",
+        label: "Review assessment",
+        tone: "info",
+      };
+    }
     return {
-      detail: `${(counts.get("VERIFIED") ?? 0) + (counts.get("LIKELY_MET") ?? 0)} requirements currently look satisfied or likely met.`,
+      detail: `${(counts.get("VERIFIED") ?? 0) + (counts.get("LIKELY_MET") ?? 0)} requirements looked satisfied or likely met at the last evidence check.`,
       label: "Satisfied where evidenced",
       tone: "success",
     };
@@ -855,6 +880,7 @@ function hasCurrentExtractedContent(
 function toAssessmentRequirement(item: MatrixItem): EligibilityViewRequirement {
   return {
     assessmentId: item.id,
+    currentEvidence: item.currentEvidence ?? null,
     categoryLabel: requirementCategoryLabel(item.requirementCategory),
     evidenceLinks: item.evidenceLinks.map((link) => ({
       excerpt:
@@ -1639,6 +1665,22 @@ export function TenderWorkspace({
         support.checklistRun === null));
 
   useEffect(() => {
+    if (currentVersionId === "" || support.assessmentRun?.status !== "COMPLETE")
+      return;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible")
+        void refreshSupportData(currentVersionId);
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [
+    currentVersionId,
+    organisationId,
+    tenderId,
+    support.assessmentRun?.id,
+    support.assessmentRun?.status,
+  ]);
+
+  useEffect(() => {
     if (!supportAutoRefreshNeeded) return;
     const timer = window.setInterval(
       () => refreshWorkspaceIfIdle(false),
@@ -2086,18 +2128,14 @@ export function TenderWorkspace({
       : requirementPresentation(selectedRequirement);
   const selectedApplicabilityQuestion =
     selectedRequirementPresentation?.applicabilityQuestion ?? null;
-  const companyDocsHref = `/documents/${organisationId}?${new URLSearchParams({
-    returnTo: `${pathname}?stage=eligibility`,
-  }).toString()}`;
   const selectedRequirementAction =
     selectedRequirement === null || selectedRequirementPresentation === null
       ? null
       : selectedRequirementPresentation.actionLabel === "Add evidence"
-        ? {
-            label: "Add evidence",
-            onClick: () => router.push(companyDocsHref),
-          }
-        : ["HUMAN_REVIEW_REQUIRED", "CONFLICT"].includes(
+        ? null
+        : selectedRequirement.currentEvidence?.status ===
+              "REASSESSMENT_REQUIRED" ||
+            ["HUMAN_REVIEW_REQUIRED", "CONFLICT"].includes(
               selectedRequirement.stateKey,
             )
           ? {
@@ -2871,7 +2909,7 @@ export function TenderWorkspace({
               <div
                 aria-label="Eligibility filters"
                 className="workspace-chip-row workspace-chip-row--left"
-                role="tablist"
+                role="group"
               >
                 {eligibilityFilters.map((filter) => (
                   <button
@@ -3062,6 +3100,18 @@ export function TenderWorkspace({
                     </section>
                     <section className="requirement-evidence-section">
                       <h4>Your evidence</h4>
+                      {selectedRequirement.structuredRequirementId &&
+                      currentVersionId ? (
+                        <RequirementEvidence
+                          key={`${currentVersionId}:${selectedRequirement.structuredRequirementId}`}
+                          organisationId={organisationId}
+                          tenderId={tenderId}
+                          versionId={currentVersionId}
+                          requirementId={
+                            selectedRequirement.structuredRequirementId
+                          }
+                        />
+                      ) : null}
                       {selectedRequirement.evidenceLinks.length === 0 ? (
                         <div className="requirement-evidence-empty">
                           <span aria-hidden="true">□</span>
@@ -3069,25 +3119,14 @@ export function TenderWorkspace({
                             {selectedRequirementPresentation?.filterKey ===
                             "SATISFIED"
                               ? "No linked evidence returned"
-                              : "No supporting document found"}
+                              : "No reviewed fact links yet"}
                           </strong>
                           <p>
                             {selectedRequirementPresentation?.filterKey ===
                             "SATISFIED"
-                              ? "This assessment is marked satisfied, but no direct supporting document is linked. Review company documents before final approval."
-                              : (selectedRequirementPresentation?.evidenceNeeded ??
-                                selectedRequirementPresentation?.evidenceEmptyLabel ??
-                                "Upload current supporting evidence for this requirement.")}
+                              ? "This assessment is marked satisfied, but no direct fact citation is linked. Review the evidence before final approval."
+                              : "Attached documents remain context until a cited fact is reviewed and linked to this requirement."}
                           </p>
-                          <Link
-                            className={`button ${selectedRequirementPresentation?.filterKey === "SATISFIED" ? "button--secondary" : "button--primary"}`}
-                            href={companyDocsHref}
-                          >
-                            {selectedRequirementPresentation?.filterKey ===
-                            "SATISFIED"
-                              ? "Review documents"
-                              : "Upload document"}
-                          </Link>
                         </div>
                       ) : (
                         <div className="requirement-evidence-list">
@@ -3103,12 +3142,6 @@ export function TenderWorkspace({
                               </div>
                             ),
                           )}
-                          <Link
-                            className="button button--secondary"
-                            href={companyDocsHref}
-                          >
-                            Manage company documents
-                          </Link>
                         </div>
                       )}
                     </section>
@@ -3122,6 +3155,17 @@ export function TenderWorkspace({
                         Why: {customerAssessmentReason(selectedRequirement)}{" "}
                         What to do: {selectedRequirement.whatToDo}
                       </p>
+                      {selectedRequirement.currentEvidence?.status ===
+                      "REASSESSMENT_REQUIRED" ? (
+                        <p role="status">
+                          Previously verified; current evidence requires
+                          reassessment:{" "}
+                          {selectedRequirement.currentEvidence.reasonCodes
+                            .map(humanizeEnum)
+                            .join(", ")}
+                          .
+                        </p>
+                      ) : null}
                     </div>
                     {selectedRequirementAction !== null ? (
                       <div className="requirement-primary-action">
@@ -3354,7 +3398,7 @@ export function TenderWorkspace({
           <section className="workspace-section">
             <div
               className="workspace-chip-row workspace-chip-row--left"
-              role="tablist"
+              role="group"
               aria-label="File filters"
             >
               <button
@@ -3418,6 +3462,11 @@ export function TenderWorkspace({
                               />
                               <div>
                                 <strong>{document.displayFilename}</strong>
+                                <small className="mobile-table-meta">
+                                  {fileType(document.displayFilename)} ·{" "}
+                                  {formatShortDate(document.createdAt)} ·{" "}
+                                  {formatFileSize(document.sizeBytes)}
+                                </small>
                                 {document.status === "READY" ? null : (
                                   <small>
                                     {documentStatusLabel(document)}
@@ -3434,59 +3483,52 @@ export function TenderWorkspace({
                           <td className="workspace-table__muted">—</td>
                           <td>{formatFileSize(document.sizeBytes)}</td>
                           <td className="workspace-table__action">
-                            <details className="row-action-menu">
-                              <summary
-                                aria-label={`Actions for ${document.displayFilename}`}
-                              >
-                                <MoreHorizontal aria-hidden="true" size={18} />
-                              </summary>
-                              <div>
-                                {document.status === "READY" ? (
-                                  <Button
-                                    aria-label={`Download ${document.displayFilename}`}
-                                    onClick={() => void download(document.id)}
-                                    type="button"
-                                    variant="quiet"
-                                  >
-                                    <Download aria-hidden="true" size={15} />
-                                    Download
-                                  </Button>
-                                ) : null}
-                                {isRemovableFailedUpload(document) ||
-                                isRemovableReadySource(document, {
-                                  documentCount:
-                                    currentVersion?.documents.length ?? 0,
-                                  isCurrentVersion: true,
-                                }) ? (
-                                  <Button
-                                    aria-label={`${document.status === "READY" ? "Remove tender file" : "Remove failed upload"} ${document.displayFilename}`}
-                                    onClick={() =>
-                                      setPendingFileRemoval({
-                                        confirmLabel: "Remove file",
-                                        description:
-                                          document.status === "READY"
-                                            ? "Removing a processed source may invalidate analysis, eligibility, draft, AI index, and review results derived from it."
-                                            : "Remove this failed upload? You can upload the file again afterwards.",
-                                        documentId: document.id,
-                                        successMessage:
-                                          document.status === "READY"
-                                            ? "Tender file removed. You can upload the same file again."
-                                            : "Failed upload removed. The same file can now be uploaded again.",
-                                        title:
-                                          document.status === "READY"
-                                            ? "Remove this tender file?"
-                                            : "Remove failed upload",
-                                      })
-                                    }
-                                    type="button"
-                                    variant="quiet"
-                                  >
-                                    <Trash2 aria-hidden="true" size={15} />
-                                    Remove
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </details>
+                            <div className="tender-file-actions">
+                              {document.status === "READY" ? (
+                                <Button
+                                  aria-label={`Download ${document.displayFilename}`}
+                                  onClick={() => void download(document.id)}
+                                  type="button"
+                                  variant="quiet"
+                                >
+                                  <Download aria-hidden="true" size={15} />
+                                  Download
+                                </Button>
+                              ) : null}
+                              {isRemovableFailedUpload(document) ||
+                              isRemovableReadySource(document, {
+                                documentCount:
+                                  currentVersion?.documents.length ?? 0,
+                                isCurrentVersion: true,
+                              }) ? (
+                                <Button
+                                  aria-label={`${document.status === "READY" ? "Remove tender file" : "Remove failed upload"} ${document.displayFilename}`}
+                                  onClick={() =>
+                                    setPendingFileRemoval({
+                                      confirmLabel: "Remove file",
+                                      description:
+                                        document.status === "READY"
+                                          ? "Removing a processed source may invalidate analysis, eligibility, draft, AI index, and review results derived from it."
+                                          : "Remove this failed upload? You can upload the file again afterwards.",
+                                      documentId: document.id,
+                                      successMessage:
+                                        document.status === "READY"
+                                          ? "Tender file removed. You can upload the same file again."
+                                          : "Failed upload removed. The same file can now be uploaded again.",
+                                      title:
+                                        document.status === "READY"
+                                          ? "Remove this tender file?"
+                                          : "Remove failed upload",
+                                    })
+                                  }
+                                  type="button"
+                                  variant="quiet"
+                                >
+                                  <Trash2 aria-hidden="true" size={15} />
+                                  Remove
+                                </Button>
+                              ) : null}
+                            </div>
                           </td>
                         </tr>
                       ))

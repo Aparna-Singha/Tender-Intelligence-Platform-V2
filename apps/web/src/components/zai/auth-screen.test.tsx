@@ -32,6 +32,7 @@ describe("prototype authentication with the real API client", () => {
       vi.stubGlobal("fetch", fetchMock);
       const user = userEvent.setup();
       render(<AuthScreen mode={mode} />);
+      expect(document.querySelector("form")).toHaveAttribute("method", "post");
       expect(screen.getByLabelText("Email address")).toHaveValue("");
       if (mode === "register")
         await user.type(screen.getByLabelText("Full name"), "Test User");

@@ -3,8 +3,9 @@
 import { useEffect, useState, type FormEvent, type JSX } from "react";
 import { apiRequest } from "../lib/api";
 import { humanizeEnum } from "@tender/ui";
+import { RequirementFactReview } from "./requirement-fact-review";
 
-interface AssessmentRun {
+export interface AssessmentRun {
   comparisonPolicyVersion: string;
   extractionRunId: string;
   id: string;
@@ -18,7 +19,13 @@ interface AssessmentRun {
 }
 interface MatrixItem {
   currentState: string;
+  currentEvidence: {
+    checkedAt: string;
+    reasonCodes: readonly string[];
+    status: "CURRENT" | "REASSESSMENT_REQUIRED";
+  } | null;
   evidenceLinks: readonly {
+    evidenceFactVersionId?: string | null;
     evidenceCitation: {
       boundedExcerpt: string;
       documentId: string;
@@ -36,6 +43,7 @@ interface MatrixItem {
   requirementObligation: string;
   reviewState: string;
   structuredRequirement: {
+    id: string;
     normalizedStatement: string;
     title: string;
   };
@@ -47,7 +55,7 @@ interface MatrixItem {
   };
   uncertainty: string;
 }
-interface MatrixResult {
+export interface MatrixResult {
   counts: readonly { _count: number; currentState: string }[];
   items: readonly MatrixItem[];
   total: number;
@@ -111,6 +119,7 @@ export function EvidenceMatrix({
   focusRequest = null,
   organisationId,
   presentation = "full",
+  previewSnapshot,
   tenderId,
   versionId,
 }: {
@@ -122,13 +131,21 @@ export function EvidenceMatrix({
   } | null;
   readonly organisationId: string;
   readonly presentation?: "focused" | "full";
+  readonly previewSnapshot?: {
+    readonly run: AssessmentRun;
+    readonly matrix: MatrixResult;
+  };
   readonly tenderId: string;
   readonly versionId: string;
 }): JSX.Element {
   const base = `/organisations/${organisationId}/tenders/${tenderId}`;
-  const [runs, setRuns] = useState<readonly AssessmentRun[]>([]);
-  const [runId, setRunId] = useState("");
-  const [matrix, setMatrix] = useState<MatrixResult | null>(null);
+  const [runs, setRuns] = useState<readonly AssessmentRun[]>(
+    previewSnapshot ? [previewSnapshot.run] : [],
+  );
+  const [runId, setRunId] = useState(previewSnapshot?.run.id ?? "");
+  const [matrix, setMatrix] = useState<MatrixResult | null>(
+    previewSnapshot?.matrix ?? null,
+  );
   const [state, setState] = useState("");
   const [message, setMessage] = useState("");
   const [documents, setDocuments] = useState<readonly CompanyDocument[]>([]);
@@ -199,6 +216,7 @@ export function EvidenceMatrix({
     }
   }
   useEffect(() => {
+    if (previewSnapshot) return;
     void loadRuns();
     if (presentation === "full") {
       void loadDocuments();
@@ -214,8 +232,24 @@ export function EvidenceMatrix({
     versionId,
   ]);
   useEffect(() => {
+    if (previewSnapshot) return;
     void loadMatrix();
   }, [runId, state]);
+  useEffect(() => {
+    if (previewSnapshot) return;
+    if (runId === "") return;
+    const refresh = (): void => {
+      if (document.visibilityState === "visible") void loadMatrix();
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    const timer = window.setInterval(refresh, 60_000);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      window.clearInterval(timer);
+    };
+  }, [runId, state, organisationId, tenderId]);
 
   async function start(): Promise<void> {
     try {
@@ -416,6 +450,11 @@ export function EvidenceMatrix({
           Review the current requirement, its cited sources, and the proposed
           assessment before recording a decision.
         </p>
+        {!previewSnapshot && (
+          <button onClick={() => void start()} type="button">
+            Refresh requirements check
+          </button>
+        )}
         <p aria-live="polite">{message}</p>
         {focusedItems.length === 0 ? (
           <p>Current evidence for this requirement is loading.</p>
@@ -429,8 +468,26 @@ export function EvidenceMatrix({
               <h3>{item.structuredRequirement.title}</h3>
               <p>{item.structuredRequirement.normalizedStatement}</p>
               <p>
-                <strong>Status:</strong> {humanizeEnum(item.currentState)}
+                <strong>Historical decision:</strong>{" "}
+                {humanizeEnum(item.currentState)}
               </p>
+              {item.currentEvidence?.status === "REASSESSMENT_REQUIRED" && (
+                <p className="warning" role="status">
+                  This previously verified decision needs reassessment. Its
+                  supporting evidence is no longer current. Start a fresh
+                  requirements check before relying on it. Reasons:{" "}
+                  {item.currentEvidence.reasonCodes
+                    .map(humanizeEnum)
+                    .join(", ")}
+                  .
+                </p>
+              )}
+              {item.currentEvidence?.status === "CURRENT" && (
+                <p>
+                  Supporting evidence was current when checked at{" "}
+                  {item.currentEvidence.checkedAt}.
+                </p>
+              )}
               <p>{item.proposedRationale}</p>
               <h4>Source in tender</h4>
               <blockquote>
@@ -441,12 +498,14 @@ export function EvidenceMatrix({
                     ? ""
                     : `, page ${item.tenderCitation.pageNumber}`}
                 </cite>
-                <button
-                  onClick={() => void openTenderSource(item)}
-                  type="button"
-                >
-                  View tender source
-                </button>
+                {!previewSnapshot && (
+                  <button
+                    onClick={() => void openTenderSource(item)}
+                    type="button"
+                  >
+                    View tender source
+                  </button>
+                )}
               </blockquote>
               <h4>Current evidence</h4>
               {item.evidenceLinks.length === 0 ? (
@@ -465,57 +524,90 @@ export function EvidenceMatrix({
                             ? ""
                             : `, page ${link.evidenceCitation.pageNumber}`}
                         </cite>
-                        <button
-                          onClick={() =>
-                            void openCompanySource(
-                              link.evidenceCitation?.documentId ?? "",
-                            )
-                          }
-                          type="button"
-                        >
-                          View company evidence
-                        </button>
+                        {!previewSnapshot && (
+                          <button
+                            onClick={() =>
+                              void openCompanySource(
+                                link.evidenceCitation?.documentId ?? "",
+                              )
+                            }
+                            type="button"
+                          >
+                            View company evidence
+                          </button>
+                        )}
                       </>
                     )}
                   </blockquote>
                 ))
               )}
-              <form onSubmit={(event) => void reviewAssessment(event, item.id)}>
-                <label>
-                  Review decision
-                  <select name="action" required>
-                    <option value="REQUEST_HUMAN_REVIEW">
-                      Request human review
-                    </option>
-                    <option value="ACCEPT_PROPOSAL">Accept proposal</option>
-                    <option value="MARK_LIKELY_MET">Mark likely met</option>
-                    <option value="MARK_MISSING">Mark missing</option>
-                    <option value="MARK_CONFLICT">Mark conflict</option>
-                    <option value="MARK_VERIFIED">Mark verified</option>
-                    <option value="MARK_NOT_APPLICABLE">
-                      Mark not applicable
-                    </option>
-                    <option value="RESOLVE_CONFLICT">
-                      Send conflict for human review
-                    </option>
-                    <option value="REOPEN">Reopen</option>
-                  </select>
-                </label>
-                <label>
-                  Rationale
-                  <textarea
-                    minLength={10}
-                    maxLength={2000}
-                    name="rationale"
-                    required
-                  />
-                </label>
-                <button type="submit">Save review</button>
-              </form>
+              {!previewSnapshot && (
+                <RequirementFactReview
+                  key={`${organisationId}:${tenderId}:${runId}:${item.id}`}
+                  assessmentId={item.id}
+                  canLink={
+                    active?.status === "COMPLETE" &&
+                    active.invalidatedAt === null &&
+                    item.currentEvidence?.status !== "REASSESSMENT_REQUIRED"
+                  }
+                  organisationId={organisationId}
+                  requirementId={item.structuredRequirement.id}
+                  linkedFactVersionIds={item.evidenceLinks
+                    .map((link) => link.evidenceFactVersionId)
+                    .filter((id): id is string => typeof id === "string")}
+                  runId={runId}
+                  tenderId={tenderId}
+                  versionId={versionId}
+                  onEvidenceLinked={loadMatrix}
+                />
+              )}
+              {!previewSnapshot && (
+                <form
+                  onSubmit={(event) => void reviewAssessment(event, item.id)}
+                >
+                  <label>
+                    Review decision
+                    <select name="action" required>
+                      <option value="REQUEST_HUMAN_REVIEW">
+                        Request human review
+                      </option>
+                      <option value="ACCEPT_PROPOSAL">Accept proposal</option>
+                      <option value="MARK_LIKELY_MET">Mark likely met</option>
+                      <option value="MARK_MISSING">Mark missing</option>
+                      <option value="MARK_CONFLICT">Mark conflict</option>
+                      <option value="MARK_VERIFIED">Mark verified</option>
+                      <option value="MARK_NOT_APPLICABLE">
+                        Mark not applicable
+                      </option>
+                      <option value="RESOLVE_CONFLICT">
+                        Send conflict for human review
+                      </option>
+                      <option value="REOPEN">Reopen</option>
+                    </select>
+                  </label>
+                  <label>
+                    Rationale
+                    <textarea
+                      minLength={10}
+                      maxLength={2000}
+                      name="rationale"
+                      required
+                    />
+                  </label>
+                  <button type="submit">Save review</button>
+                </form>
+              )}
             </article>
           ))
         )}
       </section>
+    );
+
+  if (previewSnapshot)
+    return (
+      <p role="status">
+        This synthetic visual preview cannot record evidence or decisions.
+      </p>
     );
 
   return (
@@ -749,6 +841,20 @@ export function EvidenceMatrix({
             {humanizeEnum(item.currentState)} · Review:{" "}
             {humanizeEnum(item.reviewState)}
           </p>
+          {item.currentEvidence?.status === "REASSESSMENT_REQUIRED" && (
+            <p className="warning" role="status">
+              Historical verified decision; reassessment required because
+              supporting evidence is no longer current. Use Refresh requirements
+              check above. Reasons:{" "}
+              {item.currentEvidence.reasonCodes.map(humanizeEnum).join(", ")}.
+            </p>
+          )}
+          {item.currentEvidence?.status === "CURRENT" && (
+            <p>
+              Verified decision with evidence current as of{" "}
+              {item.currentEvidence.checkedAt}.
+            </p>
+          )}
           <p>Confidence: {item.proposedConfidence}</p>
           <p>{item.proposedRationale}</p>
           <p>Uncertainty: {item.uncertainty}</p>

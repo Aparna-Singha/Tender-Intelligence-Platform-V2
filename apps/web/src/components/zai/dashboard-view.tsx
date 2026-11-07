@@ -315,6 +315,7 @@ export function DashboardView({
                     </div>
                     <div className="flex items-center gap-3">
                       <Progress
+                        aria-label={`Processing progress for ${t.title}`}
                         value={t.workspace?.processingProgress ?? 0}
                         className="h-1.5 flex-1"
                       />
@@ -611,6 +612,7 @@ function TenderCard({
         tender.workspace?.processingProgress < 100 && (
           <div className="mt-4 flex items-center gap-2">
             <Progress
+              aria-label={`Processing progress for ${tender.title}`}
               value={tender.workspace?.processingProgress}
               className="h-1.5 flex-1"
             />
