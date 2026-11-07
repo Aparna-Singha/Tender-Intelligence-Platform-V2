@@ -91,6 +91,12 @@ export class EligibilityController {
 
   @RequireOrganisationPermission("ELIGIBILITY_ASSESSMENT_READ")
   @Get("tenders/:tenderId/eligibility-assessments/:runId/matrix")
+  @ApiOperation({
+    summary:
+      "Read historical assessment rows with live evidence-currentness verdicts",
+    description:
+      "Finalised VERIFIED rows include nullable currentEvidence: CURRENT or REASSESSMENT_REQUIRED, a UTC checkedAt timestamp, and deterministic reasonCodes. Historical review states and citations are unchanged.",
+  })
   public matrix(
     @Param("organisationId") organisationId: string,
     @Param("tenderId") tenderId: string,

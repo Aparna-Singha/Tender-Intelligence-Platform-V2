@@ -20,11 +20,13 @@ import {
   canHumanFinaliseVerified,
   EVIDENCE_COMPARISON_POLICY_VERSION,
   EVIDENCE_NORMALISATION_POLICY_VERSION,
+  isDateOnlyExpired,
 } from "@tender/domain";
 import type { Queue } from "bullmq";
 import { createHash } from "node:crypto";
 import { Observable, concat, from, interval, map, takeUntil } from "rxjs";
 import { JOB_QUEUE, PRISMA_CLIENT } from "../infrastructure.tokens.js";
+import { currentEvidenceFor } from "./current-evidence.js";
 
 @Injectable()
 export class EligibilityService {
@@ -393,55 +395,164 @@ export class EligibilityService {
     runId: string,
     filter: AssessmentFilter,
   ): Promise<unknown> {
-    await this.getRun(organisationId, tenderId, runId);
-    const where = {
-      assessmentRunId: runId,
-      organisationId,
-      ...(filter.category === undefined
-        ? {}
-        : { requirementCategory: filter.category }),
-      ...(filter.obligation === undefined
-        ? {}
-        : { requirementObligation: filter.obligation }),
-      ...(filter.proposed_state === undefined
-        ? {}
-        : { proposedState: filter.proposed_state }),
-      ...(filter.review_state === undefined
-        ? {}
-        : { reviewState: filter.review_state }),
-      ...(filter.state === undefined ? {} : { currentState: filter.state }),
-      ...(filter.conflict === undefined
-        ? {}
-        : {
-            currentState:
-              filter.conflict === "true"
-                ? ("CONFLICT" as const)
-                : { not: "CONFLICT" as const },
-          }),
-    };
-    const [items, total, counts] = await Promise.all([
-      this.database.eligibilityAssessment.findMany({
-        include: {
-          evidenceLinks: {
-            include: { evidenceCitation: true, evidenceFactVersion: true },
+    return this.database.$transaction(
+      async (transaction) => {
+        const run = await transaction.eligibilityAssessmentRun.findFirst({
+          select: { invalidatedAt: true, status: true },
+          where: { id: runId, organisationId, tenderId },
+        });
+        if (run === null) throw new NotFoundException();
+        const where = {
+          assessmentRunId: runId,
+          organisationId,
+          ...(filter.category === undefined
+            ? {}
+            : { requirementCategory: filter.category }),
+          ...(filter.obligation === undefined
+            ? {}
+            : { requirementObligation: filter.obligation }),
+          ...(filter.proposed_state === undefined
+            ? {}
+            : { proposedState: filter.proposed_state }),
+          ...(filter.review_state === undefined
+            ? {}
+            : { reviewState: filter.review_state }),
+          ...(filter.state === undefined ? {} : { currentState: filter.state }),
+          ...(filter.conflict === undefined
+            ? {}
+            : {
+                currentState:
+                  filter.conflict === "true"
+                    ? ("CONFLICT" as const)
+                    : { not: "CONFLICT" as const },
+              }),
+        };
+        const items = await transaction.eligibilityAssessment.findMany({
+          include: {
+            evidenceLinks: {
+              include: { evidenceCitation: true, evidenceFactVersion: true },
+            },
+            reviews: { orderBy: { reviewVersion: "asc" } },
+            structuredRequirement: true,
+            tenderCitation: true,
           },
-          reviews: { orderBy: { reviewVersion: "asc" } },
-          structuredRequirement: true,
-          tenderCitation: true,
-        },
-        orderBy: { createdAt: "asc" },
-        skip: filter.offset,
-        take: filter.limit,
-        where,
-      }),
-      this.database.eligibilityAssessment.count({ where }),
-      this.database.eligibilityAssessment.groupBy({
-        _count: true,
-        by: ["currentState"],
-        where: { assessmentRunId: runId, organisationId },
-      }),
-    ]);
-    return { counts, items, total };
+          orderBy: { createdAt: "asc" },
+          skip: filter.offset,
+          take: filter.limit,
+          where,
+        });
+        const total = await transaction.eligibilityAssessment.count({ where });
+        const counts = await transaction.eligibilityAssessment.groupBy({
+          _count: true,
+          by: ["currentState"],
+          where: { assessmentRunId: runId, organisationId },
+        });
+        const checkedAt = new Date();
+        const sourceLinks =
+          items.length === 0
+            ? []
+            : await transaction.eligibilityAssessmentEvidenceLink.findMany({
+                select: {
+                  id: true,
+                  assessmentId: true,
+                  linkType: true,
+                  evidenceCitation: {
+                    select: {
+                      documentChecksum: true,
+                      documentId: true,
+                      documentVersionId: true,
+                      evidenceFactVersionId: true,
+                      invalidatedAt: true,
+                      organisationId: true,
+                      validationStatus: true,
+                    },
+                  },
+                  evidenceFactVersion: {
+                    select: {
+                      id: true,
+                      documentVersionId: true,
+                      reviewState: true,
+                      validUntil: true,
+                      evidenceFact: {
+                        select: {
+                          organisationId: true,
+                          currentVersionId: true,
+                          documentId: true,
+                          invalidatedAt: true,
+                          document: {
+                            select: {
+                              organisationId: true,
+                              tenderScopeId: true,
+                              currentVersionId: true,
+                              currentVersion: { select: { sha256: true } },
+                              deletedAt: true,
+                              expiryDate: true,
+                              status: true,
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+                where: {
+                  assessmentId: { in: items.map((item) => item.id) },
+                  assessment: {
+                    organisationId,
+                    tenderId,
+                    assessmentRunId: runId,
+                  },
+                },
+              });
+        const linksByAssessment = new Map<string, typeof sourceLinks>();
+        const safeLinkIds = new Set<string>();
+        for (const link of sourceLinks) {
+          const current = linksByAssessment.get(link.assessmentId) ?? [];
+          current.push(link);
+          linksByAssessment.set(link.assessmentId, current);
+          const fact = link.evidenceFactVersion?.evidenceFact;
+          const document = fact?.document;
+          if (
+            link.evidenceCitation?.organisationId !== organisationId &&
+            link.evidenceCitation !== null
+          )
+            continue;
+          if (fact?.organisationId !== organisationId && fact !== undefined)
+            continue;
+          if (
+            document !== undefined &&
+            (document.organisationId !== organisationId ||
+              (document.tenderScopeId !== null &&
+                document.tenderScopeId !== tenderId))
+          )
+            continue;
+          safeLinkIds.add(link.id);
+        }
+        return {
+          counts,
+          items: items.map((item) => ({
+            ...item,
+            evidenceLinks: item.evidenceLinks.filter((link) =>
+              safeLinkIds.has(link.id),
+            ),
+            currentEvidence: currentEvidenceFor({
+              assessmentInvalidatedAt: item.invalidatedAt,
+              checkedAt,
+              currentState: item.currentState,
+              links: linksByAssessment.get(item.id) ?? [],
+              organisationId,
+              reviewState: item.reviewState,
+              runInvalidatedAt: run.invalidatedAt,
+              runStatus: run.status,
+              tenderCitationStatus: item.tenderCitation.validationStatus,
+              tenderId,
+            }),
+          })),
+          total,
+        };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.RepeatableRead },
+    );
   }
 
   public async cancel(
@@ -799,125 +910,161 @@ export class EligibilityService {
     requestId: string,
     mayFinalise: boolean,
   ): Promise<unknown> {
-    const assessment = await this.database.eligibilityAssessment.findFirst({
-      include: {
-        assessmentRun: true,
-        evidenceLinks: {
-          include: { evidenceCitation: true, evidenceFactVersion: true },
+    const review = await this.database
+      .$transaction(
+        async (transaction) => {
+          const assessment = await transaction.eligibilityAssessment.findFirst({
+            include: {
+              assessmentRun: true,
+              evidenceLinks: {
+                include: {
+                  evidenceCitation: true,
+                  evidenceFactVersion: {
+                    include: {
+                      evidenceFact: {
+                        include: {
+                          document: { include: { currentVersion: true } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+              tenderCitation: true,
+            },
+            where: {
+              assessmentRunId: runId,
+              id: assessmentId,
+              organisationId,
+              tenderId,
+            },
+          });
+          if (
+            assessment?.assessmentRun.status !== "COMPLETE" ||
+            assessment.assessmentRun.invalidatedAt !== null
+          )
+            throw new ConflictException();
+          const nextState = reviewStateFor(input, assessment.proposedState);
+          if (
+            (nextState === "VERIFIED" ||
+              ["MARK_NOT_APPLICABLE", "RESOLVE_CONFLICT"].includes(
+                input.action,
+              )) &&
+            !mayFinalise
+          )
+            throw new ForbiddenException();
+          if (nextState === "VERIFIED")
+            await lockReviewSources(transaction, assessment);
+          const direct = assessment.evidenceLinks.filter(
+            (link) => link.linkType === "DIRECT_SUPPORT",
+          );
+          const hasCurrentDirectSupport = direct.some(isCurrentDirectSupport);
+          if (
+            nextState === "VERIFIED" &&
+            !canHumanFinaliseVerified({
+              directCompanyCitationValid: hasCurrentDirectSupport,
+              evidenceApprovedAndCurrent: hasCurrentDirectSupport,
+              hasDirectSupport: hasCurrentDirectSupport,
+              hasUnresolvedConflict: assessment.evidenceLinks.some(
+                (link) => link.linkType === "CONTRADICTS",
+              ),
+              rationale: input.rationale,
+              tenderCitationValid:
+                assessment.tenderCitation.validationStatus === "VALID",
+            })
+          )
+            throw new UnprocessableEntityException(
+              "VERIFIED requires current direct cited evidence and no unresolved conflict",
+            );
+          if (
+            (input.action === "MARK_NOT_APPLICABLE" ||
+              input.action === "RESOLVE_CONFLICT") &&
+            input.rationale.trim().length < 20
+          )
+            throw new UnprocessableEntityException(
+              "A detailed human rationale is required",
+            );
+          const nextReviewState =
+            input.action === "REOPEN"
+              ? "HUMAN_REVIEW_REQUIRED"
+              : input.action === "REQUEST_HUMAN_REVIEW"
+                ? "HUMAN_REVIEW_REQUIRED"
+                : "FINALISED";
+          const updated = await transaction.eligibilityAssessment.updateMany({
+            data: {
+              currentState: nextState,
+              finalRationale: input.rationale,
+              finalisedAt: nextReviewState === "FINALISED" ? new Date() : null,
+              finalisedByUserId:
+                nextReviewState === "FINALISED" ? userId : null,
+              reviewState: nextReviewState,
+            },
+            where: {
+              id: assessmentId,
+              organisationId,
+              tenderId,
+              assessmentRunId: runId,
+              currentState: assessment.currentState,
+              reviewState: assessment.reviewState,
+              updatedAt: assessment.updatedAt,
+              assessmentRun: { status: "COMPLETE", invalidatedAt: null },
+            },
+          });
+          if (updated.count !== 1)
+            throw new ConflictException(
+              "Assessment changed; reload before reviewing",
+            );
+          const aggregate =
+            await transaction.eligibilityAssessmentReview.aggregate({
+              _max: { reviewVersion: true },
+              where: { assessmentId },
+            });
+          const review = await transaction.eligibilityAssessmentReview.create({
+            data: {
+              action: input.action,
+              actorUserId: userId,
+              assessmentId,
+              newReviewState: nextReviewState,
+              newState: nextState,
+              organisationId,
+              previousReviewState: assessment.reviewState,
+              previousState: assessment.currentState,
+              rationale: input.rationale,
+              reviewVersion: (aggregate._max.reviewVersion ?? 0) + 1,
+            },
+          });
+          await transaction.auditEvent.create({
+            data: {
+              actorUserId: userId,
+              eventType:
+                nextState === "VERIFIED"
+                  ? "ELIGIBILITY_ASSESSMENT_VERIFIED"
+                  : input.action === "MARK_NOT_APPLICABLE"
+                    ? "ELIGIBILITY_ASSESSMENT_NOT_APPLICABLE"
+                    : input.action === "RESOLVE_CONFLICT"
+                      ? "ELIGIBILITY_CONFLICT_RESOLVED"
+                      : "ELIGIBILITY_ASSESSMENT_REVIEWED",
+              organisationId,
+              outcome: "SUCCESS",
+              requestId,
+              subjectId: assessmentId,
+              subjectType: "eligibility_assessment",
+            },
+          });
+          return review;
         },
-        tenderCitation: true,
-      },
-      where: {
-        assessmentRunId: runId,
-        id: assessmentId,
-        organisationId,
-        tenderId,
-      },
-    });
-    if (
-      assessment?.assessmentRun.status !== "COMPLETE" ||
-      assessment.assessmentRun.invalidatedAt !== null
-    )
-      throw new ConflictException();
-    const nextState = reviewStateFor(input, assessment.proposedState);
-    if (
-      ["MARK_VERIFIED", "MARK_NOT_APPLICABLE", "RESOLVE_CONFLICT"].includes(
-        input.action,
-      ) &&
-      !mayFinalise
-    )
-      throw new ForbiddenException();
-    const direct = assessment.evidenceLinks.filter(
-      (link) => link.linkType === "DIRECT_SUPPORT",
-    );
-    if (
-      input.action === "MARK_VERIFIED" &&
-      !canHumanFinaliseVerified({
-        directCompanyCitationValid: direct.some(
-          (link) =>
-            link.evidenceCitation?.validationStatus === "VALID" &&
-            link.evidenceCitation.invalidatedAt === null,
-        ),
-        evidenceApprovedAndCurrent: direct.some(
-          (link) => link.evidenceFactVersion?.reviewState === "ACCEPTED",
-        ),
-        hasDirectSupport: direct.length > 0,
-        hasUnresolvedConflict: assessment.evidenceLinks.some(
-          (link) => link.linkType === "CONTRADICTS",
-        ),
-        rationale: input.rationale,
-        tenderCitationValid:
-          assessment.tenderCitation.validationStatus === "VALID",
-      })
-    )
-      throw new UnprocessableEntityException(
-        "VERIFIED requires current direct cited evidence and no unresolved conflict",
-      );
-    if (
-      (input.action === "MARK_NOT_APPLICABLE" ||
-        input.action === "RESOLVE_CONFLICT") &&
-      input.rationale.trim().length < 20
-    )
-      throw new UnprocessableEntityException(
-        "A detailed human rationale is required",
-      );
-    const review = await this.database.$transaction(async (transaction) => {
-      const aggregate = await transaction.eligibilityAssessmentReview.aggregate(
-        {
-          _max: { reviewVersion: true },
-          where: { assessmentId },
-        },
-      );
-      const nextReviewState =
-        input.action === "REOPEN"
-          ? "HUMAN_REVIEW_REQUIRED"
-          : input.action === "REQUEST_HUMAN_REVIEW"
-            ? "HUMAN_REVIEW_REQUIRED"
-            : "FINALISED";
-      const review = await transaction.eligibilityAssessmentReview.create({
-        data: {
-          action: input.action,
-          actorUserId: userId,
-          assessmentId,
-          newReviewState: nextReviewState,
-          newState: nextState,
-          organisationId,
-          previousReviewState: assessment.reviewState,
-          previousState: assessment.currentState,
-          rationale: input.rationale,
-          reviewVersion: (aggregate._max.reviewVersion ?? 0) + 1,
-        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((error: unknown) => {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === "P2034"
+        )
+          throw new ConflictException(
+            "Assessment changed; reload before reviewing",
+          );
+        throw error;
       });
-      await transaction.eligibilityAssessment.update({
-        data: {
-          currentState: nextState,
-          finalRationale: input.rationale,
-          finalisedAt: nextReviewState === "FINALISED" ? new Date() : null,
-          finalisedByUserId: nextReviewState === "FINALISED" ? userId : null,
-          reviewState: nextReviewState,
-        },
-        where: { id: assessmentId },
-      });
-      await transaction.auditEvent.create({
-        data: {
-          actorUserId: userId,
-          eventType:
-            input.action === "MARK_VERIFIED"
-              ? "ELIGIBILITY_ASSESSMENT_VERIFIED"
-              : input.action === "MARK_NOT_APPLICABLE"
-                ? "ELIGIBILITY_ASSESSMENT_NOT_APPLICABLE"
-                : input.action === "RESOLVE_CONFLICT"
-                  ? "ELIGIBILITY_CONFLICT_RESOLVED"
-                  : "ELIGIBILITY_ASSESSMENT_REVIEWED",
-          organisationId,
-          outcome: "SUCCESS",
-          requestId,
-          subjectId: assessmentId,
-          subjectType: "eligibility_assessment",
-        },
-      });
-      return review;
-    });
     await this.invalidateChecklistRuns(organisationId, runId);
     return review;
   }
@@ -1177,6 +1324,130 @@ export class EligibilityService {
     }
     return { status: "CONNECTION_CLOSED" };
   }
+}
+
+async function lockReviewSources(
+  transaction: Prisma.TransactionClient,
+  assessment: {
+    readonly id: string;
+    readonly assessmentRunId: string;
+    readonly tenderCitationId: string;
+    readonly evidenceLinks: readonly {
+      readonly evidenceCitation: { readonly id: string } | null;
+      readonly evidenceFactVersion: {
+        readonly id: string;
+        readonly documentVersionId: string;
+        readonly evidenceFact: {
+          readonly id: string;
+          readonly documentId: string;
+        };
+      } | null;
+    }[];
+  },
+): Promise<void> {
+  const links = assessment.evidenceLinks;
+  const groups: readonly [string, readonly string[]][] = [
+    ["eligibility_assessment_runs", [assessment.assessmentRunId]],
+    ["eligibility_assessments", [assessment.id]],
+    ["extraction_citations", [assessment.tenderCitationId]],
+    [
+      "documents",
+      links.flatMap((link) =>
+        link.evidenceFactVersion
+          ? [link.evidenceFactVersion.evidenceFact.documentId]
+          : [],
+      ),
+    ],
+    [
+      "document_versions",
+      links.flatMap((link) =>
+        link.evidenceFactVersion
+          ? [link.evidenceFactVersion.documentVersionId]
+          : [],
+      ),
+    ],
+    [
+      "company_evidence_facts",
+      links.flatMap((link) =>
+        link.evidenceFactVersion
+          ? [link.evidenceFactVersion.evidenceFact.id]
+          : [],
+      ),
+    ],
+    [
+      "company_evidence_fact_versions",
+      links.flatMap((link) =>
+        link.evidenceFactVersion ? [link.evidenceFactVersion.id] : [],
+      ),
+    ],
+    [
+      "company_evidence_citations",
+      links.flatMap((link) =>
+        link.evidenceCitation ? [link.evidenceCitation.id] : [],
+      ),
+    ],
+  ];
+  for (const [table, identifiers] of groups) {
+    const ids = [...new Set(identifiers)].sort();
+    if (ids.length === 0) continue;
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT id FROM ${Prisma.raw(table)} WHERE id IN (${Prisma.join(ids.map((id) => Prisma.sql`${id}::uuid`))}) ORDER BY id FOR SHARE`,
+    );
+  }
+}
+
+function isCurrentDirectSupport(link: {
+  readonly evidenceCitation: {
+    readonly documentChecksum: string;
+    readonly documentId: string;
+    readonly documentVersionId: string;
+    readonly evidenceFactVersionId: string;
+    readonly invalidatedAt: Date | null;
+    readonly validationStatus: string;
+  } | null;
+  readonly evidenceFactVersion: {
+    readonly id: string;
+    readonly documentVersionId: string;
+    readonly reviewState: string;
+    readonly validUntil: Date | null;
+    readonly evidenceFact: {
+      readonly currentVersionId: string | null;
+      readonly documentId: string;
+      readonly invalidatedAt: Date | null;
+      readonly document: {
+        readonly currentVersionId: string | null;
+        readonly deletedAt: Date | null;
+        readonly expiryDate: Date | null;
+        readonly status: string;
+        readonly currentVersion: { readonly sha256: string } | null;
+      };
+    };
+  } | null;
+}): boolean {
+  const fact = link.evidenceFactVersion;
+  const citation = link.evidenceCitation;
+  if (!fact || !citation) return false;
+  const source = fact.evidenceFact;
+  const document = source.document;
+  const checkedAt = new Date();
+  return (
+    fact.reviewState === "ACCEPTED" &&
+    source.invalidatedAt === null &&
+    source.currentVersionId === fact.id &&
+    document.deletedAt === null &&
+    document.status === "READY" &&
+    document.currentVersionId === fact.documentVersionId &&
+    (document.expiryDate === null ||
+      !isDateOnlyExpired(document.expiryDate, checkedAt)) &&
+    (fact.validUntil === null ||
+      !isDateOnlyExpired(fact.validUntil, checkedAt)) &&
+    citation.validationStatus === "VALID" &&
+    citation.invalidatedAt === null &&
+    citation.evidenceFactVersionId === fact.id &&
+    citation.documentId === source.documentId &&
+    citation.documentVersionId === fact.documentVersionId &&
+    citation.documentChecksum === document.currentVersion?.sha256
+  );
 }
 
 function approvedDocument(): {

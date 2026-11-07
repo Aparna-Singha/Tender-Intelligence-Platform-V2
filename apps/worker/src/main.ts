@@ -214,7 +214,7 @@ async function bootstrap(): Promise<void> {
         throw new Error("Invalid company upload cleanup job");
       const data = job.data;
       return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async () =>
-        processor.cleanupUploadObjects(data.keys),
+        processor.cleanupUploadObjects(data),
       );
     }
     if (job.name === "cleanup-tender-document-storage") {

@@ -91,6 +91,30 @@ describe("company document direct upload", () => {
     });
   });
 
+  it("creates no upload records when signing fails", async () => {
+    getSignedUrlMock.mockRejectedValueOnce(new Error("signing unavailable"));
+    const database = {
+      document: { count: vi.fn().mockResolvedValue(0) },
+      documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(),
+    };
+    const service = new DocumentsService(
+      database as never,
+      {} as never,
+      {} as never,
+      environment,
+    );
+    await expect(
+      service.createUploadSession(
+        "organisation-a",
+        "user-a",
+        input,
+        "request-a",
+      ),
+    ).rejects.toThrow("signing unavailable");
+    expect(database.$transaction).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["matching", { sha256: checksum }, true],
     ["missing", undefined, false],
@@ -253,6 +277,121 @@ describe("document vault authorisation", () => {
 });
 
 describe("document upload abandonment", () => {
+  it.each([
+    ["pending", 60_000, "CANCELLED"],
+    ["expired", -60_000, "EXPIRED"],
+  ])(
+    "retains a historically attached %s version",
+    async (_label, offset, status) => {
+      const tx = {
+        uploadSession: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          delete: vi.fn(),
+        },
+        requirementEvidenceAttachment: { count: vi.fn().mockResolvedValue(1) },
+        companyEvidenceFactVersion: { count: vi.fn().mockResolvedValue(0) },
+        companyEvidenceCitation: { count: vi.fn().mockResolvedValue(0) },
+        eligibilitySnapshotDocument: { count: vi.fn().mockResolvedValue(0) },
+        documentVersion: { delete: vi.fn() },
+        document: {
+          updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+          delete: vi.fn(),
+        },
+        auditEvent: { create: vi.fn() },
+      };
+      const database = {
+        $transaction: vi.fn(
+          (callback: (value: typeof tx) => Promise<unknown>) => callback(tx),
+        ),
+        uploadSession: {
+          findFirst: vi.fn().mockResolvedValue({
+            id: "session-a",
+            status: "PENDING",
+            completedAt: null,
+            expiresAt: new Date(Date.now() + offset),
+            documentVersionId: "version-a",
+            documentVersion: {
+              documentId: "document-a",
+              quarantineObjectKey: "quarantine/org/version-a",
+              document: { id: "document-a", currentVersionId: null },
+            },
+          }),
+        },
+      };
+      const storage = { send: vi.fn() };
+      const service = new DocumentsService(
+        database as never,
+        storage as never,
+        { add: vi.fn() } as never,
+        environment,
+      );
+      await expect(
+        service.abandonUploadSession("org", "session-a", "user-a", "request-a"),
+      ).resolves.toEqual({ removed: true });
+      expect(tx.uploadSession.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status } }),
+      );
+      expect(tx.uploadSession.delete).not.toHaveBeenCalled();
+      expect(tx.documentVersion.delete).not.toHaveBeenCalled();
+      expect(tx.document.delete).not.toHaveBeenCalled();
+      expect(tx.document.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({ data: { status: "FAILED" } }),
+      );
+      expect(storage.send).not.toHaveBeenCalled();
+    },
+  );
+  it("does not delete a version when completion claims the session first", async () => {
+    const transaction = {
+      uploadSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+        delete: vi.fn(),
+      },
+      documentVersion: { delete: vi.fn() },
+      document: { delete: vi.fn() },
+      auditEvent: { create: vi.fn() },
+    };
+    const database = {
+      $transaction: vi.fn(
+        (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+      documentVersion: { count: vi.fn().mockResolvedValue(1) },
+      uploadSession: {
+        findFirst: vi.fn().mockResolvedValue({
+          completedAt: null,
+          documentVersion: {
+            document: { currentVersionId: null, id: "document-a" },
+            documentId: "document-a",
+            quarantineObjectKey: "quarantine/document-a",
+          },
+          documentVersionId: "version-a",
+          id: "session-a",
+          status: "PENDING",
+        }),
+      },
+    };
+    const storage = { send: vi.fn() };
+    const service = new DocumentsService(
+      database as never,
+      storage as never,
+      { add: vi.fn() } as never,
+      environment,
+    );
+
+    await expect(
+      service.abandonUploadSession(
+        "organisation-a",
+        "session-a",
+        "user-a",
+        "request-a",
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(transaction.uploadSession.delete).not.toHaveBeenCalled();
+    expect(transaction.documentVersion.delete).not.toHaveBeenCalled();
+    expect(transaction.document.delete).not.toHaveBeenCalled();
+    expect(storage.send).not.toHaveBeenCalled();
+  });
+
   it("removes only an incomplete upload session within the current organisation", async () => {
     const jobs = { add: vi.fn().mockResolvedValue(undefined) };
     const storage = { send: vi.fn().mockResolvedValue(undefined) };
@@ -288,9 +427,15 @@ describe("document upload abandonment", () => {
         delete: vi.fn().mockResolvedValue(undefined),
       },
       documentVersion: {
+        count: vi.fn().mockResolvedValue(1),
         delete: vi.fn().mockResolvedValue(undefined),
       },
+      requirementEvidenceAttachment: { count: vi.fn().mockResolvedValue(0) },
+      companyEvidenceFactVersion: { count: vi.fn().mockResolvedValue(0) },
+      companyEvidenceCitation: { count: vi.fn().mockResolvedValue(0) },
+      eligibilitySnapshotDocument: { count: vi.fn().mockResolvedValue(0) },
       uploadSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         delete: vi.fn().mockResolvedValue(undefined),
       },
     };
@@ -318,6 +463,7 @@ describe("document upload abandonment", () => {
               select: {
                 currentVersionId: true,
                 id: true,
+                tenderScopeId: true,
               },
             },
           },
@@ -327,6 +473,10 @@ describe("document upload abandonment", () => {
     });
     expect(transaction.uploadSession.delete).toHaveBeenCalledWith({
       where: { id: "session-a" },
+    });
+    expect(transaction.uploadSession.updateMany).toHaveBeenCalledWith({
+      data: { status: "CANCELLED" },
+      where: { completedAt: null, id: "session-a", status: "PENDING" },
     });
     expect(transaction.documentVersion.delete).toHaveBeenCalledWith({
       where: { id: "version-a" },
@@ -386,9 +536,15 @@ describe("document upload abandonment", () => {
         delete: vi.fn().mockResolvedValue(undefined),
       },
       documentVersion: {
+        count: vi.fn().mockResolvedValue(1),
         delete: vi.fn().mockResolvedValue(undefined),
       },
+      requirementEvidenceAttachment: { count: vi.fn().mockResolvedValue(0) },
+      companyEvidenceFactVersion: { count: vi.fn().mockResolvedValue(0) },
+      companyEvidenceCitation: { count: vi.fn().mockResolvedValue(0) },
+      eligibilitySnapshotDocument: { count: vi.fn().mockResolvedValue(0) },
       uploadSession: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         delete: vi.fn().mockResolvedValue(undefined),
       },
     };

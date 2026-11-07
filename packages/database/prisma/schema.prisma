@@ -949,6 +949,8 @@ model User {
   updatedProfileValues                 CompanyProfileValue[]                 @relation("ProfileValueUpdater")
   ownedDocuments                       Document[]                            @relation("DocumentOwner")
   uploadedDocumentVersions             DocumentVersion[]                     @relation("DocumentVersionUploader")
+  createdRequirementAttachments        RequirementEvidenceAttachment[]       @relation("RequirementAttachmentCreator")
+  detachedRequirementAttachments       RequirementEvidenceAttachment[]       @relation("RequirementAttachmentDetacher")
   documentVerifications                DocumentVerification[]                @relation("DocumentVerifier")
   documentAccessEvents                 DocumentAccessEvent[]
   createdTenders                       Tender[]                              @relation("TenderCreator")
@@ -1017,6 +1019,7 @@ model Organisation {
   turnoverRecords         CompanyTurnover[]
   documentReadiness       DocumentReadiness[]
   documents               Document[]
+  requirementAttachments  RequirementEvidenceAttachment[]
   uploadSessions          UploadSession[]
   documentAccessEvents    DocumentAccessEvent[]
   tenders                 Tender[]
@@ -1204,6 +1207,7 @@ model DocumentReadiness {
 model Document {
   id                  String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organisationId      String                        @map("organisation_id") @db.Uuid
+  tenderScopeId       String?                       @map("tender_scope_id") @db.Uuid
   ownerUserId         String                        @map("owner_user_id") @db.Uuid
   category            DocumentCategory
   displayName         String                        @map("display_name") @db.VarChar(255)
@@ -1225,7 +1229,11 @@ model Document {
   evidenceFacts       CompanyEvidenceFact[]
   evidenceCitations   CompanyEvidenceCitation[]
   snapshotDocuments   EligibilitySnapshotDocument[]
+  tenderScope         Tender?                       @relation("TenderEvidenceDocuments", fields: [tenderScopeId, organisationId], references: [id, organisationId], onDelete: Restrict)
+  requirementAttachments RequirementEvidenceAttachment[]
 
+  @@unique([id, organisationId])
+  @@index([organisationId, tenderScopeId, status])
   @@index([organisationId, category, status])
   @@index([organisationId, expiryDate])
   @@map("documents")
@@ -1253,7 +1261,9 @@ model DocumentVersion {
   evidenceFactVersions CompanyEvidenceFactVersion[]
   evidenceCitations    CompanyEvidenceCitation[]
   snapshotDocuments    EligibilitySnapshotDocument[]
+  requirementAttachments RequirementEvidenceAttachment[]
 
+  @@unique([id, documentId])
   @@unique([documentId, versionNumber])
   @@index([sha256])
   @@map("document_versions")
@@ -1365,6 +1375,8 @@ model Tender {
   workspace               TenderWorkspace?
   currentVersion          TenderVersion?                @relation("CurrentTenderVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
   versions                TenderVersion[]               @relation("TenderVersions")
+  evidenceDocuments       Document[]                  @relation("TenderEvidenceDocuments")
+  requirementAttachments  RequirementEvidenceAttachment[]
   sources                 TenderSource[]
   corrigenda              TenderCorrigendum[]
   processingJobs          ProcessingJob[]
@@ -1384,6 +1396,7 @@ model Tender {
 
   @@index([organisationId, lifecycleStatus, submissionDeadline])
   @@index([organisationId, sourceTenderNumber])
+  @@unique([id, organisationId])
   @@map("tenders")
 }
 
@@ -1423,6 +1436,7 @@ model TenderVersion {
   finalReadinessRuns               FinalReadinessRun[]           @relation("TenderVersionFinalReadinessRuns")
   finalReadinessSnapshots          FinalReadinessInputSnapshot[]
   eligibilityAssessments           EligibilityAssessment[]
+  requirementAttachments           RequirementEvidenceAttachment[]
   checklistRuns                    ChecklistGenerationRun[]
   checklistItems                   ChecklistItem[]
   currentControlledPackageRunId    String?                       @unique @map("current_controlled_package_run_id") @db.Uuid
@@ -1430,6 +1444,7 @@ model TenderVersion {
   controlledPackageRuns            ControlledReviewPackageRun[]  @relation("TenderVersionControlledPackageRuns")
 
   @@unique([tenderId, versionNumber])
+  @@unique([id, tenderId])
   @@unique([tenderId, sourceFingerprint])
   @@map("tender_versions")
 }
@@ -1545,6 +1560,7 @@ model ProcessingJob {
 
 model ExtractionRun {
   id                           String                        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  requirementAttachments       RequirementEvidenceAttachment[]
   organisationId               String                        @map("organisation_id") @db.Uuid
   tenderId                     String                        @map("tender_id") @db.Uuid
   tenderVersionId              String                        @map("tender_version_id") @db.Uuid
@@ -1594,6 +1610,7 @@ model ExtractionRun {
   @@index([organisationId, tenderId, status, createdAt])
   @@index([tenderVersionId, createdAt])
   @@index([organisationId, tenderVersionId, sourceFingerprint, parserPolicyVersion, structuringPolicyVersion])
+  @@unique([id, tenderVersionId])
   @@map("extraction_runs")
 }
 
@@ -1764,9 +1781,42 @@ model StructuredRequirement {
   citations               ExtractionCitation[]
   eligibilityAssessments  EligibilityAssessment[]
   checklistLinks          ChecklistItemRequirementLink[]
+  evidenceAttachments     RequirementEvidenceAttachment[]
 
+  @@unique([id, extractionRunId])
   @@index([extractionRunId, category, obligation, confidence, reviewState])
   @@map("structured_requirements")
+}
+
+model RequirementEvidenceAttachment {
+  id                      String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organisationId          String    @map("organisation_id") @db.Uuid
+  tenderId                String    @map("tender_id") @db.Uuid
+  tenderVersionId         String    @map("tender_version_id") @db.Uuid
+  extractionRunId         String    @map("extraction_run_id") @db.Uuid
+  structuredRequirementId String    @map("structured_requirement_id") @db.Uuid
+  documentId              String    @map("document_id") @db.Uuid
+  documentVersionId       String    @map("document_version_id") @db.Uuid
+  attachedByUserId        String    @map("attached_by_user_id") @db.Uuid
+  idempotencyKey          String    @map("idempotency_key") @db.VarChar(120)
+  requestFingerprint      String    @map("request_fingerprint") @db.Char(64)
+  createdAt               DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  detachedAt              DateTime? @map("detached_at") @db.Timestamptz(3)
+  detachedByUserId        String?   @map("detached_by_user_id") @db.Uuid
+  tender                  Tender    @relation(fields: [tenderId, organisationId], references: [id, organisationId], onDelete: Restrict)
+  tenderVersion           TenderVersion @relation(fields: [tenderVersionId, tenderId], references: [id, tenderId], onDelete: Restrict)
+  extractionRun           ExtractionRun @relation(fields: [extractionRunId, tenderVersionId], references: [id, tenderVersionId], onDelete: Restrict)
+  requirement             StructuredRequirement @relation(fields: [structuredRequirementId, extractionRunId], references: [id, extractionRunId], onDelete: Restrict)
+  document                Document @relation(fields: [documentId, organisationId], references: [id, organisationId], onDelete: Restrict)
+  documentVersion         DocumentVersion @relation(fields: [documentVersionId, documentId], references: [id, documentId], onDelete: Restrict)
+  organisation            Organisation @relation(fields: [organisationId], references: [id], onDelete: Restrict)
+  attachedBy              User @relation("RequirementAttachmentCreator", fields: [attachedByUserId], references: [id], onDelete: Restrict)
+  detachedBy              User? @relation("RequirementAttachmentDetacher", fields: [detachedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([organisationId, tenderId, idempotencyKey])
+  @@index([organisationId, tenderId, structuredRequirementId, detachedAt])
+  @@index([documentId, documentVersionId])
+  @@map("requirement_evidence_attachments")
 }
 
 model ExtractionCitation {

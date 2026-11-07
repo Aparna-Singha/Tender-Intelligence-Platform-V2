@@ -2,9 +2,164 @@ import { describe, expect, it, vi } from "vitest";
 import type { DeadlineField } from "@tender/domain";
 import {
   EvidenceAssessmentProcessor,
+  assertSourcesUnchanged,
+  buildEvidence,
   isEvidenceAssessmentJob,
   isRelevant,
 } from "../src/evidence-assessment-processor.js";
+
+describe("snapshot source currentness", () => {
+  const date = new Date("2026-11-07T00:00:00Z");
+  const snapshotFixture = {
+    documents: [
+      {
+        documentId: "document",
+        documentVersionId: "version",
+        checksum: "checksum",
+        category: "UDYAM",
+        expiryDate: null,
+        verificationStatus: "UNVERIFIED",
+      },
+    ],
+    documentReadiness: [],
+    evidenceCitations: [{ sourceEvidenceCitationId: "citation" }],
+    evidenceFacts: [
+      {
+        evidenceFactVersion: {
+          id: "fact-version",
+          documentVersionId: "version",
+          reviewState: "ACCEPTED",
+          confidence: { toNumber: () => 1 },
+          validUntil: null,
+          citations: [
+            {
+              id: "citation",
+              documentId: "document",
+              documentVersionId: "version",
+              documentChecksum: "checksum",
+              invalidatedAt: null,
+              validationStatus: "VALID",
+            },
+          ],
+          evidenceFact: {
+            documentId: "document",
+            currentVersionId: "fact-version",
+            invalidatedAt: null,
+            factType: "UDYAM",
+          },
+          textValue: "Synthetic fact",
+          numberValue: null,
+          booleanValue: null,
+          dateValue: null,
+          textListValue: [],
+          unit: null,
+          currency: null,
+        },
+      },
+    ],
+    profileValues: [],
+    turnoverRecords: [],
+  };
+  function snapshot(): typeof snapshotFixture {
+    return snapshotFixture;
+  }
+  const sourceFixture = {
+    id: "document",
+    status: "READY",
+    deletedAt: null,
+    expiryDate: null as Date | null,
+    currentVersionId: "version",
+    currentVersion: { sha256: "checksum" },
+  };
+  function source(): typeof sourceFixture {
+    return { ...sourceFixture };
+  }
+
+  it.each([
+    ["current", "READY", "version", null, true],
+    ["replaced", "READY", "replacement", null, false],
+    ["failed", "FAILED", "version", null, false],
+    ["expired", "READY", "version", new Date("2020-01-01"), false],
+    [
+      "valid through expiry date",
+      "READY",
+      "version",
+      new Date("2026-11-07"),
+      true,
+    ],
+    [
+      "expired after date boundary",
+      "READY",
+      "version",
+      new Date("2026-11-06"),
+      false,
+    ],
+  ] as const)(
+    "marks %s source correctly",
+    (_name, status, version, expiry, current) => {
+      const document = source();
+      document.status = status;
+      document.currentVersionId = version;
+      document.expiryDate = expiry;
+      const evidence = buildEvidence(
+        snapshot() as never,
+        date,
+        new Map([["document", document]]) as never,
+      );
+      const fact = evidence.find(
+        (item) => item.sourceKind === "MANUAL_DOCUMENT_FACT",
+      );
+      expect(fact?.documentCurrent).toBe(current);
+      expect(fact?.documentVerified).toBe(current);
+    },
+  );
+
+  it("fails closed when the source is missing", () => {
+    const evidence = buildEvidence(
+      snapshot() as never,
+      date,
+      new Map() as never,
+    );
+    expect(
+      evidence.find((item) => item.sourceKind === "MANUAL_DOCUMENT_FACT")
+        ?.documentCurrent,
+    ).toBe(false);
+  });
+
+  it.each([
+    ["2026-11-07T18:29:59.999Z", true],
+    ["2026-11-07T18:30:00.000Z", false],
+  ] as const)("uses the India expiry boundary at %s", (instant, expected) => {
+    const document = source();
+    document.expiryDate = new Date("2026-11-07T00:00:00.000Z");
+    const evidence = buildEvidence(
+      snapshot() as never,
+      new Date(instant),
+      new Map([["document", document]]) as never,
+    );
+    expect(
+      evidence.find((item) => item.sourceKind === "MANUAL_DOCUMENT_FACT")
+        ?.documentCurrent,
+    ).toBe(expected);
+  });
+
+  it("rejects a source changed after matching and before persistence", async () => {
+    const original = source();
+    const changed = { ...source(), status: "FAILED" };
+    const tx = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
+      document: { findMany: vi.fn().mockResolvedValue([changed]) },
+    };
+    await expect(
+      assertSourcesUnchanged(
+        tx as never,
+        { organisationId: "org", evidenceFacts: [] } as never,
+        new Map([["document", original]]) as never,
+        ["document"],
+      ),
+    ).rejects.toThrow("ASSESSMENT_SOURCE_CHANGED");
+  });
+});
 
 describe("evidence assessment queue boundary", () => {
   it("accepts opaque identifiers only", () => {
@@ -47,7 +202,9 @@ describe("evidence assessment progression safety", () => {
   it("requires review when conflicting deadlines affect expiring evidence", async () => {
     const createMany = vi.fn().mockResolvedValue(undefined);
     const transaction = {
+      $queryRaw: vi.fn().mockResolvedValue([]),
       auditEvent: { create: vi.fn() },
+      document: { findMany: vi.fn().mockResolvedValue([]) },
       checklistGenerationRun: { updateMany: vi.fn() },
       checklistItem: { updateMany: vi.fn() },
       eligibilityAssessment: {
@@ -78,6 +235,7 @@ describe("evidence assessment progression safety", () => {
         (callback: (tx: typeof transaction) => Promise<unknown>) =>
           callback(transaction),
       ),
+      document: { findMany: vi.fn().mockResolvedValue([]) },
       earlyPursuitDecision: {
         findFirst: vi
           .fn()

@@ -241,8 +241,18 @@ export class DocumentProcessor {
     }
   }
 
-  public async cleanupUploadObjects(keys: readonly string[]): Promise<void> {
-    for (const key of keys) {
+  public async cleanupUploadObjects(
+    data: CompanyUploadCleanupJob,
+  ): Promise<void> {
+    const expectedKey = `quarantine/${data.organisationId}/${data.documentVersionId}`;
+    if (data.keys.some((key) => key !== expectedKey))
+      throw new Error("COMPANY_UPLOAD_CLEANUP_KEY_MISMATCH");
+    const retainedVersion = await this.database.documentVersion.findUnique({
+      select: { id: true },
+      where: { id: data.documentVersionId },
+    });
+    if (retainedVersion !== null) return;
+    for (const key of data.keys) {
       try {
         await this.storage.send(
           new DeleteObjectCommand({
