@@ -3,6 +3,11 @@ import type { NextConfig } from "next";
 import { parseEnvironment, webEnvironmentSchema } from "@tender/config";
 
 parseEnvironment("web", webEnvironmentSchema, process.env);
+const visualPreview =
+  process.env.VERCEL_ENV === "preview" &&
+  process.env.BIDVEDA_VISUAL_PREVIEW === "true";
+if (visualPreview && process.env.NEXT_PUBLIC_API_URL !== "/api")
+  throw new Error("Visual preview requires same-origin API routing");
 
 function originFrom(value: string | undefined): string | null {
   if (value === undefined || value.trim() === "") return null;
@@ -23,8 +28,8 @@ const scriptSources = [
 ];
 const connectSources = [
   "'self'",
-  ...(apiOrigin === null ? [] : [apiOrigin]),
-  ...(storageOrigin === null || storageOrigin === apiOrigin
+  ...(visualPreview || apiOrigin === null ? [] : [apiOrigin]),
+  ...(visualPreview || storageOrigin === null || storageOrigin === apiOrigin
     ? []
     : [storageOrigin]),
 ];

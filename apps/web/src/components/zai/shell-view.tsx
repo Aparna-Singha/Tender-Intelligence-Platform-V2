@@ -219,6 +219,7 @@ function SidebarContent({
 }): React.JSX.Element {
   const {
     page,
+    pathname,
     setPage,
     activeOrgId,
     setActiveOrg,
@@ -237,6 +238,17 @@ function SidebarContent({
   const activeOrg = organizations.find((o) => o.id === activeOrgId);
 
   const recentTenders = tenders.slice(0, 3);
+  const safeHref = (destination: string): string =>
+    hrefFor(destination) ?? pathname;
+  const followLink = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    destination: string,
+  ): void => {
+    if (hrefFor(destination) === null) {
+      event.preventDefault();
+      setPage(destination);
+    } else onNavigate?.();
+  };
 
   return (
     <div className="zai-design flex flex-col h-full bg-grid-dark">
@@ -368,13 +380,10 @@ function SidebarContent({
           return (
             <MotionLink
               key={item.id}
-              href={hrefFor(item.id) ?? "/dashboard"}
+              href={safeHref(item.id)}
               aria-disabled={hrefFor(item.id) === null}
               aria-current={active ? "page" : undefined}
-              onClick={(event) => {
-                if (!hrefFor(item.id)) event.preventDefault();
-                else onNavigate?.();
-              }}
+              onClick={(event) => followLink(event, item.id)}
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{
@@ -448,8 +457,11 @@ function SidebarContent({
             >
               <Link
                 aria-label={t.title}
-                href={hrefFor(`tender:${t.id}:overview`) ?? "/dashboard"}
-                onClick={() => onNavigate?.()}
+                href={safeHref(`tender:${t.id}:overview`)}
+                aria-disabled={hrefFor(`tender:${t.id}:overview`) === null}
+                onClick={(event) =>
+                  followLink(event, `tender:${t.id}:overview`)
+                }
                 className="min-w-0 flex-1 text-left px-3 py-2"
               >
                 <div className="text-[13px] text-white/70 truncate group-hover:text-white transition-colors">
@@ -471,8 +483,11 @@ function SidebarContent({
                 <DropdownMenuContent>
                   <DropdownMenuItem asChild>
                     <Link
-                      href={hrefFor(`tender:${t.id}:ask`) ?? "/dashboard"}
-                      onClick={() => onNavigate?.()}
+                      href={safeHref(`tender:${t.id}:ask`)}
+                      aria-disabled={hrefFor(`tender:${t.id}:ask`) === null}
+                      onClick={(event) =>
+                        followLink(event, `tender:${t.id}:ask`)
+                      }
                     >
                       Tender chat
                     </Link>
@@ -485,8 +500,11 @@ function SidebarContent({
                             ? "page"
                             : undefined
                         }
-                        href={hrefFor(`tender:${t.id}:draft`) ?? "/dashboard"}
-                        onClick={() => onNavigate?.()}
+                        href={safeHref(`tender:${t.id}:draft`)}
+                        aria-disabled={hrefFor(`tender:${t.id}:draft`) === null}
+                        onClick={(event) =>
+                          followLink(event, `tender:${t.id}:draft`)
+                        }
                       >
                         Continue draft
                       </Link>
@@ -560,7 +578,11 @@ function SidebarContent({
             <DropdownMenuSeparator />
             {activeOrgId && (
               <DropdownMenuItem asChild>
-                <Link href={hrefFor("onboarding") ?? "/dashboard"}>
+                <Link
+                  href={safeHref("onboarding")}
+                  aria-disabled={hrefFor("onboarding") === null}
+                  onClick={(event) => followLink(event, "onboarding")}
+                >
                   Company profile
                 </Link>
               </DropdownMenuItem>

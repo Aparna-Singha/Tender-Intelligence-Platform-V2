@@ -41,6 +41,31 @@ const data: ShellData = {
 };
 
 describe("navigation over the contextual assistant", () => {
+  it("keeps unavailable preview links on the synthetic page", async () => {
+    const user = userEvent.setup();
+    const setPage = vi.fn();
+    render(
+      <ShellView
+        data={{
+          ...data,
+          pathname: "/visual-preview/dashboard",
+          hrefFor: (page) =>
+            page === "dashboard" ? "/visual-preview/dashboard" : null,
+          setPage,
+        }}
+      >
+        <p>Synthetic page</p>
+      </ShellView>,
+    );
+    const link = within(screen.getByTestId("desktop-sidebar")).getByRole(
+      "link",
+      { name: "AI Chat" },
+    );
+    expect(link).toHaveAttribute("href", "/visual-preview/dashboard");
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    await user.click(link);
+    expect(setPage).toHaveBeenCalledWith("ai-chat");
+  });
   it("collapses the desktop rail without losing navigation or keyboard focus", async () => {
     const user = userEvent.setup();
     render(

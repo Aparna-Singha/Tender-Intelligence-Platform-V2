@@ -10,7 +10,10 @@ The pages exist only when both `VERCEL_ENV=preview` and
 `BIDVEDA_VISUAL_PREVIEW=true` are set. In that mode the same-origin `/api`
 handler returns a no-store 503 response before accessing the upstream proxy,
 including for writes. The normal production proxy remains unchanged when the
-preview flag is absent. The visual preview must not be configured as a
+preview flag is absent. In visual preview, the route proxy blocks real application
+pages, the build rejects a non-`/api` browser API URL, and the CSP permits only
+same-origin connections. Unavailable shell links stay on the synthetic page.
+The visual preview must not be configured as a
 production environment. Turborepo includes the flag in its strict build
 environment and cache key.
 
@@ -38,8 +41,31 @@ After deployment, confirm the banner and synthetic labels on both routes,
 navigation between the two views, mobile sidebar behavior, assets, browser
 console, and desktop/tablet/mobile layouts. Confirm `/api/health` returns
 `503` with `VISUAL_PREVIEW_ONLY` and no upstream request. Real application
-routes will show their normal API-unavailable states. Treat all account,
+routes return 404 in visual-preview mode. Treat all account,
 upload, reviewer and eligibility actions as **untested** until the separate
 authenticated Milestone 2A.4D workflow succeeds against an isolated backend.
 
 No Vercel or GitHub deployment has been performed by this preparation.
+
+## Backend dependency for real evidence actions
+
+The visual preview is independent of the API. For the authenticated Eligibility
+screen, this frontend expects the following requirement-scoped routes beneath
+`/organisations/:organisationId/tenders/:tenderId/versions/:versionId/requirements/:requirementId`:
+
+| Method   | Suffix                                       | Expected result                                                                |
+| -------- | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `GET`    | `/attachments`                               | Active attachment array with document, exact version and upload-session status |
+| `GET`    | `/evidence-candidates?search=&limit=50`      | `{ items: [...] }` of authorised reusable documents and current versions       |
+| `POST`   | `/upload-sessions`                           | `{ attachment_id, upload_session_id, upload_url }` for a private signed upload |
+| `POST`   | `/upload-sessions/:uploadSessionId/complete` | Completion through the existing private upload lifecycle                       |
+| `POST`   | `/attachments`                               | Persist a selected `document_id`, `document_version_id` and `idempotency_key`  |
+| `DELETE` | `/attachments/:attachmentId`                 | Detach evidence while preserving the source document                           |
+
+At `main` commit `6b28c94`, no controller registers these routes. The existing
+eligibility controller does provide assessment runs, the matrix, item reviews,
+company facts and assessment evidence links at different paths. The six routes
+above require the separately reviewed Milestone 2A backend before the real
+evidence upload and selection flows can work. Frontend unit tests use mocked
+responses and do not establish backend compatibility. Do not present the real
+Eligibility attachment UI as operational on a deployment of this `main` API.
