@@ -50,6 +50,7 @@ import {
 } from "./ui/sheet";
 
 export interface ShellData {
+  readonly previewBrand?: boolean;
   readonly page: string;
   readonly pathname: string;
   readonly activeOrgId: string | null;
@@ -114,7 +115,10 @@ function ShellLayout({
   const navigationOpener = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div className="zai-app-shell min-h-screen bg-mesh">
+    <div
+      className="zai-app-shell min-h-screen bg-mesh"
+      data-visual-preview={useShell().previewBrand ? "true" : undefined}
+    >
       {/* Ambient aurora glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
         <div className="absolute -top-40 -left-40 h-[480px] w-[480px] rounded-full bg-[#FF5722]/8 blur-3xl animate-aurora" />
@@ -219,6 +223,7 @@ function SidebarContent({
 }): React.JSX.Element {
   const {
     page,
+    previewBrand,
     pathname,
     setPage,
     activeOrgId,
@@ -264,10 +269,18 @@ function SidebarContent({
         </motion.div>
         <div className={cn("min-w-0", collapsed && "sr-only")}>
           <div className="text-white text-sm font-bold uppercase tracking-tight leading-tight">
-            Tender<span className="text-[var(--brand-orange)]">.</span>Intel
+            {previewBrand ? (
+              <>
+                BidVeda<span className="text-[var(--brand-orange)]">.</span>
+              </>
+            ) : (
+              <>
+                Tender<span className="text-[var(--brand-orange)]">.</span>Intel
+              </>
+            )}
           </div>
           <div className="text-[9px] text-white/40 uppercase tracking-[0.15em] font-mono">
-            Platform V2
+            {previewBrand ? "Visual preview" : "Platform V2"}
           </div>
         </div>
       </div>
@@ -683,7 +696,7 @@ function Topbar({
   }
 
   return (
-    <header className="zai-design sticky top-0 z-20 h-16 glass border-b border-[#E5E7EB]/60">
+    <header className="zai-design sticky top-0 z-20 h-16 bg-white border-b border-[#E5E7EB]/60 shadow-[0_1px_8px_rgb(17_24_39_/_0.04)]">
       <div className="h-full px-4 sm:px-6 lg:px-10 flex items-center gap-3">
         <button
           aria-label={desktopCollapsed ? "Expand sidebar" : "Collapse sidebar"}

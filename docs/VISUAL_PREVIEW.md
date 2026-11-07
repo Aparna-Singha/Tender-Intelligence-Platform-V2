@@ -5,6 +5,10 @@ The feature branch has a read-only visual preview at
 synthetic in-memory examples and the existing Z.ai shell, dashboard and evidence
 components. The banner identifies the examples. They do not demonstrate
 authentication, document upload, evidence review, eligibility or a working API.
+The evidence view separates an attached but unverified document from a recorded
+assessment decision. A second synthetic item illustrates why a historical
+verified decision can require reassessment. The dashboard's live-only actions
+are disabled; its synthetic filters and the two preview navigation routes work.
 
 The pages exist only when both `VERCEL_ENV=preview` and
 `BIDVEDA_VISUAL_PREVIEW=true` are set. In that mode the same-origin `/api`

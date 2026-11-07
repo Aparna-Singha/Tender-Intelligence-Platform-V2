@@ -464,18 +464,35 @@ export function EvidenceMatrix({
               id={`assessment-review-${item.id}`}
               key={item.id}
               tabIndex={0}
+              className={
+                previewSnapshot ? "visual-preview-review-item" : undefined
+              }
             >
               <h3>{item.structuredRequirement.title}</h3>
               <p>{item.structuredRequirement.normalizedStatement}</p>
-              <p>
-                <strong>Historical decision:</strong>{" "}
-                {humanizeEnum(item.currentState)}
-              </p>
+              {previewSnapshot ? (
+                <div className="visual-preview-review-status">
+                  <span className="visual-preview-badge">
+                    Recorded: {humanizeEnum(item.currentState)}
+                  </span>
+                  <span className="visual-preview-badge visual-preview-badge--muted">
+                    Review: {humanizeEnum(item.reviewState)}
+                  </span>
+                </div>
+              ) : (
+                <p>
+                  <strong>Historical decision:</strong>{" "}
+                  {humanizeEnum(item.currentState)}
+                </p>
+              )}
               {item.currentEvidence?.status === "REASSESSMENT_REQUIRED" && (
                 <p className="warning" role="status">
                   This previously verified decision needs reassessment. Its
-                  supporting evidence is no longer current. Start a fresh
-                  requirements check before relying on it. Reasons:{" "}
+                  supporting evidence is no longer current.
+                  {previewSnapshot
+                    ? " This is a synthetic historical example."
+                    : " Start a fresh requirements check before relying on it."}{" "}
+                  Reasons:{" "}
                   {item.currentEvidence.reasonCodes
                     .map(humanizeEnum)
                     .join(", ")}
@@ -507,7 +524,11 @@ export function EvidenceMatrix({
                   </button>
                 )}
               </blockquote>
-              <h4>Current evidence</h4>
+              <h4>
+                {item.currentEvidence?.status === "REASSESSMENT_REQUIRED"
+                  ? "Recorded evidence · reassessment required"
+                  : "Current evidence"}
+              </h4>
               {item.evidenceLinks.length === 0 ? (
                 <p>No supporting company evidence is linked yet.</p>
               ) : (

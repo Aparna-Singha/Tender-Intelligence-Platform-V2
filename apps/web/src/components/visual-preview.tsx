@@ -46,7 +46,10 @@ const demoRun: AssessmentRun = {
 };
 
 const demoMatrix: MatrixResult = {
-  counts: [{ _count: 1, currentState: "MISSING_EVIDENCE" }],
+  counts: [
+    { _count: 1, currentState: "MISSING_EVIDENCE" },
+    { _count: 1, currentState: "VERIFIED" },
+  ],
   items: [
     {
       currentState: "MISSING_EVIDENCE",
@@ -73,8 +76,50 @@ const demoMatrix: MatrixResult = {
       },
       uncertainty: "No reviewed direct support is linked.",
     },
+    {
+      currentState: "VERIFIED",
+      currentEvidence: {
+        checkedAt: "2026-11-07T00:00:00.000Z",
+        reasonCodes: ["DOCUMENT_REPLACED"],
+        status: "REASSESSMENT_REQUIRED",
+      },
+      evidenceLinks: [
+        {
+          evidenceCitation: {
+            boundedExcerpt:
+              "Tax registration was recorded in the prior review.",
+            documentId: "synthetic-replaced-document",
+            documentName: "Synthetic historical tax certificate",
+            pageNumber: 1,
+            validationStatus: "VALID",
+          },
+          linkType: "DIRECT_SUPPORT",
+        },
+      ],
+      id: "synthetic-historical-item",
+      proposedConfidence: "MEDIUM",
+      proposedRationale:
+        "A prior reviewer recorded a decision; its supporting source must be checked again.",
+      proposedState: "HUMAN_REVIEW_REQUIRED",
+      requirementCategory: "TAX_REGISTRATION",
+      requirementObligation: "REQUIRED",
+      reviewState: "ACCEPTED",
+      structuredRequirement: {
+        id: "synthetic-historical-requirement",
+        normalizedStatement: "Provide current tax registration evidence.",
+        title: "Tax registration",
+      },
+      tenderCitation: {
+        boundedExcerpt: "A valid tax registration document is required.",
+        documentName: "Synthetic tender excerpt (not a real document)",
+        pageNumber: 4,
+        tenderDocumentId: "synthetic-source",
+      },
+      uncertainty:
+        "The historical decision is not a current eligibility conclusion.",
+    },
   ],
-  total: 1,
+  total: 2,
 };
 
 const demoAttachments: readonly Attachment[] = [
@@ -114,6 +159,7 @@ export function VisualPreview({
         : null;
   const shell: ShellData = {
     page: view === "dashboard" ? "dashboard" : "tenders",
+    previewBrand: true,
     pathname: `/visual-preview/${view}`,
     activeOrgId: "synthetic-org",
     activeTenderId: null,
@@ -170,33 +216,46 @@ export function VisualPreview({
           filter={filter}
           onFilter={setFilter}
           companyProgress={null}
+          previewMode
         />
       ) : (
-        <div className="zai-design space-y-8">
-          <div>
+        <div className="zai-design visual-preview-evidence space-y-6">
+          <div className="space-y-2">
+            <p className="label-mono text-[var(--brand-orange-deep)]">
+              Eligibility / visual example
+            </p>
             <h1 className="text-3xl font-bold text-[#1E1F22]">
-              Synthetic eligibility workspace
+              Evidence workspace
             </h1>
-            <p className="text-[#4B5563]">
-              Inspect layout and responsive behavior only. No eligibility
-              conclusion is represented here.
+            <p className="text-[#4B5563] max-w-2xl">
+              Explore how documents and review decisions are presented. These
+              examples do not establish eligibility.
             </p>
           </div>
-          <RequirementEvidence
-            organisationId="synthetic-org"
-            tenderId="synthetic-tender-one"
-            versionId="synthetic-tender-version"
-            requirementId="synthetic-requirement"
-            canEdit={false}
-            previewItems={demoAttachments}
-          />
-          <EvidenceMatrix
-            organisationId="synthetic-org"
-            tenderId="synthetic-tender-one"
-            versionId="synthetic-tender-version"
-            presentation="focused"
-            previewSnapshot={{ run: demoRun, matrix: demoMatrix }}
-          />
+          <section
+            className="visual-preview-card"
+            aria-label="Document context"
+          >
+            <p className="visual-preview-eyebrow">01 / Document context</p>
+            <RequirementEvidence
+              organisationId="synthetic-org"
+              tenderId="synthetic-tender-one"
+              versionId="synthetic-tender-version"
+              requirementId="synthetic-requirement"
+              canEdit={false}
+              previewItems={demoAttachments}
+            />
+          </section>
+          <section className="visual-preview-card" aria-label="Evidence review">
+            <p className="visual-preview-eyebrow">02 / Human review</p>
+            <EvidenceMatrix
+              organisationId="synthetic-org"
+              tenderId="synthetic-tender-one"
+              versionId="synthetic-tender-version"
+              presentation="focused"
+              previewSnapshot={{ run: demoRun, matrix: demoMatrix }}
+            />
+          </section>
         </div>
       )}
     </ShellView>

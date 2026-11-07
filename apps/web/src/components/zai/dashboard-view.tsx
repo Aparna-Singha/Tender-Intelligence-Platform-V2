@@ -39,6 +39,7 @@ export function DashboardView({
   filter,
   onFilter,
   companyProgress,
+  previewMode = false,
 }: {
   readonly tenders: readonly TenderSummary[];
   readonly userName: string;
@@ -55,6 +56,7 @@ export function DashboardView({
     filter: "ALL" | "ACTIVE" | "IN_PROGRESS" | "COMPLETED",
   ) => void;
   readonly companyProgress: number | null;
+  readonly previewMode?: boolean;
 }): React.JSX.Element {
   const router = useRouter();
   const openTender = (id: string): void => {
@@ -130,8 +132,9 @@ export function DashboardView({
             </p>
           </div>
           <Button
+            disabled={previewMode}
             onClick={() => setPage("tenders")}
-            className="bg-[var(--brand-orange)] hover:bg-[#E64A19] text-white h-12 px-6 text-sm font-bold uppercase tracking-wider shadow-glow-orange rounded-xl group"
+            className="bg-[var(--brand-orange)] hover:bg-[#E64A19] text-white h-12 px-6 text-sm font-bold uppercase tracking-wider shadow-glow-orange rounded-xl group disabled:opacity-55 disabled:cursor-not-allowed disabled:shadow-none"
           >
             <Plus className="mr-2 h-4 w-4 transition-transform group-hover:rotate-90 duration-300" />
             Analyse new tender
@@ -167,7 +170,11 @@ export function DashboardView({
           label="Upcoming deadlines"
           value={upcomingDeadlines.length}
           tone="warning"
-          hint={`Next: ${fmtDate(upcomingDeadlines[0]?.submissionDeadline)}`}
+          hint={
+            upcomingDeadlines[0]
+              ? `Next: ${fmtDate(upcomingDeadlines[0].submissionDeadline)}`
+              : "No upcoming dates"
+          }
           index={2}
         />
         <SummaryCard
@@ -198,6 +205,7 @@ export function DashboardView({
                 </p>
               </div>
               <Button
+                disabled={previewMode}
                 variant="ghost"
                 size="sm"
                 onClick={() => setPage("tenders")}
@@ -243,6 +251,7 @@ export function DashboardView({
                 body="Your organisation's tender workspaces appear here."
                 action={
                   <Button
+                    disabled={previewMode}
                     onClick={
                       organisationId ? () => setPage("tenders") : onCreate
                     }
@@ -257,6 +266,7 @@ export function DashboardView({
             <div className="space-y-3">
               {visible.map((t, i) => (
                 <TenderCard
+                  disabled={previewMode}
                   key={t.id}
                   tender={t}
                   index={i}
@@ -282,6 +292,7 @@ export function DashboardView({
                 body="When you upload a new tender, extraction and assessment jobs will appear here with live progress."
                 action={
                   <Button
+                    disabled={previewMode}
                     variant="outline"
                     size="sm"
                     onClick={() => setPage("tenders")}
@@ -357,6 +368,7 @@ export function DashboardView({
                 )}
               {attentionTenders.map((t) => (
                 <AttentionCard
+                  disabled={previewMode}
                   key={t.id}
                   tone="warning"
                   icon={AlertTriangle}
@@ -368,6 +380,7 @@ export function DashboardView({
               ))}
               {recommendations.map((item) => (
                 <AttentionCard
+                  disabled={previewMode}
                   key={item.id}
                   tone={item.priority === "HIGH" ? "danger" : "warning"}
                   icon={CircleDashed}
@@ -399,6 +412,7 @@ export function DashboardView({
                 const days = getDeadlineDays(t.submissionDeadline) ?? 0;
                 return (
                   <motion.button
+                    disabled={previewMode}
                     key={t.id}
                     onClick={() => openTender(t.id)}
                     initial={{ opacity: 0, x: 12 }}
@@ -455,6 +469,7 @@ export function DashboardView({
                 </p>
               </div>
               <Button
+                disabled={previewMode}
                 variant="ghost"
                 size="sm"
                 onClick={() => setPage("company-docs")}
@@ -568,19 +583,22 @@ function TenderCard({
   tender,
   index,
   onClick,
+  disabled = false,
 }: {
   tender: TenderSummary;
   index: number;
   onClick: () => void;
+  disabled?: boolean;
 }): React.JSX.Element {
   return (
     <motion.button
+      disabled={disabled}
       onClick={onClick}
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.07, duration: 0.5, ease: EASE }}
-      whileHover={{ y: -3 }}
-      className="group w-full text-left rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-soft hover:shadow-card-hover hover:border-[var(--brand-orange)]/30 transition-all"
+      {...(disabled ? {} : { whileHover: { y: -3 } })}
+      className="group w-full text-left rounded-2xl border border-[#E5E7EB] bg-white p-5 shadow-soft hover:shadow-card-hover hover:border-[var(--brand-orange)]/30 transition-all disabled:cursor-not-allowed disabled:hover:shadow-soft"
     >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
@@ -601,10 +619,16 @@ function TenderCard({
         <div className="text-right shrink-0">
           <WorkflowStatus tender={tender} />
           <div className="text-xs text-[#6B7280] mt-2 font-mono">
-            {formatDeadlineCountdown(tender.submissionDeadline)}
-            <span className="block mt-1">
-              Due {fmtDate(tender.submissionDeadline)}
-            </span>
+            {tender.submissionDeadline ? (
+              <>
+                {formatDeadlineCountdown(tender.submissionDeadline)}
+                <span className="block mt-1">
+                  Due {fmtDate(tender.submissionDeadline)}
+                </span>
+              </>
+            ) : (
+              "Deadline not provided"
+            )}
           </div>
         </div>
       </div>
@@ -633,6 +657,7 @@ function AttentionCard({
   title,
   subtitle,
   onClick,
+  disabled = false,
 }: {
   tone: "danger" | "warning";
   icon: typeof AlertTriangle;
@@ -640,6 +665,7 @@ function AttentionCard({
   title: string;
   subtitle: string;
   onClick: () => void;
+  disabled?: boolean;
 }): React.JSX.Element {
   const cfg = {
     danger: {
@@ -655,8 +681,9 @@ function AttentionCard({
   }[tone];
   return (
     <motion.button
+      disabled={disabled}
       onClick={onClick}
-      whileHover={{ y: -2 }}
+      {...(disabled ? {} : { whileHover: { y: -2 } })}
       className={cn(
         "w-full text-left rounded-2xl border p-4 transition-all hover:shadow-soft",
         cfg.border,
