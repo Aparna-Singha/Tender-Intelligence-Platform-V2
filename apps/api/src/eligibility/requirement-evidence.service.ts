@@ -72,6 +72,22 @@ export class RequirementEvidenceService {
     return { attachment_id: attachment.id, ...(result as object) };
   }
 
+  public async downloadAttachment(
+    scope: RequirementScope,
+    attachmentId: string,
+    userId: string,
+    requestId: string,
+  ): Promise<unknown> {
+    // Historical tender versions remain readable after a newer extraction.
+    await this.readableScope(scope);
+    return this.documents.downloadRequirementAttachment(
+      scope,
+      attachmentId,
+      userId,
+      requestId,
+    );
+  }
+
   public async abandonUpload(
     scope: RequirementScope,
     uploadSessionId: string,

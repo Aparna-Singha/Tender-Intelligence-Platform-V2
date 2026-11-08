@@ -127,6 +127,25 @@ export class RequirementEvidenceController {
     );
   }
 
+  @RequireOrganisationPermission("DOCUMENT_READ")
+  @Post("attachments/:attachmentId/download")
+  @ApiOperation({
+    summary:
+      "Sign a short-lived download for the exact attached document version",
+  })
+  public download(
+    @Param() params: Record<string, string>,
+    @Req() request: AuthenticatedRequest,
+  ): Promise<unknown> {
+    this.require(request, "ELIGIBILITY_ASSESSMENT_READ");
+    return this.evidence.downloadAttachment(
+      this.scope(params),
+      z.uuid().parse(params.attachmentId),
+      request.authenticatedUser.userId,
+      request.id,
+    );
+  }
+
   @RequireOrganisationPermission("COMPANY_EVIDENCE_LINK")
   @Post("attachments")
   @ApiOperation({

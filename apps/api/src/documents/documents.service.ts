@@ -396,10 +396,19 @@ export class DocumentsService {
     scope?: RequirementScope,
   ): Promise<unknown> {
     const session = await this.database.uploadSession.findFirst({
-      include: { documentVersion: { include: { document: true } } },
-      where: { id: uploadSessionId, organisationId, status: "PENDING" },
+      include: {
+        documentVersion: { include: { document: true, extraction: true } },
+      },
+      where: {
+        id: uploadSessionId,
+        organisationId,
+        status: { in: ["PENDING", "COMPLETED"] },
+      },
     });
-    if (session === null || session.expiresAt <= new Date())
+    if (
+      session === null ||
+      (session.status === "PENDING" && session.expiresAt <= new Date())
+    )
       throw new NotFoundException();
     if (
       (scope &&
@@ -409,6 +418,56 @@ export class DocumentsService {
       throw new NotFoundException();
     if (session.documentVersion.sha256 !== input.checksum_sha256)
       throw new BadRequestException("Upload checksum does not match");
+    const newerApprovedVersion = await this.database.documentVersion.findFirst({
+      select: { id: true },
+      where: {
+        approvedObjectKey: { not: null },
+        documentId: session.documentVersion.documentId,
+        versionNumber: { gt: session.documentVersion.versionNumber },
+      },
+    });
+    if (newerApprovedVersion)
+      throw new ConflictException("A newer document version is ready");
+    if (session.status === "COMPLETED") {
+      if (scope) {
+        await this.database.$transaction(async (tx) => {
+          await assertCurrentRequirement(tx, scope);
+          const attachment = await tx.requirementEvidenceAttachment.findFirst({
+            select: { id: true },
+            where: {
+              detachedAt: null,
+              documentVersionId: session.documentVersionId,
+              organisationId,
+              structuredRequirementId: scope.requirementId,
+              tenderId: scope.tenderId,
+              tenderVersionId: scope.tenderVersionId,
+            },
+          });
+          if (!attachment) throw new NotFoundException();
+        });
+      }
+      const status = session.documentVersion.document.status;
+      if (!session.documentVersion.approvedObjectKey) {
+        if (
+          ["REJECTED", "FAILED"].includes(
+            session.documentVersion.extraction?.status ?? "",
+          )
+        )
+          throw new ConflictException(
+            "Document scan has reached a terminal state",
+          );
+        await this.enqueueDocumentScan(
+          session.documentVersion.id,
+          organisationId,
+          requestId,
+        );
+        return {
+          document_id: session.documentVersion.documentId,
+          status: "UPLOADED",
+        };
+      }
+      return { document_id: session.documentVersion.documentId, status };
+    }
     let object;
     try {
       object = await this.storage.send(
@@ -426,8 +485,8 @@ export class DocumentsService {
       object.Metadata?.sha256 !== session.documentVersion.sha256
     )
       throw new BadRequestException("Uploaded object metadata does not match");
-    if (scope) {
-      await this.database.$transaction(async (tx) => {
+    await this.database.$transaction(async (tx) => {
+      if (scope) {
         await assertCurrentRequirement(tx, scope);
         const activeAttachment =
           await tx.requirementEvidenceAttachment.findFirst({
@@ -442,69 +501,56 @@ export class DocumentsService {
             },
           });
         if (!activeAttachment) throw new NotFoundException();
-        const claimed = await tx.uploadSession.updateMany({
-          data: { completedAt: new Date(), status: "COMPLETED" },
-          where: {
-            id: session.id,
-            organisationId,
-            status: "PENDING",
-            expiresAt: { gt: new Date() },
-            completedAt: null,
-          },
-        });
-        if (claimed.count !== 1)
-          throw new ConflictException("Upload is no longer pending");
-        await tx.document.update({
-          data: { status: "UPLOADED" },
-          where: { id: session.documentVersion.documentId },
-        });
-        await tx.auditEvent.create({
-          data: {
-            actorUserId: userId,
-            eventType: "DOCUMENT_UPLOAD_COMPLETED",
-            organisationId,
-            outcome: "SUCCESS",
-            requestId,
-            subjectId: session.documentVersion.documentId,
-            subjectType: "document",
-          },
-        });
+      }
+      const claimed = await tx.uploadSession.updateMany({
+        data: { completedAt: new Date(), status: "COMPLETED" },
+        where: {
+          id: session.id,
+          organisationId,
+          status: "PENDING",
+          expiresAt: { gt: new Date() },
+          completedAt: null,
+        },
       });
-    } else
-      await this.database.$transaction([
-        this.database.uploadSession.update({
-          data: { completedAt: new Date(), status: "COMPLETED" },
-          where: { id: session.id },
-        }),
-        this.database.document.update({
-          data: { status: "UPLOADED" },
-          where: { id: session.documentVersion.documentId },
-        }),
-        this.database.auditEvent.create({
-          data: {
-            actorUserId: userId,
-            eventType: "DOCUMENT_UPLOAD_COMPLETED",
-            organisationId,
-            outcome: "SUCCESS",
-            requestId,
-            subjectId: session.documentVersion.documentId,
-            subjectType: "document",
-          },
-        }),
-      ]);
-    await this.jobs.add(
-      "process-company-document",
-      {
-        documentVersionId: session.documentVersion.id,
-        organisationId,
-        requestId,
-      },
-      { attempts: 3, jobId: session.documentVersion.id, removeOnComplete: 100 },
+      if (claimed.count !== 1)
+        throw new ConflictException("Upload is no longer pending");
+      await tx.document.update({
+        data: { status: "UPLOADED" },
+        where: { id: session.documentVersion.documentId },
+      });
+      await tx.auditEvent.create({
+        data: {
+          actorUserId: userId,
+          eventType: "DOCUMENT_UPLOAD_COMPLETED",
+          organisationId,
+          outcome: "SUCCESS",
+          requestId,
+          subjectId: session.documentVersion.documentId,
+          subjectType: "document",
+        },
+      });
+    });
+    await this.enqueueDocumentScan(
+      session.documentVersion.id,
+      organisationId,
+      requestId,
     );
     return {
       document_id: session.documentVersion.documentId,
       status: "UPLOADED",
     };
+  }
+
+  private async enqueueDocumentScan(
+    documentVersionId: string,
+    organisationId: string,
+    requestId: string,
+  ): Promise<void> {
+    await this.jobs.add(
+      "process-company-document",
+      { documentVersionId, organisationId, requestId },
+      { attempts: 3, jobId: documentVersionId, removeOnComplete: 100 },
+    );
   }
 
   public async abandonUploadSession(
@@ -679,6 +725,73 @@ export class DocumentsService {
     return {
       download_url: downloadUrl,
       expires_in_seconds: this.environment.DOCUMENT_DOWNLOAD_TTL_SECONDS,
+    };
+  }
+
+  public async downloadRequirementAttachment(
+    scope: RequirementScope,
+    attachmentId: string,
+    userId: string,
+    requestId: string,
+  ): Promise<unknown> {
+    const attachment =
+      await this.database.requirementEvidenceAttachment.findFirst({
+        include: { document: true, documentVersion: true },
+        where: {
+          id: attachmentId,
+          organisationId: scope.organisationId,
+          tenderId: scope.tenderId,
+          tenderVersionId: scope.tenderVersionId,
+          structuredRequirementId: scope.requirementId,
+          document: {
+            deletedAt: null,
+            organisationId: scope.organisationId,
+            OR: [{ tenderScopeId: null }, { tenderScopeId: scope.tenderId }],
+          },
+          documentVersion: { approvedObjectKey: { not: null } },
+        },
+      });
+    const version = attachment?.documentVersion;
+    if (!attachment || !version?.approvedObjectKey)
+      throw new NotFoundException();
+    const downloadUrl = await getSignedUrl(
+      this.storage,
+      new GetObjectCommand({
+        Bucket: this.environment.S3_BUCKET,
+        Key: version.approvedObjectKey,
+        ResponseContentDisposition: `attachment; filename="document-${attachment.documentId}-v${version.versionNumber}${version.extension}"`,
+      }),
+      { expiresIn: this.environment.DOCUMENT_DOWNLOAD_TTL_SECONDS },
+    );
+    await this.database.documentAccessEvent.create({
+      data: {
+        action: "DOWNLOAD_URL_REQUESTED",
+        documentId: attachment.documentId,
+        organisationId: scope.organisationId,
+        outcome: "SUCCESS",
+        requestId,
+        userId,
+      },
+    });
+    await this.database.auditEvent.create({
+      data: {
+        actorUserId: userId,
+        eventType: "DOCUMENT_DOWNLOADED",
+        organisationId: scope.organisationId,
+        outcome: "SUCCESS",
+        requestId,
+        subjectId: attachment.documentId,
+        subjectType: "document",
+        metadata: {
+          attachment_id: attachmentId,
+          document_version_id: version.id,
+        },
+      },
+    });
+    return {
+      download_url: downloadUrl,
+      expires_in_seconds: this.environment.DOCUMENT_DOWNLOAD_TTL_SECONDS,
+      document_version_id: version.id,
     };
   }
 

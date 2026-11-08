@@ -1,7 +1,7 @@
 # Requirement-level evidence backend
 
 This branch proposes the additive `20261106000100_requirement_evidence_attachments`
-migration. It has **not** been applied by this work. The six requirement-scoped
+migration. It has **not** been applied by this work. The seven requirement-scoped
 routes remain unavailable against a database until the migration is reviewed and
 deployed in migration order. Do not use `db push` or rewrite migration history.
 
@@ -27,6 +27,7 @@ Under `/organisations/:organisationId/tenders/:tenderId/versions/:versionId/requ
 | `POST`   | `/upload-sessions/:uploadSessionId/complete` | Existing object verification and security-processing queue    |
 | `POST`   | `/attachments`                               | Link an existing exact document version as context            |
 | `DELETE` | `/attachments/:attachmentId`                 | Detach without deleting the document or version               |
+| `POST`   | `/attachments/:attachmentId/download`        | Short-lived private download for the attached exact version   |
 
 The implementation also permits reading one attachment and abandoning a pending
 upload. Existing cookie authentication, CSRF handling, organisation permissions,
@@ -34,11 +35,31 @@ document lifecycle, private object storage, and malware scanning remain in use.
 Attachment does not approve a fact or an eligibility decision. Current-evidence
 verdicts are additive to historical assessment state.
 
-The frontend in PR #43 expects the six listed route shapes. Its upload form sends
+The frontend in PR #43 expects the six original route shapes. Its upload form sends
 the checksum, MIME type, size, and idempotency key; the backend retains the
 existing upload validation. Browser-to-storage CORS must allow the signed
 `x-amz-meta-sha256` header for actual uploads, as required by the existing
 direct-upload flow.
+
+For PR #43 integration, use the attachment ID from the attachment list to call
+`POST /attachments/:attachmentId/download` with the existing authenticated
+cookie and CSRF header. The response contains `download_url`,
+`expires_in_seconds`, and `document_version_id`. Open the signed URL promptly;
+do not persist it or substitute the document-library download route, which is
+limited to organisation library documents and their current versions. The new
+route requires both `DOCUMENT_READ` and `ELIGIBILITY_ASSESSMENT_READ` and signs
+the attachment's stored approved version, including a historical version after
+document replacement.
+
+If scan queue insertion fails after upload completion commits, the same
+completion request may be retried with the original checksum. It reuses the
+existing upload session and document version with a stable scan job ID. The
+worker also re-enqueues eligible completed, unscanned versions in bounded
+batches on startup and every 30 seconds, covering a crash before queue
+insertion. Only successful security processing can move a document to `READY`.
+An unprocessed V1 remains eligible when V2 is merely pending. A higher version
+supersedes V1 only after its scan succeeds; a late V1 result cannot replace a
+newer approved current version.
 
 Database-backed and authenticated browser verification require a separately
 approved isolated database migration and test environment. Unit and mocked

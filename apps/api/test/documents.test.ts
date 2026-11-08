@@ -39,6 +39,423 @@ describe("company document direct upload", () => {
     size_bytes: 100,
   } as const;
 
+  it("recovers a committed upload after queue insertion failed without another version or transaction", async () => {
+    const session = {
+      id: "session-a",
+      organisationId: "organisation-a",
+      status: "COMPLETED",
+      expiresAt: new Date(0),
+      documentVersionId: "version-a",
+      documentVersion: {
+        id: "version-a",
+        documentId: "document-a",
+        versionNumber: 1,
+        sha256: checksum,
+        document: { status: "UPLOADED", tenderScopeId: null },
+      },
+    };
+    const database = {
+      uploadSession: { findFirst: vi.fn().mockResolvedValue(session) },
+      documentVersion: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      $transaction: vi.fn(),
+    };
+    const jobs = {
+      add: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("queue unavailable"))
+        .mockResolvedValue(undefined),
+    };
+    const storage = { send: vi.fn() };
+    const service = new DocumentsService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+    const complete = (): Promise<unknown> =>
+      service.completeUpload(
+        "organisation-a",
+        "session-a",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      );
+    await expect(complete()).rejects.toThrow("queue unavailable");
+    await expect(complete()).resolves.toEqual({
+      document_id: "document-a",
+      status: "UPLOADED",
+    });
+    expect(jobs.add).toHaveBeenCalledTimes(2);
+    expect(jobs.add).toHaveBeenCalledWith(
+      "process-company-document",
+      expect.objectContaining({ documentVersionId: "version-a" }),
+      expect.objectContaining({ jobId: "version-a" }),
+    );
+    expect(database.$transaction).not.toHaveBeenCalled();
+    expect(storage.send).not.toHaveBeenCalled();
+    expect(database.documentVersion.findFirst).toHaveBeenCalledWith({
+      select: { id: true },
+      where: {
+        approvedObjectKey: { not: null },
+        documentId: "document-a",
+        versionNumber: { gt: 1 },
+      },
+    });
+  });
+
+  it("does not retry a superseded completed version", async () => {
+    const database = {
+      uploadSession: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "old-session",
+          status: "COMPLETED",
+          expiresAt: new Date(0),
+          documentVersionId: "version-1",
+          documentVersion: {
+            id: "version-1",
+            documentId: "document-a",
+            versionNumber: 1,
+            sha256: checksum,
+            document: { status: "UPLOADED", tenderScopeId: null },
+          },
+        }),
+      },
+      documentVersion: {
+        findFirst: vi.fn().mockResolvedValue({ id: "version-3" }),
+      },
+    };
+    const jobs = { add: vi.fn() };
+    const service = new DocumentsService(
+      database as never,
+      {} as never,
+      jobs as never,
+      environment,
+    );
+    await expect(
+      service.completeUpload(
+        "organisation-a",
+        "old-session",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      ),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(jobs.add).not.toHaveBeenCalled();
+  });
+
+  it("queues a completed V2 even while the document still reports ready V1", async () => {
+    const database = {
+      uploadSession: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "session-2",
+          status: "COMPLETED",
+          expiresAt: new Date(0),
+          documentVersionId: "version-2",
+          documentVersion: {
+            id: "version-2",
+            documentId: "document-a",
+            versionNumber: 2,
+            approvedObjectKey: null,
+            extraction: null,
+            sha256: checksum,
+            document: {
+              status: "READY",
+              tenderScopeId: null,
+              currentVersionId: "version-1",
+            },
+          },
+        }),
+      },
+      documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+    };
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const service = new DocumentsService(
+      database as never,
+      {} as never,
+      jobs as never,
+      environment,
+    );
+    await expect(
+      service.completeUpload(
+        "organisation-a",
+        "session-2",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      ),
+    ).resolves.toEqual({ document_id: "document-a", status: "UPLOADED" });
+    expect(jobs.add).toHaveBeenCalledWith(
+      "process-company-document",
+      expect.objectContaining({ documentVersionId: "version-2" }),
+      expect.objectContaining({ jobId: "version-2" }),
+    );
+  });
+
+  it("commits completion once, then retries the same scan job after an insertion failure", async () => {
+    const version = {
+      id: "version-a",
+      documentId: "document-a",
+      versionNumber: 1,
+      sha256: checksum,
+      sizeBytes: 100n,
+      declaredMimeType: "application/pdf",
+      quarantineObjectKey: "quarantine/a",
+      document: { status: "UPLOADING", tenderScopeId: null },
+    };
+    const session = {
+      id: "session-a",
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + 60_000),
+      documentVersionId: "version-a",
+      documentVersion: version,
+    };
+    const database = {
+      uploadSession: {
+        findFirst: vi.fn().mockImplementation(() => Promise.resolve(session)),
+        update: vi.fn(),
+      },
+      documentVersion: {
+        findFirst: vi.fn().mockResolvedValue(null),
+      },
+      document: { update: vi.fn() },
+      auditEvent: { create: vi.fn() },
+      $transaction: vi.fn().mockResolvedValue([]),
+    };
+    const storage = {
+      send: vi.fn().mockResolvedValue({
+        ContentLength: 100,
+        ContentType: "application/pdf",
+        Metadata: { sha256: checksum },
+      }),
+    };
+    const jobs = {
+      add: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("queue unavailable"))
+        .mockResolvedValue(undefined),
+    };
+    const service = new DocumentsService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+    await expect(
+      service.completeUpload(
+        "organisation-a",
+        "session-a",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      ),
+    ).rejects.toThrow("queue unavailable");
+    session.status = "COMPLETED";
+    version.document.status = "UPLOADED";
+    await expect(
+      service.completeUpload(
+        "organisation-a",
+        "session-a",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      ),
+    ).resolves.toMatchObject({ document_id: "document-a" });
+    expect(database.$transaction).toHaveBeenCalledTimes(1);
+    expect(jobs.add).toHaveBeenCalledTimes(2);
+    expect(
+      jobs.add.mock.calls.map(
+        (call: unknown[]) => (call[2] as { jobId: string }).jobId,
+      ),
+    ).toEqual(["version-a", "version-a"]);
+  });
+
+  it("recovers completed V1 after a V2 session is created but remains pending", async () => {
+    const v1 = {
+      id: "version-1",
+      documentId: "document-a",
+      versionNumber: 1,
+      sha256: checksum,
+      sizeBytes: 100n,
+      declaredMimeType: "application/pdf",
+      quarantineObjectKey: "quarantine/version-1",
+      document: { status: "UPLOADING", tenderScopeId: null },
+    };
+    const session = {
+      id: "session-1",
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + 60_000),
+      documentVersionId: "version-1",
+      documentVersion: v1,
+    };
+    const transaction = {
+      uploadSession: {
+        updateMany: vi.fn().mockImplementation(() => {
+          if (session.status !== "PENDING")
+            return Promise.resolve({ count: 0 });
+          session.status = "COMPLETED";
+          return Promise.resolve({ count: 1 });
+        }),
+        create: vi.fn().mockResolvedValue({ id: "session-2" }),
+      },
+      document: {
+        update: vi.fn().mockImplementation(() => {
+          v1.document.status = "UPLOADED";
+          return Promise.resolve(undefined);
+        }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "document-a" }),
+      },
+      documentVersion: {
+        count: vi.fn().mockResolvedValue(1),
+        create: vi.fn().mockResolvedValue({ id: "version-2" }),
+      },
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+    };
+    const database = {
+      uploadSession: { findFirst: vi.fn().mockResolvedValue(session) },
+      documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+      document: {
+        count: vi.fn().mockResolvedValue(1),
+        findFirst: vi.fn().mockResolvedValue({ id: "document-a" }),
+      },
+      $transaction: vi.fn(
+        (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    };
+    const storage = {
+      send: vi.fn().mockResolvedValue({
+        ContentLength: 100,
+        ContentType: "application/pdf",
+        Metadata: { sha256: checksum },
+      }),
+    };
+    const jobs = {
+      add: vi
+        .fn()
+        .mockRejectedValueOnce(new Error("queue unavailable"))
+        .mockResolvedValue(undefined),
+    };
+    const service = new DocumentsService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+    const completeV1 = (): Promise<unknown> =>
+      service.completeUpload(
+        "organisation-a",
+        "session-1",
+        "user-a",
+        { checksum_sha256: checksum },
+        "request-a",
+      );
+    await expect(completeV1()).rejects.toThrow("queue unavailable");
+    const v2 = (await service.createUploadSession(
+      "organisation-a",
+      "user-a",
+      {
+        ...input,
+        document_id: "document-a",
+        checksum_sha256: "b".repeat(64),
+      },
+      "request-b",
+    )) as { upload_session_id: string; version_id: string };
+    expect(v2).toMatchObject({
+      upload_session_id: "session-2",
+      version_id: "version-2",
+    });
+    expect(session.status).toBe("COMPLETED");
+    await expect(completeV1()).resolves.toEqual({
+      document_id: "document-a",
+      status: "UPLOADED",
+    });
+    expect(jobs.add).toHaveBeenCalledTimes(2);
+    expect(
+      jobs.add.mock.calls.map(
+        (call: unknown[]) => (call[2] as { jobId: string }).jobId,
+      ),
+    ).toEqual(["version-1", "version-1"]);
+    expect(transaction.uploadSession.updateMany).toHaveBeenCalledOnce();
+  });
+
+  it("atomically claims a general upload once under concurrent completion", async () => {
+    let pending = true;
+    const session = {
+      id: "session-a",
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + 60_000),
+      documentVersionId: "version-a",
+      documentVersion: {
+        id: "version-a",
+        documentId: "document-a",
+        versionNumber: 1,
+        sha256: checksum,
+        sizeBytes: 100n,
+        declaredMimeType: "application/pdf",
+        quarantineObjectKey: "quarantine/a",
+        document: { tenderScopeId: null },
+      },
+    };
+    const transaction = {
+      uploadSession: {
+        updateMany: vi.fn().mockImplementation(() => {
+          if (!pending) return Promise.resolve({ count: 0 });
+          pending = false;
+          return Promise.resolve({ count: 1 });
+        }),
+      },
+      document: { update: vi.fn().mockResolvedValue(undefined) },
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+    };
+    const database = {
+      uploadSession: { findFirst: vi.fn().mockResolvedValue(session) },
+      documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(
+        (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    };
+    const storage = {
+      send: vi.fn().mockResolvedValue({
+        ContentLength: 100,
+        ContentType: "application/pdf",
+        Metadata: { sha256: checksum },
+      }),
+    };
+    const jobs = { add: vi.fn().mockResolvedValue(undefined) };
+    const service = new DocumentsService(
+      database as never,
+      storage as never,
+      jobs as never,
+      environment,
+    );
+    const results = await Promise.allSettled(
+      [1, 2].map(() =>
+        service.completeUpload(
+          "organisation-a",
+          "session-a",
+          "user-a",
+          { checksum_sha256: checksum },
+          "request-a",
+        ),
+      ),
+    );
+    expect(results.map((result) => result.status).sort()).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    expect(transaction.document.update).toHaveBeenCalledOnce();
+    expect(transaction.auditEvent.create).toHaveBeenCalledOnce();
+    expect(jobs.add).toHaveBeenCalledOnce();
+    expect(jobs.add).toHaveBeenCalledWith(
+      "process-company-document",
+      expect.anything(),
+      expect.objectContaining({ jobId: "version-a" }),
+    );
+  });
+
   it("requires the SHA-256 metadata as a signed upload header", async () => {
     const transaction = {
       auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
@@ -127,6 +544,7 @@ describe("company document direct upload", () => {
           declaredMimeType: "application/pdf",
           documentId: "document-a",
           id: "version-a",
+          versionNumber: 1,
           quarantineObjectKey: "quarantine/organisation-a/version-a",
           sha256: checksum,
           sizeBytes: 100n,
@@ -138,6 +556,7 @@ describe("company document direct upload", () => {
         $transaction: vi.fn().mockResolvedValue([]),
         auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
         document: { update: vi.fn().mockResolvedValue(undefined) },
+        documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
         uploadSession: {
           findFirst: vi.fn().mockResolvedValue(session),
           update: vi.fn().mockResolvedValue(undefined),
@@ -181,7 +600,7 @@ describe("company document direct upload", () => {
           where: {
             id: "session-a",
             organisationId: "organisation-a",
-            status: "PENDING",
+            status: { in: ["PENDING", "COMPLETED"] },
           },
         }),
       );
