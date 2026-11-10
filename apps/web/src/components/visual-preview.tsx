@@ -125,6 +125,7 @@ const demoMatrix: MatrixResult = {
 const demoAttachments: readonly Attachment[] = [
   {
     attachment_id: "synthetic-attachment",
+    document_version_id: "synthetic-registration-v1",
     context_only: true,
     detached_at: null,
     stale_requirement: false,

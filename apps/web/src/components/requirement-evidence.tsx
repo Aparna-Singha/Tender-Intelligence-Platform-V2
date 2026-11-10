@@ -16,6 +16,7 @@ const maxBytes = 25 * 1024 * 1024;
 
 export interface Attachment {
   attachment_id: string;
+  document_version_id: string;
   context_only: boolean;
   detached_at: string | null;
   stale_requirement: boolean;
@@ -46,6 +47,11 @@ interface UploadSession {
   upload_session_id: string;
   upload_url: string | null;
 }
+interface AttachmentDownload {
+  download_url: string;
+  document_version_id: string;
+  expires_in_seconds: number;
+}
 
 export function RequirementEvidence({
   organisationId,
@@ -73,7 +79,22 @@ export function RequirementEvidence({
   const input = useRef<HTMLInputElement>(null);
   const requestKey = useRef<string | null>(null);
   const [retryFile, setRetryFile] = useState<File | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [downloadLink, setDownloadLink] = useState<{
+    attachmentId: string;
+    url: string;
+    expiresAt: number;
+  } | null>(null);
   const editable = canEdit && previewItems === undefined;
+
+  useEffect(() => {
+    if (!downloadLink) return;
+    const timer = window.setTimeout(
+      () => setDownloadLink(null),
+      Math.max(0, downloadLink.expiresAt - Date.now()),
+    );
+    return () => window.clearTimeout(timer);
+  }, [downloadLink]);
 
   async function refresh(): Promise<void> {
     const result = await apiRequest<Attachment[]>(`${base}/attachments`, {});
@@ -226,6 +247,68 @@ export function RequirementEvidence({
       setBusy(false);
     }
   }
+  async function download(item: Attachment): Promise<void> {
+    setError("");
+    setDownloadLink(null);
+    setDownloadingId(item.attachment_id);
+    // Open during the click gesture so popup blockers permit the tab.
+    let popup: Window | null;
+    try {
+      popup = window.open("about:blank", "_blank");
+      if (popup) popup.opener = null;
+    } catch {
+      popup = null;
+    }
+    try {
+      const result = await apiRequest<AttachmentDownload>(
+        `${base}/attachments/${item.attachment_id}/download`,
+        { method: "POST" },
+      );
+      if (result.document_version_id !== item.document_version_id)
+        throw new Error(
+          "The download did not match the attached document version.",
+        );
+      const url = new URL(result.download_url);
+      if (
+        !Number.isFinite(result.expires_in_seconds) ||
+        result.expires_in_seconds <= 0 ||
+        (url.protocol !== "https:" &&
+          !(
+            url.protocol === "http:" &&
+            ["127.0.0.1", "localhost"].includes(url.hostname)
+          ))
+      )
+        throw new Error(
+          "The download link was invalid or expired. Request it again.",
+        );
+      const link = {
+        attachmentId: item.attachment_id,
+        url: url.href,
+        expiresAt: Date.now() + result.expires_in_seconds * 1000,
+      };
+      if (popup) {
+        try {
+          popup.location.replace(link.url);
+          return;
+        } catch {
+          popup.close();
+        }
+      }
+      setDownloadLink(link);
+      setMessage(
+        "Your browser blocked the download tab. Use the link below before it expires.",
+      );
+    } catch (caught) {
+      popup?.close();
+      setError(
+        caught instanceof Error && caught.message.startsWith("The download")
+          ? caught.message
+          : formatApiError(caught, "Download failed. Please retry."),
+      );
+    } finally {
+      setDownloadingId(null);
+    }
+  }
   const active = items.filter((item) => item.detached_at === null);
   return (
     <div className="requirement-evidence-panel">
@@ -272,6 +355,33 @@ export function RequirementEvidence({
               )}
             {item.stale_requirement && (
               <span> · Requirement changed; review again</span>
+            )}
+            {previewItems === undefined && (
+              <Button
+                disabled={downloadingId === item.attachment_id}
+                onClick={() => void download(item)}
+                variant="secondary"
+              >
+                {downloadingId === item.attachment_id
+                  ? "Preparing download..."
+                  : "Download attached version"}
+              </Button>
+            )}
+            {downloadLink?.attachmentId === item.attachment_id && (
+              <a
+                href={downloadLink.url}
+                onClick={(event) => {
+                  if (Date.now() >= downloadLink.expiresAt) {
+                    event.preventDefault();
+                    setDownloadLink(null);
+                    setError("The download link expired. Request it again.");
+                  }
+                }}
+                rel="noopener noreferrer"
+                target="_blank"
+              >
+                Open download link
+              </a>
             )}
             {editable && (
               <Button

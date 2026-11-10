@@ -104,4 +104,34 @@ describe("public API client", () => {
       code: "STALE_RESPONSE",
     });
   });
+
+  it("obtains CSRF for attachment download and refreshes it after a 403", async () => {
+    const path =
+      "/organisations/org/tenders/tender/versions/version/requirements/requirement/attachments/attachment/download";
+    let csrfRequests = 0;
+    let downloadRequests = 0;
+    const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      if (url.endsWith("/auth/csrf"))
+        return Promise.resolve(
+          Response.json({ data: { csrf_token: `csrf-${++csrfRequests}` } }),
+        );
+      expect(url).toContain(path);
+      expect(init?.method).toBe("POST");
+      expect(init?.credentials).toBe("include");
+      const headers = new Headers(init?.headers);
+      expect(headers.get("x-csrf-token")).toBe(`csrf-${++downloadRequests}`);
+      return Promise.resolve(
+        downloadRequests === 1
+          ? Response.json({ error: { code: "FORBIDDEN" } }, { status: 403 })
+          : Response.json({ data: { document_version_id: "v1" } }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(apiRequest(path, { method: "POST" })).resolves.toEqual({
+      document_version_id: "v1",
+    });
+    expect(csrfRequests).toBe(2);
+    expect(downloadRequests).toBe(2);
+  });
 });

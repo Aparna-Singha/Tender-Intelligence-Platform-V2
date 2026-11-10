@@ -4,7 +4,7 @@ import {
   GetObjectCommand,
 } from "@aws-sdk/client-s3";
 import type { S3Client } from "@aws-sdk/client-s3";
-import type { Prisma, PrismaClient } from "@tender/database";
+import { Prisma, type PrismaClient } from "@tender/database";
 import { isAllowedMimeExtension, MAX_UPLOAD_BYTES } from "@tender/domain";
 import { fileTypeFromBuffer } from "file-type";
 import { createHash } from "node:crypto";
@@ -58,10 +58,19 @@ export class DocumentProcessor {
       },
     });
     if (version === null) throw new Error("Document version not found");
-    await this.database.document.update({
-      data: { status: "SCANNING" },
-      where: { id: version.documentId },
-    });
+    if (version.approvedObjectKey !== null) return;
+    if (
+      await this.hasNewerCurrentVersion(
+        version.documentId,
+        version.versionNumber,
+      )
+    )
+      return;
+    await this.updateStatusUnlessSuperseded(
+      version.documentId,
+      version.versionNumber,
+      "SCANNING",
+    );
     const object = await this.storage.send(
       new GetObjectCommand({
         Bucket: this.bucket,
@@ -106,10 +115,11 @@ export class DocumentProcessor {
       return;
     }
     if (scan.status === "ERROR") {
-      await this.database.document.update({
-        data: { status: "QUARANTINED" },
-        where: { id: version.documentId },
-      });
+      await this.updateStatusUnlessSuperseded(
+        version.documentId,
+        version.versionNumber,
+        "QUARANTINED",
+      );
       throw new Error("Malware scanner unavailable");
     }
     let extractionMetadata: Prisma.InputJsonObject = {
@@ -151,10 +161,11 @@ export class DocumentProcessor {
         throw error;
       }
     }
-    await this.database.document.update({
-      data: { status: "PROCESSING" },
-      where: { id: version.documentId },
-    });
+    await this.updateStatusUnlessSuperseded(
+      version.documentId,
+      version.versionNumber,
+      "PROCESSING",
+    );
     signal?.throwIfAborted();
     const approvedKey = `approved/${data.organisationId}/${version.id}`;
     await this.storage.send(
@@ -174,6 +185,7 @@ export class DocumentProcessor {
     );
     signal?.throwIfAborted();
     await this.database.$transaction(async (transaction) => {
+      await this.lockDocument(transaction, version.documentId);
       await transaction.documentVersion.update({
         data: {
           approvedObjectKey: approvedKey,
@@ -196,10 +208,18 @@ export class DocumentProcessor {
         },
         where: { documentVersionId: version.id },
       });
-      await transaction.document.update({
-        data: { currentVersionId: version.id, status: "READY" },
+      const current = await transaction.document.findUniqueOrThrow({
+        select: { currentVersion: { select: { versionNumber: true } } },
         where: { id: version.documentId },
       });
+      if (
+        !current.currentVersion ||
+        current.currentVersion.versionNumber <= version.versionNumber
+      )
+        await transaction.document.update({
+          data: { currentVersionId: version.id, status: "READY" },
+          where: { id: version.documentId },
+        });
       for (const fact of extractedFacts)
         await this.persistExtractedFact(
           transaction,
@@ -222,27 +242,48 @@ export class DocumentProcessor {
       );
     });
     await this.invalidateAssessments(data.organisationId);
-    if (signal?.aborted === true) {
-      await this.database.$transaction([
-        this.database.document.update({
-          data: { currentVersionId: null, status: "FAILED" },
-          where: { id: version.documentId },
-        }),
-        this.database.documentExtraction.update({
-          data: {
-            completedAt: new Date(),
-            failureCode: "JOB_TIMEOUT",
-            status: "FAILED",
-          },
-          where: { documentVersionId: version.id },
-        }),
-      ]);
-      signal.throwIfAborted();
-    }
+    // A committed clean result must not be undone by a timeout observed afterward.
+    signal?.throwIfAborted();
   }
 
-  public async cleanupUploadObjects(keys: readonly string[]): Promise<void> {
-    for (const key of keys) {
+  public async markFailed(documentVersionId: string): Promise<void> {
+    const version = await this.database.documentVersion.findUnique({
+      select: { documentId: true, versionNumber: true },
+      where: { id: documentVersionId },
+    });
+    if (!version) return;
+    await this.database.$transaction(async (transaction) => {
+      await this.lockDocument(transaction, version.documentId);
+      const document = await transaction.document.findUniqueOrThrow({
+        select: {
+          currentVersion: { select: { versionNumber: true } },
+          status: true,
+        },
+        where: { id: version.documentId },
+      });
+      if (
+        ["UPLOADED", "SCANNING", "PROCESSING"].includes(document.status) &&
+        (document.currentVersion?.versionNumber ?? 0) < version.versionNumber
+      )
+        await transaction.document.update({
+          data: { status: "FAILED" },
+          where: { id: version.documentId },
+        });
+    });
+  }
+
+  public async cleanupUploadObjects(
+    data: CompanyUploadCleanupJob,
+  ): Promise<void> {
+    const expectedKey = `quarantine/${data.organisationId}/${data.documentVersionId}`;
+    if (data.keys.some((key) => key !== expectedKey))
+      throw new Error("COMPANY_UPLOAD_CLEANUP_KEY_MISMATCH");
+    const retainedVersion = await this.database.documentVersion.findUnique({
+      select: { id: true },
+      where: { id: data.documentVersionId },
+    });
+    if (retainedVersion !== null) return;
+    for (const key of data.keys) {
       try {
         await this.storage.send(
           new DeleteObjectCommand({
@@ -659,12 +700,21 @@ export class DocumentProcessor {
     detectedMimeType: string | undefined,
     failureCode: string,
   ): Promise<void> {
-    await this.database.$transaction([
-      this.database.documentVersion.update({
+    await this.database.$transaction(async (transaction) => {
+      await this.lockDocument(transaction, documentId);
+      const rejected = await transaction.documentVersion.findUniqueOrThrow({
+        select: { versionNumber: true },
+        where: { id: versionId },
+      });
+      const current = await transaction.document.findUniqueOrThrow({
+        select: { currentVersion: { select: { versionNumber: true } } },
+        where: { id: documentId },
+      });
+      await transaction.documentVersion.update({
         data: { detectedMimeType: detectedMimeType ?? null },
         where: { id: versionId },
-      }),
-      this.database.documentExtraction.upsert({
+      });
+      await transaction.documentExtraction.upsert({
         create: {
           documentVersionId: versionId,
           failureCode,
@@ -672,18 +722,59 @@ export class DocumentProcessor {
         },
         update: { failureCode, status: "REJECTED" },
         where: { documentVersionId: versionId },
-      }),
-      this.database.document.update({
-        data: { status: "REJECTED" },
-        where: { id: documentId },
-      }),
-    ]);
+      });
+      if (
+        !current.currentVersion ||
+        current.currentVersion.versionNumber <= rejected.versionNumber
+      )
+        await transaction.document.update({
+          data: { status: "REJECTED" },
+          where: { id: documentId },
+        });
+    });
     const document = await this.database.document.findUnique({
       select: { organisationId: true },
       where: { id: documentId },
     });
     if (document !== null)
       await this.invalidateAssessments(document.organisationId);
+  }
+
+  private async lockDocument(
+    transaction: Prisma.TransactionClient,
+    documentId: string,
+  ): Promise<void> {
+    await transaction.$queryRaw(
+      Prisma.sql`SELECT id FROM documents WHERE id=${documentId}::uuid FOR UPDATE`,
+    );
+  }
+
+  private async hasNewerCurrentVersion(
+    documentId: string,
+    versionNumber: number,
+  ): Promise<boolean> {
+    const document = await this.database.document.findUnique({
+      select: { currentVersion: { select: { versionNumber: true } } },
+      where: { id: documentId },
+    });
+    return (document?.currentVersion?.versionNumber ?? 0) > versionNumber;
+  }
+
+  private async updateStatusUnlessSuperseded(
+    documentId: string,
+    versionNumber: number,
+    status: "SCANNING" | "QUARANTINED" | "PROCESSING",
+  ): Promise<void> {
+    await this.database.document.updateMany({
+      data: { status },
+      where: {
+        id: documentId,
+        OR: [
+          { currentVersionId: null },
+          { currentVersion: { versionNumber: { lte: versionNumber } } },
+        ],
+      },
+    });
   }
 
   private async deleteDocument(data: DocumentJob): Promise<void> {

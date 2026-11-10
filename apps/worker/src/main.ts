@@ -17,6 +17,7 @@ import Fastify, { type FastifyInstance } from "fastify";
 import { Redis } from "ioredis";
 
 import { createHealthServer } from "./health-server.js";
+import { CompanyUploadRecovery } from "./company-upload-recovery.js";
 import {
   hasBullMqRetryRemaining,
   startJobLifecycle,
@@ -214,7 +215,7 @@ async function bootstrap(): Promise<void> {
         throw new Error("Invalid company upload cleanup job");
       const data = job.data;
       return runWithTimeout(environment.DOCUMENT_JOB_TIMEOUT_MS, async () =>
-        processor.cleanupUploadObjects(data.keys),
+        processor.cleanupUploadObjects(data),
       );
     }
     if (job.name === "cleanup-tender-document-storage") {
@@ -403,16 +404,11 @@ async function bootstrap(): Promise<void> {
       );
     if (
       job?.name === "process-company-document" &&
-      isCompanyDocumentJob(job.data)
+      isCompanyDocumentJob(job.data) &&
+      !hasBullMqRetryRemaining(job)
     ) {
-      void database.document
-        .updateMany({
-          data: { status: "FAILED" },
-          where: {
-            status: { in: ["UPLOADED", "SCANNING", "PROCESSING"] },
-            versions: { some: { id: job.data.documentVersionId } },
-          },
-        })
+      void processor
+        .markFailed(job.data.documentVersionId)
         .catch((failure: unknown) => {
           logger.error(
             {
@@ -433,13 +429,24 @@ async function bootstrap(): Promise<void> {
     requestIdHeader: environment.REQUEST_ID_HEADER,
   });
   let shuttingDown = false;
+  const recovery = new CompanyUploadRecovery(database, queue, (error) => {
+    logger.error(
+      { errorType: error instanceof Error ? error.name : "UnknownError" },
+      "Company upload recovery will retry",
+    );
+  });
+  const recoveryTimer = setInterval(() => {
+    void recovery.run();
+  }, 30_000);
 
   const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (shuttingDown) {
       return;
     }
     shuttingDown = true;
+    clearInterval(recoveryTimer);
     logger.info({ signal }, "Worker is shutting down");
+    await recovery.stop();
 
     const results = await Promise.allSettled([
       server.close(),
@@ -473,6 +480,7 @@ async function bootstrap(): Promise<void> {
     host: environment.WORKER_METRICS_HOST,
     port: environment.WORKER_METRICS_PORT,
   });
+  void recovery.run();
   logger.info(
     {
       healthPort: environment.WORKER_HEALTH_PORT,

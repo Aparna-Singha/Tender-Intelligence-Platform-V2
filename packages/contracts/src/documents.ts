@@ -67,6 +67,37 @@ export const completeUploadSchema = z.object({
   checksum_sha256: sha256Schema,
 });
 
+const evidenceIdempotencyKeySchema = z.string().trim().min(8).max(120);
+
+export const createRequirementUploadSchema = createUploadSessionSchema
+  .omit({ category: true, document_id: true })
+  .extend({
+    category: documentCategorySchema.optional(),
+    idempotency_key: evidenceIdempotencyKeySchema,
+  });
+
+export const attachRequirementEvidenceSchema = z.object({
+  document_id: z.uuid(),
+  document_version_id: z.uuid(),
+  idempotency_key: evidenceIdempotencyKeySchema,
+});
+
+export const evidenceCandidateFilterSchema = z.object({
+  search: z.string().trim().max(120).optional(),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+  offset: z.coerce.number().int().min(0).max(10_000).default(0),
+});
+
+export type CreateRequirementUploadRequest = z.infer<
+  typeof createRequirementUploadSchema
+>;
+export type AttachRequirementEvidenceRequest = z.infer<
+  typeof attachRequirementEvidenceSchema
+>;
+export type EvidenceCandidateFilter = z.infer<
+  typeof evidenceCandidateFilterSchema
+>;
+
 export const documentFilterSchema = z.object({
   category: documentCategorySchema.optional(),
   expiring_before: z.iso.date().optional(),
