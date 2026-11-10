@@ -300,9 +300,9 @@ describe("company document direct upload", () => {
         create: vi.fn().mockResolvedValue({ id: "session-2" }),
       },
       document: {
-        update: vi.fn().mockImplementation(() => {
+        updateMany: vi.fn().mockImplementation(() => {
           v1.document.status = "UPLOADED";
-          return Promise.resolve(undefined);
+          return Promise.resolve({ count: 1 });
         }),
         findUniqueOrThrow: vi.fn().mockResolvedValue({ id: "document-a" }),
       },
@@ -406,7 +406,7 @@ describe("company document direct upload", () => {
           return Promise.resolve({ count: 1 });
         }),
       },
-      document: { update: vi.fn().mockResolvedValue(undefined) },
+      document: { updateMany: vi.fn().mockResolvedValue({ count: 1 }) },
       auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
     };
     const database = {
@@ -446,7 +446,7 @@ describe("company document direct upload", () => {
       "fulfilled",
       "rejected",
     ]);
-    expect(transaction.document.update).toHaveBeenCalledOnce();
+    expect(transaction.document.updateMany).toHaveBeenCalledOnce();
     expect(transaction.auditEvent.create).toHaveBeenCalledOnce();
     expect(jobs.add).toHaveBeenCalledOnce();
     expect(jobs.add).toHaveBeenCalledWith(
@@ -454,6 +454,102 @@ describe("company document direct upload", () => {
       expect.anything(),
       expect.objectContaining({ jobId: "version-a" }),
     );
+  });
+
+  it("preserves a newer READY version when V1 completes after its initial supersession check", async () => {
+    const document = { status: "UPLOADING", currentVersionNumber: 0 };
+    const session = {
+      id: "session-1",
+      status: "PENDING",
+      expiresAt: new Date(Date.now() + 60_000),
+      documentVersionId: "version-1",
+      documentVersion: {
+        id: "version-1",
+        documentId: "document-a",
+        versionNumber: 1,
+        sha256: checksum,
+        sizeBytes: 100n,
+        declaredMimeType: "application/pdf",
+        quarantineObjectKey: "quarantine/version-1",
+        document: { tenderScopeId: null },
+      },
+    };
+    const transaction = {
+      uploadSession: {
+        updateMany: vi.fn().mockImplementation(() => {
+          // V2's scan commits after V1's initial read and before its status write.
+          document.status = "READY";
+          document.currentVersionNumber = 2;
+          return Promise.resolve({ count: 1 });
+        }),
+      },
+      document: {
+        update: vi.fn().mockImplementation(() => {
+          document.status = "UPLOADED";
+          return Promise.resolve(undefined);
+        }),
+        updateMany: vi.fn().mockImplementation(
+          (query: {
+            where: {
+              OR: [
+                { currentVersionId: null },
+                { currentVersion: { versionNumber: { lte: number } } },
+              ];
+            };
+          }) => {
+            if (
+              document.currentVersionNumber <=
+              query.where.OR[1].currentVersion.versionNumber.lte
+            ) {
+              document.status = "UPLOADED";
+              return Promise.resolve({ count: 1 });
+            }
+            return Promise.resolve({ count: 0 });
+          },
+        ),
+      },
+      auditEvent: { create: vi.fn().mockResolvedValue(undefined) },
+    };
+    const database = {
+      uploadSession: { findFirst: vi.fn().mockResolvedValue(session) },
+      documentVersion: { findFirst: vi.fn().mockResolvedValue(null) },
+      $transaction: vi.fn(
+        (callback: (tx: typeof transaction) => Promise<unknown>) =>
+          callback(transaction),
+      ),
+    };
+    const service = new DocumentsService(
+      database as never,
+      {
+        send: vi.fn().mockResolvedValue({
+          ContentLength: 100,
+          ContentType: "application/pdf",
+          Metadata: { sha256: checksum },
+        }),
+      } as never,
+      { add: vi.fn().mockResolvedValue(undefined) } as never,
+      environment,
+    );
+
+    await service.completeUpload(
+      "organisation-a",
+      "session-1",
+      "user-a",
+      { checksum_sha256: checksum },
+      "request-a",
+    );
+    expect(document.status).toBe("READY");
+    expect(transaction.document.update).not.toHaveBeenCalled();
+    expect(transaction.document.updateMany).toHaveBeenCalledWith({
+      data: { status: "UPLOADED" },
+      where: {
+        id: "document-a",
+        OR: [
+          { currentVersionId: null },
+          { currentVersion: { versionNumber: { lte: 1 } } },
+        ],
+      },
+    });
   });
 
   it("requires the SHA-256 metadata as a signed upload header", async () => {

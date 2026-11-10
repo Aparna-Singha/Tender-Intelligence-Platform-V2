@@ -514,9 +514,23 @@ export class DocumentsService {
       });
       if (claimed.count !== 1)
         throw new ConflictException("Upload is no longer pending");
-      await tx.document.update({
+      // The conditional UPDATE takes the document row lock and rechecks the
+      // current version after any concurrent scan transaction commits.
+      await tx.document.updateMany({
         data: { status: "UPLOADED" },
-        where: { id: session.documentVersion.documentId },
+        where: {
+          id: session.documentVersion.documentId,
+          OR: [
+            { currentVersionId: null },
+            {
+              currentVersion: {
+                versionNumber: {
+                  lte: session.documentVersion.versionNumber,
+                },
+              },
+            },
+          ],
+        },
       });
       await tx.auditEvent.create({
         data: {
