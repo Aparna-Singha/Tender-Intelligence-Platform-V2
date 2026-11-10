@@ -86,22 +86,59 @@ export class ExtractionsService {
     const existing = await this.database.extractionRun.findUnique({
       where: { idempotencyKey },
     });
-    if (existing !== null) return publicRun(existing);
-    if (triggerType === "USER") {
+    if (existing !== null) {
+      if (existing.status === "QUEUED")
+        await this.enqueue(existing.id, organisationId, requestId);
+      return publicRun(existing);
+    }
+    {
       const equivalent = await this.database.extractionRun.findFirst({
         orderBy: { createdAt: "desc" },
         where: {
           organisationId,
           parserPolicyVersion: PARSER_POLICY_VERSION,
           sourceFingerprint,
-          status: { in: ["QUEUED", "PARSING", "STRUCTURING", "COMPLETE"] },
+          status: {
+            in:
+              triggerType === "USER"
+                ? ["QUEUED", "PARSING", "STRUCTURING", "COMPLETE"]
+                : ["QUEUED", "PARSING", "STRUCTURING"],
+          },
           structuringPolicyVersion: STRUCTURING_POLICY_VERSION,
           tenderVersionId: versionId,
         },
       });
-      if (equivalent !== null) return publicRun(equivalent);
+      if (equivalent !== null) {
+        if (equivalent.status === "QUEUED")
+          await this.enqueue(equivalent.id, organisationId, requestId);
+        return publicRun(equivalent);
+      }
     }
     const run = await this.database.$transaction(async (transaction) => {
+      // Match the worker's version lock so a new run cannot race an older
+      // extraction's final activation. Recheck under the lock for two starts.
+      await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${versionId}::text, 0))`;
+      const replay = await transaction.extractionRun.findUnique({
+        where: { idempotencyKey },
+      });
+      if (replay !== null) return replay;
+      const concurrent = await transaction.extractionRun.findFirst({
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+        where: {
+          organisationId,
+          parserPolicyVersion: PARSER_POLICY_VERSION,
+          sourceFingerprint,
+          status: {
+            in:
+              triggerType === "USER"
+                ? ["QUEUED", "PARSING", "STRUCTURING", "COMPLETE"]
+                : ["QUEUED", "PARSING", "STRUCTURING"],
+          },
+          structuringPolicyVersion: STRUCTURING_POLICY_VERSION,
+          tenderVersionId: versionId,
+        },
+      });
+      if (concurrent !== null) return concurrent;
       const created = await transaction.extractionRun.create({
         data: {
           idempotencyKey,
@@ -135,21 +172,30 @@ export class ExtractionsService {
       });
       return created;
     });
+    if (run.status === "QUEUED")
+      await this.enqueue(run.id, organisationId, requestId);
+    return publicRun(run);
+  }
+
+  private async enqueue(
+    runId: string,
+    organisationId: string,
+    requestId: string,
+  ): Promise<void> {
     await this.jobs.add(
       "extract-tender-version",
       {
-        extractionRunId: run.id,
+        extractionRunId: runId,
         organisationId,
         requestId,
       },
       {
         attempts: 3,
         backoff: { delay: 2000, type: "exponential" },
-        jobId: run.id,
+        jobId: runId,
         removeOnComplete: 100,
       },
     );
-    return publicRun(run);
   }
 
   public async listRuns(
@@ -160,7 +206,7 @@ export class ExtractionsService {
   ): Promise<unknown> {
     await this.requireVersion(organisationId, tenderId, versionId);
     const runs = await this.database.extractionRun.findMany({
-      orderBy: { createdAt: "desc" },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       skip: pagination.cursor === undefined ? 0 : 1,
       take: pagination.limit,
       ...(pagination.cursor === undefined
@@ -546,6 +592,14 @@ export class ExtractionsService {
     });
     if (failed === null)
       throw new ConflictException("Only failed extraction runs may be retried");
+    const tender = await this.database.tender.findFirst({
+      select: { currentVersionId: true },
+      where: { id: tenderId, organisationId, deletedAt: null },
+    });
+    if (tender?.currentVersionId !== failed.tenderVersionId)
+      throw new ConflictException(
+        "Only the current tender version may be retried",
+      );
     return this.start(
       organisationId,
       tenderId,

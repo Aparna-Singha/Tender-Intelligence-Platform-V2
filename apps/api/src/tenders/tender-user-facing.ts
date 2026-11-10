@@ -227,6 +227,22 @@ export function deriveTenderWorkflowState(
     };
   }
 
+  if (context.extraction.status === "CANCELLED") {
+    return {
+      actionLabel: "Review",
+      code: "FAILED_RECOVERABLE",
+      detail:
+        "Extraction was cancelled. The approved source documents remain available.",
+      isCompleted: false,
+      isDraft: false,
+      isInProgress: false,
+      needsAttention: true,
+      onHold: false,
+      statusLabel: "Extraction cancelled",
+      tone: "warning",
+    };
+  }
+
   if (
     context.extraction.invalidatedAt !== null ||
     context.extraction.status !== "COMPLETE"
@@ -241,7 +257,14 @@ export function deriveTenderWorkflowState(
       isInProgress: true,
       needsAttention: false,
       onHold: false,
-      statusLabel: "Reading tender...",
+      statusLabel:
+        context.extraction.status === "QUEUED"
+          ? "Extraction queued"
+          : context.extraction.status === "PARSING"
+            ? "Extracting documents"
+            : context.extraction.status === "STRUCTURING"
+              ? "Structuring requirements"
+              : "Extracting documents",
       tone: "info",
     };
   }

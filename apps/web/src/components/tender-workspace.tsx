@@ -1371,6 +1371,10 @@ export function TenderWorkspace({
   const [eligibilityAutomationRetry, setEligibilityAutomationRetry] =
     useState(0);
   const [riskRetrying, setRiskRetrying] = useState(false);
+  const [extractionRetrying, setExtractionRetrying] = useState(false);
+  const [extractionFeedback, setExtractionFeedback] = useState("");
+  const extractionRetryInFlight = useRef(false);
+  const extractionRetryKey = useRef<string | null>(null);
   const workspaceLoadToken = useRef(0);
   const workspacePollPromise = useRef<Promise<void> | null>(null);
   const supportLoadPromise = useRef<Promise<void> | null>(null);
@@ -1986,6 +1990,41 @@ export function TenderWorkspace({
     }
   }
 
+  async function retryExtraction(): Promise<void> {
+    const failedRun = support.extractionRun;
+    if (
+      failedRun?.status !== "FAILED" ||
+      currentVersionId === "" ||
+      extractionRetryInFlight.current
+    )
+      return;
+    extractionRetryInFlight.current = true;
+    setExtractionRetrying(true);
+    extractionRetryKey.current ??= crypto.randomUUID();
+    try {
+      const queued = await apiRequest<ExtractionRun>(
+        `/organisations/${organisationId}/tenders/${tenderId}/extractions/${failedRun.id}/retry`,
+        {
+          body: JSON.stringify({ idempotency_key: extractionRetryKey.current }),
+          method: "POST",
+        },
+      );
+      setExtractionFeedback(
+        `Extraction retry: ${humanizeEnum(queued.status)}.`,
+      );
+      extractionRetryKey.current = null;
+      await refreshSupportData(currentVersionId);
+      await loadWorkspace(false);
+    } catch (caught) {
+      setExtractionFeedback(
+        formatApiError(caught, "Extraction retry could not be confirmed."),
+      );
+    } finally {
+      extractionRetryInFlight.current = false;
+      setExtractionRetrying(false);
+    }
+  }
+
   async function recordPursuitDecision(
     event: FormEvent<HTMLFormElement>,
   ): Promise<void> {
@@ -2552,6 +2591,33 @@ export function TenderWorkspace({
                   {workflowSummary.statusLabel}
                 </span>
                 <p>{workflowSummary.detail}</p>
+              </div>
+              <div className="tender-assessment-pending">
+                <strong>
+                  Extraction:{" "}
+                  {support.extractionRun === null
+                    ? "Not started"
+                    : support.extractionRun.status === "PARSING"
+                      ? "Extracting documents"
+                      : support.extractionRun.status === "STRUCTURING"
+                        ? "Structuring requirements"
+                        : humanizeEnum(support.extractionRun.status)}
+                </strong>
+                {support.extractionRun?.status === "FAILED" ? (
+                  <Button
+                    disabled={extractionRetrying}
+                    onClick={() => void retryExtraction()}
+                    type="button"
+                    variant="secondary"
+                  >
+                    {extractionRetrying
+                      ? "Retrying extraction..."
+                      : "Retry extraction"}
+                  </Button>
+                ) : null}
+                {extractionFeedback !== "" ? (
+                  <p role="status">{extractionFeedback}</p>
+                ) : null}
               </div>
               {support.matrix === null ? (
                 <div className="tender-assessment-pending">
