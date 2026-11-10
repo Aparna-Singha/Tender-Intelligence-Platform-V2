@@ -31,6 +31,40 @@ extraction status. `activeExtractionRunId` continues to point only to a
 completed authoritative extraction for downstream analysis. A failed latest
 attempt therefore appears as failed without promoting its results.
 
+## Disposable PostgreSQL verification
+
+`tools/verify-extraction-postgres.mjs` calls the real built worker persistence
+method and API extraction service against a disposable PostgreSQL 18 database
+with all 18 repository migrations. It fails closed unless
+`BIDVEDA_EXTRACTION_TEST_DATABASE_URL` names
+`pr47_test@127.0.0.1:16432/bidveda_pr47_verification` without URL overrides.
+Use only a dedicated container and volume; remove those exact resources after
+the run. Build `@tender/api` and `@tender/worker` before running the script.
+The synthetic documents are parsed data supplied directly to persistence; this
+does not test PDF parsing, object storage, antivirus scanning, authenticated
+HTTP, or frontend browser interactions.
+
+In the isolated run on PostgreSQL 18.6, the representative fixture used four
+documents, 29 units (24 primary pages, an 18-line BOQ sheet, three scanned
+terms pages, and one technical page), 658 blocks, 658 requirements, 659
+citations, one table, and 36 cells. Persistence used 17 bulk insert batches
+with at most 200 rows each and 27 measured transaction operations. Three
+repetitions took roughly 0.5–0.8 seconds inside the transaction on local
+PostgreSQL; the controlled 50 ms delay per database operation took roughly
+1.9–2.2 seconds.
+All were below the unchanged 120-second transaction timeout. Five injected
+insert/activation failures rolled back, preserving the prior active extraction
+and risk pointer. Real connections also verified same-key and equivalent-source
+start concurrency, queue-failure replay, retry, stale-worker rejection,
+cancellation, and duplicate-worker activation protection.
+
+These timings do not establish Neon latency or complete end-to-end parsing
+time. The earlier approximately 1,388 sequential writes are a code-path
+estimate; the new operation count is measured by the verification wrapper.
+Before staging rollout, run a separately approved synthetic extraction through
+the deployed API, worker, parser, and storage stack. Do not retry a real failed
+tender as the first verification.
+
 ## Post-merge staging verification
 
 1. Confirm the matching API and worker revisions, health, and migration status.

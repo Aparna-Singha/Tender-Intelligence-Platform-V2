@@ -117,7 +117,8 @@ export class ExtractionsService {
     const run = await this.database.$transaction(async (transaction) => {
       // Match the worker's version lock so a new run cannot race an older
       // extraction's final activation. Recheck under the lock for two starts.
-      await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${versionId}::text, 0))`;
+      // Return a boolean: Prisma cannot deserialize PostgreSQL's void result.
+      await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${versionId}::text, 0)) IS NOT NULL AS locked`;
       const replay = await transaction.extractionRun.findUnique({
         where: { idempotencyKey },
       });

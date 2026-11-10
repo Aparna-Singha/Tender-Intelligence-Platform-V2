@@ -470,7 +470,8 @@ export class ExtractionProcessor {
 
     await this.database.$transaction(
       async (transaction) => {
-        await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${tenderVersionId}::text, 0))`;
+        // Return a boolean: Prisma cannot deserialize PostgreSQL's void result.
+        await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${tenderVersionId}::text, 0)) IS NOT NULL AS locked`;
         // Serialize duplicate workers for this run before inserting any rows.
         // A late worker sees COMPLETE after the first transaction commits.
         const claim = await transaction.extractionRun.updateMany({
