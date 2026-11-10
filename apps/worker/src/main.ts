@@ -143,6 +143,17 @@ async function bootstrap(): Promise<void> {
     database,
     storage,
     environment.S3_BUCKET,
+    undefined,
+    ({ code, operation }) => {
+      logger.error(
+        {
+          event: "extraction_prisma_failure",
+          prisma_error_code: code,
+          extraction_operation: operation,
+        },
+        "Extraction database operation failed",
+      );
+    },
   );
   const riskAnalysisProcessor = new RiskAnalysisProcessor(database);
   const evidenceAssessmentProcessor = new EvidenceAssessmentProcessor(database);

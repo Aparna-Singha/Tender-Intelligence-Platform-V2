@@ -14,6 +14,39 @@ import { createHash, randomUUID } from "node:crypto";
 import { ParserFailure, ParserRegistry } from "./tender-document-parsers.js";
 
 const MAX_SOURCE_BYTES = 25 * 1024 * 1024;
+const DIAGNOSTIC_PRISMA_CODES = new Set([
+  "P2000",
+  "P2002",
+  "P2003",
+  "P2004",
+  "P2011",
+  "P2014",
+  "P2021",
+  "P2022",
+  "P2025",
+  "P2028",
+  "P2034",
+]);
+
+type ExtractionOperation =
+  "stage_update" | "source_read" | "parse_source" | "persist_transaction";
+export interface ExtractionPrismaDiagnostic {
+  readonly code: string;
+  readonly operation: ExtractionOperation;
+}
+
+function diagnosticPrismaCode(error: unknown): string | null {
+  if (
+    !(error instanceof Error) ||
+    error.name !== "PrismaClientKnownRequestError" ||
+    !("code" in error)
+  )
+    return null;
+  const code = error.code;
+  return typeof code === "string" && DIAGNOSTIC_PRISMA_CODES.has(code)
+    ? code
+    : null;
+}
 
 export interface ExtractionJob {
   readonly extractionRunId: string;
@@ -42,6 +75,9 @@ export class ExtractionProcessor {
     private readonly storage: S3Client,
     private readonly bucket: string,
     private readonly parsers = new ParserRegistry(),
+    private readonly onPrismaDiagnostic?: (
+      diagnostic: ExtractionPrismaDiagnostic,
+    ) => void,
   ) {}
 
   public async process(
@@ -79,6 +115,7 @@ export class ExtractionProcessor {
       await this.fail(run.id, "SOURCE_CHANGED", "Approved source changed");
       return null;
     }
+    let operation: ExtractionOperation = "stage_update";
     try {
       await this.stage(
         run.id,
@@ -88,6 +125,7 @@ export class ExtractionProcessor {
       );
       const parsedSources: ParsedSource[] = [];
       for (const [index, document] of run.tenderVersion.documents.entries()) {
+        operation = "source_read";
         signal?.throwIfAborted();
         if (await this.cancelled(run.id)) return null;
         const object = await this.storage.send(
@@ -108,6 +146,7 @@ export class ExtractionProcessor {
           createHash("sha256").update(content).digest("hex") !== document.sha256
         )
           throw new ParserFailure("SOURCE_CHECKSUM_MISMATCH");
+        operation = "parse_source";
         const parsed = await this.parsers.parse(
           document.extension,
           content,
@@ -122,6 +161,7 @@ export class ExtractionProcessor {
           },
           parsed,
         });
+        operation = "stage_update";
         await this.stage(
           run.id,
           "PARSING",
@@ -138,6 +178,7 @@ export class ExtractionProcessor {
         65,
         "Structuring source-grounded requirements",
       );
+      operation = "persist_transaction";
       await this.persist(run.id, run.tenderVersionId, parsedSources, signal);
       return {
         organisationId: data.organisationId,
@@ -148,6 +189,14 @@ export class ExtractionProcessor {
         userId: run.requestedByUserId,
       };
     } catch (error: unknown) {
+      const code = diagnosticPrismaCode(error);
+      if (code !== null) {
+        try {
+          this.onPrismaDiagnostic?.({ code, operation });
+        } catch {
+          // Diagnostic logging must not replace the original extraction failure.
+        }
+      }
       if (signal?.aborted === true)
         await this.fail(
           run.id,
