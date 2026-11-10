@@ -634,6 +634,200 @@ describe("tender workspace stages", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("uploads a GeM bid PDF and supporting files with independent roles", async () => {
+    const user = userEvent.setup();
+    let sessionNumber = 0;
+    const defaultApi = apiRequest.getMockImplementation()!;
+    apiRequest.mockImplementation(
+      (path: string, init?: RequestInit): unknown => {
+        if (path.endsWith("/upload-sessions") && init?.method === "POST") {
+          sessionNumber += 1;
+          return {
+            document_id: `uploaded-${sessionNumber}`,
+            upload_url: `https://storage.example/upload-${sessionNumber}`,
+          };
+        }
+        if (path.endsWith("/complete") && init?.method === "POST")
+          return { job_id: `job-${sessionNumber}`, state: "QUEUED" };
+        return defaultApi(path);
+      },
+    );
+    uploadFileToSignedStorageUrl.mockResolvedValue(undefined);
+
+    search = new URLSearchParams("stage=files");
+    render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+    await screen.findByRole("heading", { name: "Tender Files" });
+    await user.click(screen.getByRole("button", { name: "Upload files" }));
+    const dialog = screen.getByRole("dialog", { name: "Upload tender files" });
+    const files = [
+      new File(["%PDF-1.4"], "GEM_2026_B_1234567_bid.pdf", {
+        type: "application/pdf",
+      }),
+      new File(["%PDF-1.4"], "ATC_terms.pdf", {
+        type: "application/pdf",
+      }),
+      new File(["a,b"], "BOQ.csv", {
+        type: "application/vnd.ms-excel",
+      }),
+    ];
+    for (const file of files)
+      Object.defineProperty(file, "arrayBuffer", {
+        value: () => Promise.resolve(new TextEncoder().encode("test").buffer),
+      });
+    await user.upload(
+      within(dialog).getByLabelText("Bid PDF and supporting files"),
+      files,
+    );
+
+    expect(
+      within(dialog).getByLabelText(/GEM_2026_B_1234567_bid.pdf/),
+    ).toHaveValue("PRIMARY");
+    expect(within(dialog).getByLabelText(/ATC_terms.pdf/)).toHaveValue(
+      "ANNEXURE",
+    );
+    expect(within(dialog).getByLabelText(/BOQ.csv/)).toHaveValue("BOQ");
+
+    const form = dialog.querySelector("form");
+    if (form === null) throw new Error("Expected tender upload form");
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(uploadFileToSignedStorageUrl).toHaveBeenCalledTimes(3),
+    );
+    const uploads = (
+      apiRequest.mock.calls as unknown as [string, RequestInit?][]
+    )
+      .filter(
+        ([path, init]) =>
+          String(path).endsWith("/upload-sessions") && init?.method === "POST",
+      )
+      .map(([, init]) => {
+        if (typeof init?.body !== "string")
+          throw new Error("Expected a JSON upload request");
+        return JSON.parse(init.body) as Record<string, unknown>;
+      });
+    expect(uploads.map(({ role }) => role)).toEqual([
+      "PRIMARY",
+      "ANNEXURE",
+      "BOQ",
+    ]);
+    expect(uploads[2]?.mime_type).toBe("text/csv");
+    expect(
+      await screen.findByText(/3 tender files accepted/),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a corrigendum on a separate version and never groups it with the bid bundle", async () => {
+    const user = userEvent.setup();
+    const defaultApi = apiRequest.getMockImplementation()!;
+    apiRequest.mockImplementation(
+      (path: string, init?: RequestInit): unknown => {
+        if (path.endsWith("/corrigenda") && init?.method === "POST")
+          return { version_id: "version-2" };
+        if (path.endsWith("/versions/version-2/upload-sessions"))
+          return {
+            document_id: "corrigendum-file",
+            upload_url: "https://storage.example/corrigendum",
+          };
+        if (path.endsWith("/documents/corrigendum-file/complete"))
+          return { job_id: "job-corrigendum", state: "QUEUED" };
+        return defaultApi(path);
+      },
+    );
+    uploadFileToSignedStorageUrl.mockResolvedValue(undefined);
+    search = new URLSearchParams("stage=files");
+    render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+    await screen.findByRole("heading", { name: "Tender Files" });
+    await user.click(screen.getByRole("button", { name: "Upload files" }));
+    const dialog = screen.getByRole("dialog", { name: "Upload tender files" });
+    await user.selectOptions(
+      within(dialog).getByLabelText("What are you uploading?"),
+      "CORRIGENDUM",
+    );
+    await user.type(
+      within(dialog).getByLabelText(/Corrigendum identifier/),
+      "C-1",
+    );
+    await user.type(
+      within(dialog).getByLabelText(/Corrigendum description/),
+      "Revised closing date",
+    );
+    const file = new File(["%PDF-1.4"], "corrigendum.pdf", {
+      type: "application/pdf",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: () => Promise.resolve(new TextEncoder().encode("test").buffer),
+    });
+    await user.upload(within(dialog).getByLabelText("Corrigendum file"), file);
+    const form = dialog.querySelector("form");
+    if (form === null) throw new Error("Expected corrigendum upload form");
+    fireEvent.submit(form);
+    await waitFor(() =>
+      expect(
+        apiRequest.mock.calls.some(([path]) =>
+          path.endsWith("/versions/version-2/upload-sessions"),
+        ),
+      ).toBe(true),
+    );
+    const sessionCall = (
+      apiRequest.mock.calls as unknown as [string, RequestInit?][]
+    ).find(([path]) => path.endsWith("/versions/version-2/upload-sessions"));
+    if (typeof sessionCall?.[1]?.body !== "string")
+      throw new Error("Expected corrigendum upload JSON");
+    expect(JSON.parse(sessionCall[1].body)).toMatchObject({
+      role: "CORRIGENDUM",
+      mime_type: "application/pdf",
+    });
+  });
+
+  it("keeps only remaining files selected after a partially failed bundle", async () => {
+    const user = userEvent.setup();
+    const defaultApi = apiRequest.getMockImplementation()!;
+    let sessionNumber = 0;
+    apiRequest.mockImplementation(
+      (path: string, init?: RequestInit): unknown => {
+        if (path.endsWith("/upload-sessions") && init?.method === "POST") {
+          sessionNumber += 1;
+          return {
+            document_id: `uploaded-${sessionNumber}`,
+            upload_url: `https://storage.example/upload-${sessionNumber}`,
+          };
+        }
+        if (path.endsWith("/complete")) return { state: "QUEUED" };
+        return defaultApi(path);
+      },
+    );
+    uploadFileToSignedStorageUrl
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error("Synthetic storage failure"));
+    search = new URLSearchParams("stage=files");
+    render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+    await screen.findByRole("heading", { name: "Tender Files" });
+    await user.click(screen.getByRole("button", { name: "Upload files" }));
+    const dialog = screen.getByRole("dialog", { name: "Upload tender files" });
+    const files = ["bid.pdf", "ATC.pdf", "BOQ.csv"].map(
+      (name) => new File(["content"], name),
+    );
+    for (const file of files)
+      Object.defineProperty(file, "arrayBuffer", {
+        value: () => Promise.resolve(new TextEncoder().encode("test").buffer),
+      });
+    await user.upload(
+      within(dialog).getByLabelText("Bid PDF and supporting files"),
+      files,
+    );
+    const form = dialog.querySelector("form");
+    if (form === null) throw new Error("Expected tender upload form");
+    fireEvent.submit(form);
+    expect(
+      await screen.findByText(/1 file accepted before the error/),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).queryByLabelText(/bid.pdf \(/),
+    ).not.toBeInTheDocument();
+    expect(within(dialog).getByLabelText(/ATC.pdf \(/)).toHaveValue("ANNEXURE");
+    expect(within(dialog).getByLabelText(/BOQ.csv \(/)).toHaveValue("BOQ");
+  });
+
   it("maps legacy source routes into tender files", async () => {
     const user = userEvent.setup();
     search = new URLSearchParams("stage=sources");
