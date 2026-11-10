@@ -866,7 +866,7 @@ describe("tender workspace stages", () => {
     ).toBeInTheDocument();
   });
 
-  it("keeps file actions in compact row menus and confirms failed-upload removal", async () => {
+  it("keeps file actions visible and confirms failed-upload removal", async () => {
     const user = userEvent.setup();
     let workspaceState = structuredClone(failedUploadWorkspace);
 
@@ -916,17 +916,16 @@ describe("tender workspace stages", () => {
     expect(screen.getByText("GeM-Bidding-9646270.pdf")).toBeInTheDocument();
     expect(screen.getByText(/Upload failed/)).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Actions for GeM-Bidding-9646270.pdf"),
+      screen.getByRole("button", {
+        name: "Remove failed upload GeM-Bidding-9646270.pdf",
+      }),
     ).toBeInTheDocument();
     expect(
-      screen.getByLabelText("Actions for Ready-source.pdf"),
+      screen.getByRole("button", { name: "Download Ready-source.pdf" }),
     ).toBeInTheDocument();
     expect(screen.queryByLabelText("Tender version")).not.toBeInTheDocument();
     expect(screen.getByText("Previous source history")).toBeInTheDocument();
 
-    await user.click(
-      screen.getByLabelText("Actions for GeM-Bidding-9646270.pdf"),
-    );
     await user.click(
       screen.getByRole("button", {
         name: "Remove failed upload GeM-Bidding-9646270.pdf",
@@ -959,7 +958,7 @@ describe("tender workspace stages", () => {
     ).toBeInTheDocument();
   });
 
-  it("removes a current ready source from its compact row menu after confirmation", async () => {
+  it("removes a current ready source from its visible row action after confirmation", async () => {
     const user = userEvent.setup();
     let workspaceState = {
       ...baseWorkspace,
@@ -1028,9 +1027,6 @@ describe("tender workspace stages", () => {
     expect(
       await screen.findByRole("heading", { name: "Tender Files" }),
     ).toBeInTheDocument();
-    await user.click(
-      screen.getByLabelText("Actions for GeM-Bidding-9646270.pdf"),
-    );
     expect(
       screen.getByRole("button", {
         name: "Download GeM-Bidding-9646270.pdf",
@@ -2546,7 +2542,7 @@ describe("tender workspace stages", () => {
     ).toBeInTheDocument();
     expect(screen.getAllByText("Other requirement").length).toBeGreaterThan(0);
     expect(
-      screen.getByRole("button", { name: "Add evidence" }),
+      screen.getByRole("button", { name: "Upload document" }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
@@ -2594,7 +2590,7 @@ describe("tender workspace stages", () => {
       throw new Error("Expected company evidence section.");
     }
     expect(
-      within(companyEvidenceSection).getByRole("link", {
+      screen.getByRole("button", {
         name: "Upload document",
       }),
     ).toBeInTheDocument();

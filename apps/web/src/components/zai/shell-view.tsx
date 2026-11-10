@@ -11,7 +11,7 @@ import {
 import Link from "next/link";
 
 import { cn } from "./utils";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, type MotionStyle } from "framer-motion";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -50,6 +50,7 @@ import {
 } from "./ui/sheet";
 
 export interface ShellData {
+  readonly previewBrand?: boolean;
   readonly page: string;
   readonly pathname: string;
   readonly activeOrgId: string | null;
@@ -110,10 +111,14 @@ function ShellLayout({
   children: React.ReactNode;
 }): React.JSX.Element {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [desktopCollapsed, setDesktopCollapsed] = useState(false);
   const navigationOpener = useRef<HTMLButtonElement | null>(null);
 
   return (
-    <div className="zai-app-shell min-h-screen bg-mesh">
+    <div
+      className="zai-app-shell min-h-screen bg-mesh"
+      data-visual-preview={useShell().previewBrand ? "true" : undefined}
+    >
       {/* Ambient aurora glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden -z-10">
         <div className="absolute -top-40 -left-40 h-[480px] w-[480px] rounded-full bg-[#FF5722]/8 blur-3xl animate-aurora" />
@@ -124,7 +129,15 @@ function ShellLayout({
       </div>
 
       {/* Desktop sidebar */}
-      <Sidebar className="hidden lg:flex fixed inset-y-0 left-0 w-64 z-30" />
+      <motion.div
+        id="desktop-sidebar"
+        className="hidden lg:block fixed inset-y-0 left-0 z-30 overflow-hidden"
+        animate={{ width: desktopCollapsed ? 76 : 256 }}
+        transition={{ type: "spring", stiffness: 380, damping: 32 }}
+        data-testid="desktop-sidebar"
+      >
+        <Sidebar className="h-full" collapsed={desktopCollapsed} />
+      </motion.div>
       {/* Mobile nav sheet */}
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <SheetContent
@@ -150,8 +163,15 @@ function ShellLayout({
         </SheetContent>
       </Sheet>
 
-      <div className="lg:pl-64">
+      <motion.div
+        className="zai-main-with-sidebar"
+        style={{ "--sidebar-width": "256px" } as MotionStyle}
+        animate={{ "--sidebar-width": desktopCollapsed ? "76px" : "256px" }}
+        transition={{ type: "spring", stiffness: 380, damping: 32 }}
+      >
         <Topbar
+          desktopCollapsed={desktopCollapsed}
+          onToggleDesktopNav={() => setDesktopCollapsed((value) => !value)}
           onOpenMobileNav={(opener) => {
             navigationOpener.current = opener;
             setMobileNavOpen(true);
@@ -170,7 +190,7 @@ function ShellLayout({
             </motion.div>
           </AnimatePresence>
         </main>
-      </div>
+      </motion.div>
     </div>
   );
 }
@@ -180,21 +200,31 @@ function useNavLocationKey(): string {
   return useShell().pathname;
 }
 
-function Sidebar({ className }: { className?: string }): React.JSX.Element {
+function Sidebar({
+  className,
+  collapsed = false,
+}: {
+  className?: string;
+  collapsed?: boolean;
+}): React.JSX.Element {
   return (
     <aside className={cn("flex flex-col bg-[var(--brand-nav)]", className)}>
-      <SidebarContent />
+      <SidebarContent collapsed={collapsed} />
     </aside>
   );
 }
 
 function SidebarContent({
   onNavigate,
+  collapsed = false,
 }: {
   onNavigate?: () => void;
+  collapsed?: boolean;
 }): React.JSX.Element {
   const {
     page,
+    previewBrand,
+    pathname,
     setPage,
     activeOrgId,
     setActiveOrg,
@@ -213,6 +243,17 @@ function SidebarContent({
   const activeOrg = organizations.find((o) => o.id === activeOrgId);
 
   const recentTenders = tenders.slice(0, 3);
+  const safeHref = (destination: string): string =>
+    hrefFor(destination) ?? pathname;
+  const followLink = (
+    event: React.MouseEvent<HTMLAnchorElement>,
+    destination: string,
+  ): void => {
+    if (hrefFor(destination) === null) {
+      event.preventDefault();
+      setPage(destination);
+    } else onNavigate?.();
+  };
 
   return (
     <div className="zai-design flex flex-col h-full bg-grid-dark">
@@ -226,24 +267,40 @@ function SidebarContent({
         >
           <FileText className="h-4.5 w-4.5 text-white" />
         </motion.div>
-        <div className="min-w-0">
+        <div className={cn("min-w-0", collapsed && "sr-only")}>
           <div className="text-white text-sm font-bold uppercase tracking-tight leading-tight">
-            Tender<span className="text-[var(--brand-orange)]">.</span>Intel
+            {previewBrand ? (
+              <>
+                BidVeda<span className="text-[var(--brand-orange)]">.</span>
+              </>
+            ) : (
+              <>
+                Tender<span className="text-[var(--brand-orange)]">.</span>Intel
+              </>
+            )}
           </div>
           <div className="text-[9px] text-white/40 uppercase tracking-[0.15em] font-mono">
-            Platform V2
+            {previewBrand ? "Visual preview" : "Platform V2"}
           </div>
         </div>
       </div>
 
       {/* Org selector */}
-      <div className="px-3 py-4 border-b border-white/5">
+      <div
+        className={cn(
+          "py-4 border-b border-white/5",
+          collapsed ? "px-2" : "px-3",
+        )}
+      >
         <DropdownMenu open={orgMenuOpen} onOpenChange={setOrgMenuOpen}>
           <DropdownMenuTrigger asChild>
             <button
               aria-label="Current organisation"
               disabled={busy || organizations.length === 0}
-              className="w-full flex items-center gap-2.5 rounded-xl bg-white/5 hover:bg-white/10 transition-all px-3 py-2.5 text-left border border-white/5"
+              className={cn(
+                "w-full flex items-center gap-2.5 rounded-xl bg-white/5 hover:bg-white/10 transition-all py-2.5 text-left border border-white/5",
+                collapsed ? "justify-center px-1" : "px-3",
+              )}
             >
               <div
                 className="h-9 w-9 rounded-lg flex items-center justify-center text-[#1E1F22] text-xs font-bold shrink-0 shadow-md"
@@ -251,7 +308,7 @@ function SidebarContent({
               >
                 {activeOrg?.initials ?? "?"}
               </div>
-              <div className="min-w-0 flex-1">
+              <div className={cn("min-w-0 flex-1", collapsed && "sr-only")}>
                 <div className="text-white text-sm font-semibold truncate">
                   {activeOrg?.name ?? "Select organisation"}
                 </div>
@@ -259,7 +316,9 @@ function SidebarContent({
                   {activeOrg?.role ?? "No organisation"}
                 </div>
               </div>
-              <ChevronDown className="h-4 w-4 text-white/40 shrink-0 transition-transform" />
+              {!collapsed && (
+                <ChevronDown className="h-4 w-4 text-white/40 shrink-0 transition-transform" />
+              )}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -313,23 +372,31 @@ function SidebarContent({
       </div>
 
       {/* Primary nav — industrial with code numbers */}
-      <nav aria-label="Primary" className="px-3 py-4 space-y-1">
-        <div className="px-3 pb-2 label-mono text-white/30">
+      <nav
+        aria-label="Primary"
+        className={cn("py-4 space-y-1", collapsed ? "px-2" : "px-3")}
+      >
+        <div
+          className={cn(
+            "px-3 pb-2 label-mono text-white/30",
+            collapsed && "sr-only",
+          )}
+        >
           {"// Workspace"}
         </div>
         {navItems.map((item, i) => {
           const Icon = item.icon;
-          const active = page === item.id && !activeTenderId;
+          // Tender detail pages still belong to the Tenders workspace.
+          const active =
+            page === item.id &&
+            (activeTenderId === null || item.id === "tenders");
           return (
             <MotionLink
               key={item.id}
-              href={hrefFor(item.id) ?? "/dashboard"}
+              href={safeHref(item.id)}
               aria-disabled={hrefFor(item.id) === null}
               aria-current={active ? "page" : undefined}
-              onClick={(event) => {
-                if (!hrefFor(item.id)) event.preventDefault();
-                else onNavigate?.();
-              }}
+              onClick={(event) => followLink(event, item.id)}
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{
@@ -339,6 +406,7 @@ function SidebarContent({
               }}
               className={cn(
                 "relative w-full flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition-all group",
+                collapsed && "justify-center",
                 active
                   ? "text-white"
                   : "text-white/55 hover:text-white hover:bg-white/5",
@@ -351,29 +419,43 @@ function SidebarContent({
                   transition={{ type: "spring", stiffness: 380, damping: 32 }}
                 />
               )}
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "text-[10px] font-mono shrink-0 relative z-10 transition-colors",
-                  active ? "text-white/70" : "text-white/30",
-                )}
-              >
-                {item.code}
-              </span>
+              {!collapsed && (
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "text-[10px] font-mono shrink-0 relative z-10 transition-colors",
+                    active ? "text-white/70" : "text-white/30",
+                  )}
+                >
+                  {item.code}
+                </span>
+              )}
               <Icon
                 className={cn(
                   "h-4.5 w-4.5 shrink-0 relative z-10 transition-transform group-hover:scale-110",
                   active ? "scale-110" : "",
                 )}
               />
-              <span className="relative z-10 font-medium">{item.label}</span>
+              <span
+                className={cn(
+                  "relative z-10 font-medium",
+                  collapsed && "sr-only",
+                )}
+              >
+                {item.label}
+              </span>
             </MotionLink>
           );
         })}
       </nav>
 
       {/* Recent work */}
-      <div className="px-3 py-4 border-t border-white/5 flex-1 overflow-y-auto scroll-thin no-scrollbar">
+      <div
+        className={cn(
+          "px-3 py-4 border-t border-white/5 flex-1 overflow-y-auto scroll-thin no-scrollbar",
+          collapsed && "hidden",
+        )}
+      >
         <div className="px-3 mb-2 label-mono text-white/30 flex items-center gap-1.5">
           <Clock className="h-3 w-3" /> Recent
         </div>
@@ -388,8 +470,11 @@ function SidebarContent({
             >
               <Link
                 aria-label={t.title}
-                href={hrefFor(`tender:${t.id}:overview`) ?? "/dashboard"}
-                onClick={() => onNavigate?.()}
+                href={safeHref(`tender:${t.id}:overview`)}
+                aria-disabled={hrefFor(`tender:${t.id}:overview`) === null}
+                onClick={(event) =>
+                  followLink(event, `tender:${t.id}:overview`)
+                }
                 className="min-w-0 flex-1 text-left px-3 py-2"
               >
                 <div className="text-[13px] text-white/70 truncate group-hover:text-white transition-colors">
@@ -411,8 +496,11 @@ function SidebarContent({
                 <DropdownMenuContent>
                   <DropdownMenuItem asChild>
                     <Link
-                      href={hrefFor(`tender:${t.id}:ask`) ?? "/dashboard"}
-                      onClick={() => onNavigate?.()}
+                      href={safeHref(`tender:${t.id}:ask`)}
+                      aria-disabled={hrefFor(`tender:${t.id}:ask`) === null}
+                      onClick={(event) =>
+                        followLink(event, `tender:${t.id}:ask`)
+                      }
                     >
                       Tender chat
                     </Link>
@@ -425,8 +513,11 @@ function SidebarContent({
                             ? "page"
                             : undefined
                         }
-                        href={hrefFor(`tender:${t.id}:draft`) ?? "/dashboard"}
-                        onClick={() => onNavigate?.()}
+                        href={safeHref(`tender:${t.id}:draft`)}
+                        aria-disabled={hrefFor(`tender:${t.id}:draft`) === null}
+                        onClick={(event) =>
+                          followLink(event, `tender:${t.id}:draft`)
+                        }
                       >
                         Continue draft
                       </Link>
@@ -440,20 +531,35 @@ function SidebarContent({
       </div>
 
       {/* Status indicator */}
-      <div className="px-3 py-2 border-t border-white/5">
+      <div
+        className={cn(
+          "px-3 py-2 border-t border-white/5",
+          collapsed && "mt-auto",
+        )}
+      >
         <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-mono uppercase tracking-wider text-white/40">
           <span className="status-dot bg-[var(--brand-success)] animate-pulse-soft" />
-          Organisation-scoped access
+          <span className={cn(collapsed && "sr-only")}>
+            Organisation-scoped access
+          </span>
         </div>
       </div>
 
       {/* User */}
-      <div className="px-3 py-3 border-t border-white/5">
+      <div
+        className={cn(
+          "py-3 border-t border-white/5",
+          collapsed ? "px-2" : "px-3",
+        )}
+      >
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <button
               aria-label="Account menu"
-              className="w-full flex items-center gap-2.5 rounded-xl hover:bg-white/5 transition-all px-2 py-2 text-left"
+              className={cn(
+                "w-full flex items-center gap-2.5 rounded-xl hover:bg-white/5 transition-all px-2 py-2 text-left",
+                collapsed && "justify-center",
+              )}
             >
               <Avatar className="h-9 w-9 border border-white/10">
                 <AvatarFallback className="bg-[var(--brand-orange)] text-white text-xs font-bold">
@@ -464,7 +570,7 @@ function SidebarContent({
                     .join("")}
                 </AvatarFallback>
               </Avatar>
-              <div className="min-w-0 flex-1">
+              <div className={cn("min-w-0 flex-1", collapsed && "sr-only")}>
                 <div className="text-white text-sm font-semibold truncate">
                   {userName}
                 </div>
@@ -472,7 +578,7 @@ function SidebarContent({
                   {activeOrg?.role ?? "Member"} {activeOrg?.name ?? ""}
                 </div>
               </div>
-              <ChevronDown className="h-4 w-4 text-white/40" />
+              {!collapsed && <ChevronDown className="h-4 w-4 text-white/40" />}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
@@ -485,7 +591,11 @@ function SidebarContent({
             <DropdownMenuSeparator />
             {activeOrgId && (
               <DropdownMenuItem asChild>
-                <Link href={hrefFor("onboarding") ?? "/dashboard"}>
+                <Link
+                  href={safeHref("onboarding")}
+                  aria-disabled={hrefFor("onboarding") === null}
+                  onClick={(event) => followLink(event, "onboarding")}
+                >
                   Company profile
                 </Link>
               </DropdownMenuItem>
@@ -531,8 +641,12 @@ function SidebarContent({
 
 function Topbar({
   onOpenMobileNav,
+  desktopCollapsed,
+  onToggleDesktopNav,
 }: {
   onOpenMobileNav: (opener: HTMLButtonElement) => void;
+  desktopCollapsed: boolean;
+  onToggleDesktopNav: () => void;
 }): React.JSX.Element {
   const {
     page,
@@ -582,8 +696,18 @@ function Topbar({
   }
 
   return (
-    <header className="zai-design sticky top-0 z-20 h-16 glass border-b border-[#E5E7EB]/60">
+    <header className="zai-design sticky top-0 z-20 h-16 bg-white border-b border-[#E5E7EB]/60 shadow-[0_1px_8px_rgb(17_24_39_/_0.04)]">
       <div className="h-full px-4 sm:px-6 lg:px-10 flex items-center gap-3">
+        <button
+          aria-label={desktopCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          aria-expanded={!desktopCollapsed}
+          aria-controls="desktop-sidebar"
+          onClick={onToggleDesktopNav}
+          className="hidden lg:inline-flex h-9 w-9 items-center justify-center rounded-lg hover:bg-[#F3F4F6] text-[#111827] transition-colors"
+          type="button"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
         <button
           aria-label="Open navigation"
           onClick={(event) => onOpenMobileNav(event.currentTarget)}

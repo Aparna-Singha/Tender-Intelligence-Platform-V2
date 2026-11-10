@@ -41,6 +41,76 @@ const data: ShellData = {
 };
 
 describe("navigation over the contextual assistant", () => {
+  it("keeps unavailable preview links on the synthetic page", async () => {
+    const user = userEvent.setup();
+    const setPage = vi.fn();
+    render(
+      <ShellView
+        data={{
+          ...data,
+          pathname: "/visual-preview/dashboard",
+          hrefFor: (page) =>
+            page === "dashboard" ? "/visual-preview/dashboard" : null,
+          setPage,
+        }}
+      >
+        <p>Synthetic page</p>
+      </ShellView>,
+    );
+    const link = within(screen.getByTestId("desktop-sidebar")).getByRole(
+      "link",
+      { name: "AI Chat" },
+    );
+    expect(link).toHaveAttribute("href", "/visual-preview/dashboard");
+    expect(link).toHaveAttribute("aria-disabled", "true");
+    await user.click(link);
+    expect(setPage).toHaveBeenCalledWith("ai-chat");
+  });
+  it("collapses the desktop rail without losing navigation or keyboard focus", async () => {
+    const user = userEvent.setup();
+    render(
+      <ShellView data={data}>
+        <p>Home content</p>
+      </ShellView>,
+    );
+    const toggle = screen.getByRole("button", { name: "Collapse sidebar" });
+    toggle.focus();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Expand sidebar" }),
+    ).toHaveAttribute("aria-expanded", "false");
+    expect(
+      within(screen.getByTestId("desktop-sidebar")).getByRole("link", {
+        name: "Home",
+      }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(
+      screen.getByRole("button", { name: "Open navigation" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Enter}");
+    expect(toggle).toHaveFocus();
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+  it("keeps the Tenders sidebar entry active on tender detail pages", () => {
+    render(
+      <ShellView
+        data={{
+          ...data,
+          activeTenderId: "tender-1",
+          page: "tenders",
+          pathname: "/tenders/org/tender-1",
+        }}
+      >
+        <p>Tender details</p>
+      </ShellView>,
+    );
+
+    const tenderLinks = screen.getAllByRole("link", { name: "Tenders" });
+    expect(
+      tenderLinks.some((link) => link.getAttribute("aria-current") === "page"),
+    ).toBe(true);
+  });
   it("traps focus, handles Escape and restores the opener without closing the assistant", async () => {
     const user = userEvent.setup();
     render(

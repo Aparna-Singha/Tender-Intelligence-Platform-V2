@@ -1913,6 +1913,28 @@ article {
 .tender-tools-panel .warning {
   font-size: 0.78rem;
 }
+.modal .warning {
+  color: #92400e;
+}
+.requirement-fact-review form,
+.requirement-fact-review label {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+.requirement-fact-review {
+  overflow-wrap: anywhere;
+}
+.requirement-fact-review form {
+  gap: 16px;
+  margin-block: 16px;
+}
+.requirement-fact-review input,
+.requirement-fact-review select,
+.requirement-fact-review textarea {
+  width: 100%;
+  min-width: 0;
+}
 .tender-summary-card {
   display: grid;
   gap: 8px;
@@ -3054,6 +3076,34 @@ article {
   margin: 0;
   font-size: 0.76rem;
 }
+.eligibility-status-notice .alert--warning p {
+  color: #80500a;
+}
+.requirement-evidence-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px 0;
+}
+.requirement-evidence-panel ul {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.requirement-evidence-panel li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.requirement-evidence-panel li > strong,
+.requirement-evidence-panel li > span {
+  display: block;
+}
+.requirement-evidence-panel li > button {
+  margin-top: 6px;
+}
 .tender-eligibility-layout {
   height: min(690px, calc(100vh - 210px));
   min-height: 540px;
@@ -3085,7 +3135,7 @@ article {
 .requirement-list__item small {
   display: block;
   margin-top: 3px;
-  color: var(--text-secondary);
+  color: #4b5563;
   font-size: 0.68rem;
 }
 .requirement-list__item .status-badge {
@@ -4851,7 +4901,18 @@ article {
 }
 
 .tender-centre-page .workspace-table-card {
-  min-height: 570px;
+  min-height: 0;
+}
+
+/* Wide table content stays in its own horizontal scroller on narrow screens. */
+.tender-centre-page,
+.tender-files-page {
+  overflow-x: clip;
+}
+
+.tender-centre-page .modal form {
+  display: grid;
+  gap: 16px;
 }
 
 .tender-centre-page .workspace-table td {
@@ -5300,7 +5361,7 @@ article {
 }
 
 .requirement-evidence-empty p {
-  color: var(--text-secondary);
+  color: #4b5563;
   font-size: 0.7rem;
 }
 
@@ -5477,7 +5538,14 @@ article {
 }
 
 .tender-files-page .workspace-card:has(.workspace-table) {
-  min-height: 510px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tender-files-page,
+.tender-files-page .workspace-section,
+.tender-files-page .workspace-card:has(.workspace-table) {
+  min-width: 0;
 }
 
 .tender-files-page .workspace-table td {
@@ -5487,6 +5555,135 @@ article {
 
 .tender-files-page .workspace-table th:first-child {
   width: 44%;
+}
+
+.tender-files-page .workspace-table th:last-child {
+  position: relative;
+}
+
+.zai-main-with-sidebar {
+  min-width: 0;
+}
+
+@media (min-width: 1024px) {
+  .zai-main-with-sidebar {
+    padding-left: var(--sidebar-width);
+  }
+}
+
+.mobile-table-meta {
+  display: none !important;
+}
+
+.tender-centre-page .workspace-chip,
+.tender-files-page .workspace-chip,
+.tender-files-page .tender-compat-note small {
+  color: #536276;
+}
+
+.tender-centre-page .workspace-chip--active,
+.tender-files-page .workspace-chip--active,
+.tender-files-page .tender-compat-note,
+.tender-files-page .tender-compat-note a {
+  color: #1256b8;
+}
+
+.eligibility-page .status-badge--neutral,
+.eligibility-page .workspace-chip,
+.company-docs-page .company-docs-health__item p {
+  color: #536276;
+}
+
+.eligibility-page .status-badge--info,
+.eligibility-page .workspace-chip--active,
+.company-docs-page
+  .company-docs-health__item--summary
+  .tender-summary-card__label {
+  color: #1256b8;
+}
+
+.company-docs-page .company-docs-sidebar__link--active {
+  color: #1256b8;
+}
+
+.eligibility-page .status-badge--warning {
+  color: #855000;
+}
+
+.eligibility-page .status-badge--success {
+  color: #176a3a;
+}
+
+.eligibility-page .status-badge--danger {
+  color: #a42424;
+}
+
+.eligibility-page .status-badge--accent {
+  color: #5a3694;
+}
+
+.workspace-floating-ai > span {
+  color: #1e1f22;
+}
+
+@media (max-width: 600px) {
+  .workspace-floating-ai {
+    right: 16px;
+    left: auto;
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+  }
+
+  .tender-centre-page .workspace-table,
+  .tender-files-page .workspace-table {
+    table-layout: fixed;
+  }
+
+  .tender-centre-page .workspace-table th:first-child,
+  .tender-centre-page .workspace-table td:first-child,
+  .tender-files-page .workspace-table th:first-child,
+  .tender-files-page .workspace-table td:first-child {
+    width: 64%;
+    overflow-wrap: anywhere;
+  }
+
+  .tender-centre-page .workspace-table th:last-child,
+  .tender-centre-page .workspace-table td:last-child,
+  .tender-files-page .workspace-table th:last-child,
+  .tender-files-page .workspace-table td:last-child {
+    width: 36%;
+  }
+
+  .tender-centre-page .workspace-table th:not(:first-child):not(:last-child),
+  .tender-centre-page .workspace-table td:not(:first-child):not(:last-child),
+  .tender-files-page .workspace-table th:not(:first-child):not(:last-child),
+  .tender-files-page .workspace-table td:not(:first-child):not(:last-child) {
+    display: none;
+  }
+
+  .tender-centre-page .mobile-table-meta,
+  .tender-files-page .mobile-table-meta {
+    display: block !important;
+    margin-top: 4px;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 400;
+  }
+
+  .tender-centre-page .workspace-table th:last-child,
+  .tender-centre-page .workspace-table td:last-child,
+  .tender-files-page .workspace-table th:last-child,
+  .tender-files-page .workspace-table td:last-child {
+    position: sticky;
+    right: 0;
+    min-width: 112px;
+    background: var(--surface);
+    box-shadow: -8px 0 14px -12px rgb(16 34 58 / 25%);
+  }
 }
 
 .tender-file-name {
@@ -5913,6 +6110,7 @@ article {
   .tender-overview-top,
   .overview-bottom-grid,
   .draft-columns,
+  .tender-eligibility-layout,
   .account-profile-grid,
   .company-docs-layout {
     grid-template-columns: 1fr;
@@ -5929,6 +6127,10 @@ article {
 
   .company-docs-health {
     grid-template-columns: 1fr;
+  }
+
+  .company-docs-sidebar {
+    min-height: 0;
   }
 
   .company-docs-toolbar,

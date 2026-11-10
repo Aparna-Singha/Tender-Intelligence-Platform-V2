@@ -99,6 +99,7 @@ export function AuthScreen({
           </p>
 
           <form
+            method="post"
             onSubmit={(event) => void handleSubmit(event)}
             className="mt-7 space-y-4"
           >

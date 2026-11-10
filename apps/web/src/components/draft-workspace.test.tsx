@@ -189,7 +189,7 @@ describe("draft workspace safety", () => {
     expect(
       screen.getByRole("navigation", { name: "Draft workspace tabs" }),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Draft name")).toBeInTheDocument();
+    expect(screen.getByLabelText("Draft name")).toHaveClass("input");
     expect(
       screen.getByText("Draft history").closest("details"),
     ).not.toHaveAttribute("open");

@@ -350,6 +350,11 @@ describe("dashboard home parity behavior", () => {
       ).toBeInTheDocument();
 
       expect(screen.getAllByText("3 days left")).toHaveLength(1);
+      expect(
+        screen.getByRole("progressbar", {
+          name: "Processing progress for School Furniture - Ajmer",
+        }),
+      ).toBeInTheDocument();
       expect(screen.getAllByText("6 days overdue")).toHaveLength(1);
 
       expect(

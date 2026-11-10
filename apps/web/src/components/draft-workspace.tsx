@@ -671,7 +671,13 @@ export function DraftWorkspace({
       <form onSubmit={(event) => void startGeneration(event)}>
         <label>
           Draft name
-          <input id="draft-title-input" maxLength={200} name="title" required />
+          <input
+            className="input"
+            id="draft-title-input"
+            maxLength={200}
+            name="title"
+            required
+          />
         </label>
         <details
           className="disclosure draft-advanced-settings"
@@ -682,6 +688,7 @@ export function DraftWorkspace({
             <label>
               Source scope
               <select
+                className="select"
                 value={mode}
                 onChange={(event) => setMode(event.target.value as SourceMode)}
               >
@@ -699,7 +706,11 @@ export function DraftWorkspace({
             </label>
             <label>
               Writing preferences
-              <textarea maxLength={2000} name="instructions" />
+              <textarea
+                className="textarea"
+                maxLength={2000}
+                name="instructions"
+              />
             </label>
           </div>
         </details>

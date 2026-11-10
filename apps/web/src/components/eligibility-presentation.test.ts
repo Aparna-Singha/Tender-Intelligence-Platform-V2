@@ -33,6 +33,29 @@ function requirement(
 }
 
 describe("eligibility presentation", () => {
+  it("presents a historical verified decision with stale evidence as needing reassessment", () => {
+    const result = requirementPresentation(
+      requirement({
+        currentEvidence: {
+          reasonCodes: ["DOCUMENT_REPLACED"],
+          status: "REASSESSMENT_REQUIRED",
+        },
+        evidenceLinks: [
+          {
+            excerpt: "Old source",
+            label: "Direct support",
+            supportingText: "Old document",
+          },
+        ],
+        stateKey: "VERIFIED",
+        statusLabel: "Verified",
+        statusTone: "success",
+      }),
+    );
+    expect(result.statusLabel).toBe("Reassessment required");
+    expect(result.filterKey).toBe("NEED_REVIEW");
+    expect(result.actionLabel).toBe("Review evidence");
+  });
   it("routes unreadable source text to source review instead of a missing-evidence claim", () => {
     const result = requirementPresentation(
       requirement({

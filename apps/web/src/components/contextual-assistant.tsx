@@ -34,6 +34,7 @@ export function ContextualAssistant({
   return (
     <>
       <button
+        aria-label={`Ask about ${context}`}
         className="workspace-floating-ai"
         disabled={!interactive}
         onClick={() => {

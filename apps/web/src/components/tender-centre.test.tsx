@@ -1,8 +1,20 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TenderCentre } from "./tender-centre";
 
-const { apiRequest } = vi.hoisted(() => ({ apiRequest: vi.fn() }));
+const { apiRequest, router } = vi.hoisted(() => ({
+  apiRequest: vi.fn(),
+  router: { push: vi.fn() },
+}));
+
+vi.mock("next/navigation", () => ({ useRouter: () => router }));
 
 vi.mock("../lib/api", () => ({
   apiRequest,
@@ -12,6 +24,7 @@ vi.mock("../lib/api", () => ({
 describe("TenderCentre row presentation", () => {
   beforeEach(() => {
     apiRequest.mockReset();
+    router.push.mockReset();
     apiRequest.mockResolvedValue([
       {
         buyer: "Uranium Corporation of India Ltd",
@@ -55,6 +68,37 @@ describe("TenderCentre row presentation", () => {
     ).not.toBeInTheDocument();
     await waitFor(() =>
       expect(screen.getAllByText("Review draft")).toHaveLength(2),
+    );
+  });
+
+  it("uses client-side navigation after creating a tender", async () => {
+    apiRequest.mockImplementation((_path: string, init?: RequestInit) =>
+      Promise.resolve(init?.method === "POST" ? { tender_id: "tender-2" } : []),
+    );
+    const user = userEvent.setup();
+    render(<TenderCentre organisationId="org-1" />);
+    await user.click(
+      screen.getByRole("button", { name: /Analyse new tender/ }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Tender title" }),
+      "Demo tender",
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "Buyer" }),
+      "Demo buyer",
+    );
+    const deadline = screen.getByLabelText(/Submission deadline/);
+    fireEvent.change(deadline, { target: { value: "2026-12-09T12:00" } });
+    await user.click(
+      within(
+        screen.getByRole("dialog", { name: "Create tender workspace" }),
+      ).getByRole("button", { name: "Add tender" }),
+    );
+    await waitFor(() =>
+      expect(router.push).toHaveBeenCalledWith(
+        "/tenders/org-1/tender-2?stage=overview",
+      ),
     );
   });
 });

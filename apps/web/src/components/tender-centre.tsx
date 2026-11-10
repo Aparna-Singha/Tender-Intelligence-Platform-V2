@@ -4,6 +4,7 @@ import { ContextualAssistant } from "./contextual-assistant";
 
 import { Plus, Search, SlidersHorizontal, X } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState, type FormEvent, type JSX } from "react";
 import {
   Button,
@@ -51,6 +52,7 @@ export function TenderCentre({
 }: {
   readonly organisationId: string;
 }): JSX.Element {
+  const router = useRouter();
   const [tenders, setTenders] = useState<readonly TenderSummary[]>([]);
   const [message, setMessage] = useState("Loading tender workspaces...");
   const [open, setOpen] = useState(false);
@@ -109,7 +111,7 @@ export function TenderCentre({
         },
       );
       form.reset();
-      window.location.assign(
+      router.push(
         `/tenders/${organisationId}/${created.tender_id}?stage=overview`,
       );
     } catch (caught) {
@@ -172,7 +174,7 @@ export function TenderCentre({
 
       <div
         className="workspace-chip-row workspace-chip-row--left"
-        role="tablist"
+        role="group"
         aria-label="Tender status groups"
       >
         {(
@@ -308,6 +310,10 @@ export function TenderCentre({
                       <tr key={tender.id}>
                         <td>
                           <strong>{tender.title}</strong>
+                          <small className="mobile-table-meta">
+                            {presentation.statusLabel} ·{" "}
+                            {formatDeadlineCountdown(tender.submissionDeadline)}
+                          </small>
                         </td>
                         <td>
                           <span
