@@ -1,6 +1,6 @@
 import { GetObjectCommand, type S3Client } from "@aws-sdk/client-s3";
 import type { TenderWorkflowProgressJob } from "@tender/contracts";
-import type { PrismaClient } from "@tender/database";
+import type { Prisma, PrismaClient } from "@tender/database";
 import {
   classifySections,
   extractDeterministicFields,
@@ -64,10 +64,12 @@ interface ParsedSource {
   readonly parsed: ParsedDocument;
 }
 
-type TransactionClient = Omit<
-  PrismaClient,
-  "$connect" | "$disconnect" | "$extends" | "$on" | "$transaction" | "$use"
->;
+const PERSIST_BATCH_SIZE = 200;
+
+function* batches<T>(rows: readonly T[]): Generator<T[]> {
+  for (let offset = 0; offset < rows.length; offset += PERSIST_BATCH_SIZE)
+    yield rows.slice(offset, offset + PERSIST_BATCH_SIZE);
+}
 
 export class ExtractionProcessor {
   public constructor(
@@ -206,7 +208,11 @@ export class ExtractionProcessor {
       else
         await this.fail(
           run.id,
-          error instanceof ParserFailure ? error.code : "PARSER_FAILURE",
+          error instanceof ParserFailure
+            ? error.code
+            : code !== null && operation === "persist_transaction"
+              ? "PERSISTENCE_FAILURE"
+              : "PARSER_FAILURE",
           publicFailure(error),
         );
       throw error;
@@ -227,188 +233,284 @@ export class ExtractionProcessor {
     let fieldCount = 0;
     let citationFailures = 0;
     let issueCount = 0;
-    await this.database.$transaction(
-      async (transaction) => {
-        for (const source of parsedSources) {
-          signal?.throwIfAborted();
-          const runDocument = await transaction.extractionRunDocument.create({
-            data: {
-              detectedFormat: source.parsed.format,
-              extractionRunId: runId,
-              parserConfiguration: {
-                active_content_execution: false,
-                external_fetch: false,
-                ocr: parserOcrConfiguration(source.parsed.units),
-              },
-              parserName: source.parsed.parserName,
-              parserVersion: source.parsed.parserVersion,
-              sourceChecksum: source.document.sha256,
-              status: "COMPLETE",
-              tenderDocumentId: source.document.id,
-              warningCount: source.parsed.issues.length,
-            },
+    const documents: Prisma.ExtractionRunDocumentCreateManyInput[] = [];
+    const units: Prisma.ExtractedUnitCreateManyInput[] = [];
+    const blocks: Prisma.ExtractedBlockCreateManyInput[] = [];
+    const tables: Prisma.ExtractedTableCreateManyInput[] = [];
+    const cells: Prisma.ExtractedTableCellCreateManyInput[] = [];
+    const sections: Prisma.ClassifiedSectionCreateManyInput[] = [];
+    const fields: Prisma.ExtractedTenderFieldCreateManyInput[] = [];
+    const requirements: Prisma.StructuredRequirementCreateManyInput[] = [];
+    const citations: Prisma.ExtractionCitationCreateManyInput[] = [];
+    const issues: Prisma.ExtractionIssueCreateManyInput[] = [];
+
+    // Assign IDs and validate citations before opening the transaction. This
+    // keeps CPU work out of the database lock window and preserves every link.
+    for (const source of parsedSources) {
+      signal?.throwIfAborted();
+      const runDocumentId = randomUUID();
+      documents.push({
+        id: runDocumentId,
+        detectedFormat: source.parsed.format,
+        extractionRunId: runId,
+        parserConfiguration: {
+          active_content_execution: false,
+          external_fetch: false,
+          ocr: parserOcrConfiguration(source.parsed.units),
+        },
+        parserName: source.parsed.parserName,
+        parserVersion: source.parsed.parserVersion,
+        sourceChecksum: source.document.sha256,
+        status: "COMPLETE",
+        tenderDocumentId: source.document.id,
+        warningCount: source.parsed.issues.length,
+      });
+      documentsProcessed += 1;
+      for (const unit of source.parsed.units) {
+        signal?.throwIfAborted();
+        const unitId = randomUUID();
+        units.push({
+          id: unitId,
+          archiveMemberPath: unit.archiveMemberPath ?? null,
+          characterCount: unit.characterCount,
+          extractionRunDocumentId: runDocumentId,
+          extractionRunId: runId,
+          label: unit.label ?? null,
+          language: unit.language ?? null,
+          ocrConfidence: unit.ocrConfidence ?? null,
+          ocrStatus: unit.ocrStatus,
+          parserConfidence: unit.confidence,
+          unitIndex: unit.unitIndex,
+          unitType: unit.unitType,
+        });
+        unitsProcessed += 1;
+        if (
+          unit.ocrStatus === "OCR_UNAVAILABLE" ||
+          unit.ocrStatus === "OCR_FAILED"
+        )
+          ocrUnavailable += 1;
+        const blockIds = new Map<number, string>();
+        for (const block of unit.blocks) {
+          const blockId = randomUUID();
+          blocks.push({
+            id: blockId,
+            blockType: block.type,
+            confidence: block.confidence,
+            ...(block.coordinates === undefined
+              ? {}
+              : { coordinates: { ...block.coordinates } }),
+            extractedUnitId: unitId,
+            extractionRunDocumentId: runDocumentId,
+            extractionRunId: runId,
+            headingLevel: block.headingLevel ?? null,
+            language: unit.language ?? null,
+            normalizedText: block.text,
+            readingOrder: block.readingOrder,
+            sourceEndOffset: block.sourceEndOffset,
+            sourceStartOffset: block.sourceStartOffset,
+            warnings: [...block.warnings],
           });
-          documentsProcessed += 1;
-          for (const unit of source.parsed.units) {
-            const storedUnit = await transaction.extractedUnit.create({
-              data: {
-                archiveMemberPath: unit.archiveMemberPath ?? null,
-                characterCount: unit.characterCount,
-                extractionRunDocumentId: runDocument.id,
-                extractionRunId: runId,
-                label: unit.label ?? null,
-                language: unit.language ?? null,
-                ocrConfidence: unit.ocrConfidence ?? null,
-                ocrStatus: unit.ocrStatus,
-                parserConfidence: unit.confidence,
-                unitIndex: unit.unitIndex,
-                unitType: unit.unitType,
-              },
+          blockIds.set(block.readingOrder, blockId);
+          if (
+            block.confidence === "LOW" ||
+            block.confidence === "HUMAN_REVIEW_REQUIRED"
+          )
+            lowConfidenceItems += 1;
+          if (block.table !== undefined) {
+            const tableId = randomUUID();
+            tables.push({
+              id: tableId,
+              columnCount: block.table.columnCount,
+              confidence: block.confidence,
+              extractedBlockId: blockId,
+              extractionRunId: runId,
+              rowCount: block.table.rowCount,
             });
-            unitsProcessed += 1;
-            if (
-              unit.ocrStatus === "OCR_UNAVAILABLE" ||
-              unit.ocrStatus === "OCR_FAILED"
-            )
-              ocrUnavailable += 1;
-            const blockIds = new Map<number, string>();
-            for (const block of unit.blocks) {
-              const storedBlock = await transaction.extractedBlock.create({
-                data: {
-                  blockType: block.type,
-                  confidence: block.confidence,
-                  ...(block.coordinates === undefined
-                    ? {}
-                    : { coordinates: { ...block.coordinates } }),
-                  extractedUnitId: storedUnit.id,
-                  extractionRunDocumentId: runDocument.id,
-                  extractionRunId: runId,
-                  headingLevel: block.headingLevel ?? null,
-                  language: unit.language ?? null,
-                  normalizedText: block.text,
-                  readingOrder: block.readingOrder,
-                  sourceEndOffset: block.sourceEndOffset,
-                  sourceStartOffset: block.sourceStartOffset,
-                  warnings: [...block.warnings],
-                },
+            for (const cell of block.table.cells)
+              cells.push({
+                cellReference: cell.cellReference ?? null,
+                columnIndex: cell.columnIndex,
+                columnSpan: cell.columnSpan ?? 1,
+                displayedValue: cell.displayedValue,
+                extractedTableId: tableId,
+                formulaText: cell.formulaText ?? null,
+                rowIndex: cell.rowIndex,
+                rowSpan: cell.rowSpan ?? 1,
               });
-              blockIds.set(block.readingOrder, storedBlock.id);
-              if (
-                block.confidence === "LOW" ||
-                block.confidence === "HUMAN_REVIEW_REQUIRED"
-              )
-                lowConfidenceItems += 1;
-              if (block.table !== undefined) {
-                const table = await transaction.extractedTable.create({
-                  data: {
-                    columnCount: block.table.columnCount,
-                    confidence: block.confidence,
-                    extractedBlockId: storedBlock.id,
-                    extractionRunId: runId,
-                    rowCount: block.table.rowCount,
-                  },
-                });
-                if (block.table.cells.length > 0)
-                  await transaction.extractedTableCell.createMany({
-                    data: block.table.cells.map((cell) => ({
-                      cellReference: cell.cellReference ?? null,
-                      columnIndex: cell.columnIndex,
-                      columnSpan: cell.columnSpan ?? 1,
-                      displayedValue: cell.displayedValue,
-                      extractedTableId: table.id,
-                      formulaText: cell.formulaText ?? null,
-                      rowIndex: cell.rowIndex,
-                      rowSpan: cell.rowSpan ?? 1,
-                    })),
-                  });
-              }
-            }
-            for (const section of classifySections(unit.blocks))
-              await transaction.classifiedSection.create({
-                data: {
-                  category: section.category,
-                  classificationState: section.state,
-                  confidence: section.confidence,
-                  endReadingOrder: section.endReadingOrder,
-                  extractionRunId: runId,
-                  startReadingOrder: section.startReadingOrder,
-                  title: section.title,
-                },
-              });
-            const anchorFor = (block: ParsedBlock): SourceAnchor => ({
-              ...(unit.archiveMemberPath === undefined
-                ? {}
-                : { archiveMemberPath: unit.archiveMemberPath }),
-              blockReadingOrder: block.readingOrder,
-              documentId: source.document.id,
-              documentName: source.document.displayFilename,
-              endOffset: block.sourceEndOffset,
-              excerpt: block.text.slice(0, 900),
-              ...(unit.unitType === "PAGE"
-                ? { pageNumber: unit.unitIndex }
-                : {}),
-              ...(unit.unitType === "SHEET" && unit.label !== undefined
-                ? { sheetName: unit.label }
-                : {}),
-              sourceChecksum: source.document.sha256,
-              startOffset: block.sourceStartOffset,
-              unitIndex: unit.unitIndex,
-            });
-            await this.storeFields(
-              transaction,
-              runId,
-              runDocument.id,
-              storedUnit.id,
-              blockIds,
-              unit.blocks,
-              anchorFor,
-              () => {
-                fieldCount += 1;
-              },
-              () => {
-                citationFailures += 1;
-              },
-            );
-            await this.storeRequirements(
-              transaction,
-              runId,
-              runDocument.id,
-              storedUnit.id,
-              blockIds,
-              unit.blocks,
-              anchorFor,
-              () => {
-                requirementCount += 1;
-              },
-              () => {
-                citationFailures += 1;
-              },
-            );
-            for (const issue of source.parsed.issues.filter(
-              (candidate) =>
-                candidate.unitIndex === undefined ||
-                candidate.unitIndex === unit.unitIndex,
-            )) {
-              await transaction.extractionIssue.create({
-                data: {
-                  extractedUnitId: storedUnit.id,
-                  extractionRunId: runId,
-                  issueType: issue.issueType,
-                  requiresHumanReview: issue.requiresHumanReview,
-                  safeMessage: issue.safeMessage,
-                  severity: issue.severity,
-                  sourceDocumentId: source.document.id,
-                },
-              });
-              issueCount += 1;
-            }
           }
         }
-        if (citationFailures > 0)
-          throw new ParserFailure("CITATION_VALIDATION_FAILED");
-        if (await this.cancelled(runId))
-          throw new ParserFailure("CANCELLED_DURING_COMMIT");
-        await transaction.extractionRun.update({
+        for (const section of classifySections(unit.blocks))
+          sections.push({
+            category: section.category,
+            classificationState: section.state,
+            confidence: section.confidence,
+            endReadingOrder: section.endReadingOrder,
+            extractionRunId: runId,
+            startReadingOrder: section.startReadingOrder,
+            title: section.title,
+          });
+        const anchorFor = (block: ParsedBlock): SourceAnchor => ({
+          ...(unit.archiveMemberPath === undefined
+            ? {}
+            : { archiveMemberPath: unit.archiveMemberPath }),
+          blockReadingOrder: block.readingOrder,
+          documentId: source.document.id,
+          documentName: source.document.displayFilename,
+          endOffset: block.sourceEndOffset,
+          excerpt: block.text.slice(0, 900),
+          ...(unit.unitType === "PAGE" ? { pageNumber: unit.unitIndex } : {}),
+          ...(unit.unitType === "SHEET" && unit.label !== undefined
+            ? { sheetName: unit.label }
+            : {}),
+          sourceChecksum: source.document.sha256,
+          startOffset: block.sourceStartOffset,
+          unitIndex: unit.unitIndex,
+        });
+        for (const field of extractDeterministicFields(
+          unit.blocks,
+          anchorFor,
+        )) {
+          const block = requireBlock(
+            unit.blocks,
+            field.anchor.blockReadingOrder,
+          );
+          if (!validateCitation(block, field.anchor)) {
+            citationFailures += 1;
+            continue;
+          }
+          const fieldId = randomUUID();
+          fields.push({
+            id: fieldId,
+            confidence: field.confidence,
+            extractionRunId: runId,
+            fieldType: field.fieldType,
+            findingState: field.findingState,
+            normalizedDateValue: field.normalizedDateValue ?? null,
+            normalizedTextValue: field.normalizedTextValue,
+            sourceWording: field.sourceWording,
+          });
+          citations.push({
+            ...citationData(
+              runId,
+              runDocumentId,
+              unitId,
+              blockIds,
+              field.anchor,
+              {
+                extractedTenderFieldId: fieldId,
+              },
+            ),
+          });
+          fieldCount += 1;
+        }
+        for (const requirement of extractDeterministicRequirements(
+          unit.blocks,
+          anchorFor,
+        )) {
+          const block = requireBlock(
+            unit.blocks,
+            requirement.anchor.blockReadingOrder,
+          );
+          if (!validateCitation(block, requirement.anchor)) {
+            citationFailures += 1;
+            continue;
+          }
+          const requirementId = randomUUID();
+          requirements.push({
+            id: requirementId,
+            category: requirement.category,
+            conditionText: requirement.conditionText ?? null,
+            confidence: requirement.confidence,
+            extractionRunId: runId,
+            findingState: requirement.findingState,
+            normalizedStatement: requirement.normalizedStatement,
+            obligation: requirement.obligation,
+            sourceWording: requirement.sourceWording,
+            currency: requirement.threshold?.currency ?? null,
+            thresholdNumericValue: requirement.threshold?.numericValue ?? null,
+            thresholdOperator: requirement.threshold?.operator ?? null,
+            thresholdTextValue: requirement.threshold?.textValue ?? null,
+            unit: requirement.threshold?.unit ?? null,
+            title: requirement.title,
+          });
+          citations.push({
+            ...citationData(
+              runId,
+              runDocumentId,
+              unitId,
+              blockIds,
+              requirement.anchor,
+              {
+                structuredRequirementId: requirementId,
+              },
+            ),
+          });
+          requirementCount += 1;
+        }
+        for (const issue of source.parsed.issues.filter(
+          (candidate) =>
+            candidate.unitIndex === undefined ||
+            candidate.unitIndex === unit.unitIndex,
+        )) {
+          issues.push({
+            extractedUnitId: unitId,
+            extractionRunId: runId,
+            issueType: issue.issueType,
+            requiresHumanReview: issue.requiresHumanReview,
+            safeMessage: issue.safeMessage,
+            severity: issue.severity,
+            sourceDocumentId: source.document.id,
+          });
+          issueCount += 1;
+        }
+      }
+    }
+    if (citationFailures > 0)
+      throw new ParserFailure("CITATION_VALIDATION_FAILED");
+
+    await this.database.$transaction(
+      async (transaction) => {
+        // Return a boolean: Prisma cannot deserialize PostgreSQL's void result.
+        await transaction.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${tenderVersionId}::text, 0)) IS NOT NULL AS locked`;
+        // Serialize duplicate workers for this run before inserting any rows.
+        // A late worker sees COMPLETE after the first transaction commits.
+        const claim = await transaction.extractionRun.updateMany({
+          data: { currentStage: "STRUCTURING" },
+          where: {
+            id: runId,
+            status: "STRUCTURING",
+            cancellationRequestedAt: null,
+          },
+        });
+        if (claim.count !== 1) throw new ParserFailure("STALE_EXTRACTION_RUN");
+        const latest = await transaction.extractionRun.findFirst({
+          orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+          select: { id: true },
+          where: { tenderVersionId },
+        });
+        if (latest?.id !== runId)
+          throw new ParserFailure("STALE_EXTRACTION_RUN");
+        for (const batch of batches(documents))
+          await transaction.extractionRunDocument.createMany({ data: batch });
+        for (const batch of batches(units))
+          await transaction.extractedUnit.createMany({ data: batch });
+        for (const batch of batches(blocks))
+          await transaction.extractedBlock.createMany({ data: batch });
+        for (const batch of batches(tables))
+          await transaction.extractedTable.createMany({ data: batch });
+        for (const batch of batches(cells))
+          await transaction.extractedTableCell.createMany({ data: batch });
+        for (const batch of batches(sections))
+          await transaction.classifiedSection.createMany({ data: batch });
+        for (const batch of batches(fields))
+          await transaction.extractedTenderField.createMany({ data: batch });
+        for (const batch of batches(requirements))
+          await transaction.structuredRequirement.createMany({ data: batch });
+        for (const batch of batches(citations))
+          await transaction.extractionCitation.createMany({ data: batch });
+        for (const batch of batches(issues))
+          await transaction.extractionIssue.createMany({ data: batch });
+        const activation = await transaction.extractionRun.updateMany({
           data: {
             completedAt: new Date(),
             currentStage: "COMPLETE",
@@ -450,8 +552,14 @@ export class ExtractionProcessor {
             },
             status: "COMPLETE",
           },
-          where: { id: runId },
+          where: {
+            id: runId,
+            status: "STRUCTURING",
+            cancellationRequestedAt: null,
+          },
         });
+        if (activation.count !== 1)
+          throw new ParserFailure("CANCELLED_DURING_COMMIT");
         const staleRuns = await transaction.riskAnalysisRun.findMany({
           select: { id: true },
           where: {
@@ -542,108 +650,22 @@ export class ExtractionProcessor {
     );
   }
 
-  private async storeFields(
-    transaction: TransactionClient,
-    runId: string,
-    runDocumentId: string,
-    unitId: string,
-    blockIds: ReadonlyMap<number, string>,
-    blocks: readonly ParsedBlock[],
-    anchorFor: (block: ParsedBlock) => SourceAnchor,
-    stored: () => void,
-    failed: () => void,
-  ): Promise<void> {
-    for (const field of extractDeterministicFields(blocks, anchorFor)) {
-      const block = requireBlock(blocks, field.anchor.blockReadingOrder);
-      if (!validateCitation(block, field.anchor)) {
-        failed();
-        continue;
-      }
-      const record = await transaction.extractedTenderField.create({
-        data: {
-          confidence: field.confidence,
-          extractionRunId: runId,
-          fieldType: field.fieldType,
-          findingState: field.findingState,
-          normalizedDateValue: field.normalizedDateValue ?? null,
-          normalizedTextValue: field.normalizedTextValue,
-          sourceWording: field.sourceWording,
-        },
-      });
-      await transaction.extractionCitation.create({
-        data: citationData(
-          runId,
-          runDocumentId,
-          unitId,
-          blockIds,
-          field.anchor,
-          { extractedTenderFieldId: record.id },
-        ),
-      });
-      stored();
-    }
-  }
-
-  private async storeRequirements(
-    transaction: TransactionClient,
-    runId: string,
-    runDocumentId: string,
-    unitId: string,
-    blockIds: ReadonlyMap<number, string>,
-    blocks: readonly ParsedBlock[],
-    anchorFor: (block: ParsedBlock) => SourceAnchor,
-    stored: () => void,
-    failed: () => void,
-  ): Promise<void> {
-    for (const requirement of extractDeterministicRequirements(
-      blocks,
-      anchorFor,
-    )) {
-      const block = requireBlock(blocks, requirement.anchor.blockReadingOrder);
-      if (!validateCitation(block, requirement.anchor)) {
-        failed();
-        continue;
-      }
-      const record = await transaction.structuredRequirement.create({
-        data: {
-          category: requirement.category,
-          conditionText: requirement.conditionText ?? null,
-          confidence: requirement.confidence,
-          extractionRunId: runId,
-          findingState: requirement.findingState,
-          normalizedStatement: requirement.normalizedStatement,
-          obligation: requirement.obligation,
-          sourceWording: requirement.sourceWording,
-          currency: requirement.threshold?.currency ?? null,
-          thresholdNumericValue: requirement.threshold?.numericValue ?? null,
-          thresholdOperator: requirement.threshold?.operator ?? null,
-          thresholdTextValue: requirement.threshold?.textValue ?? null,
-          unit: requirement.threshold?.unit ?? null,
-          title: requirement.title,
-        },
-      });
-      await transaction.extractionCitation.create({
-        data: citationData(
-          runId,
-          runDocumentId,
-          unitId,
-          blockIds,
-          requirement.anchor,
-          { structuredRequirementId: record.id },
-        ),
-      });
-      stored();
-    }
-  }
-
   private async stage(
     runId: string,
     status: "PARSING" | "STRUCTURING",
     progressPercentage: number,
     publicMessage: string,
   ): Promise<void> {
-    await this.database.extractionRun.update({
+    const stage = await this.database.extractionRun.updateMany({
       data: {
+        ...(status === "PARSING"
+          ? {
+              completedAt: null,
+              failureCategory: null,
+              internalFailureReference: null,
+              safeFailureMessage: null,
+            }
+          : {}),
         currentStage: status,
         eventSequence: { increment: 1 },
         progressPercentage,
@@ -651,8 +673,13 @@ export class ExtractionProcessor {
         startedAt: new Date(),
         status,
       },
-      where: { id: runId },
+      where: {
+        id: runId,
+        status: { in: ["QUEUED", "PARSING", "STRUCTURING", "FAILED"] },
+        cancellationRequestedAt: null,
+      },
     });
+    if (stage.count !== 1) throw new ParserFailure("STALE_EXTRACTION_RUN");
   }
 
   private async cancelled(runId: string): Promise<boolean> {
@@ -682,7 +709,10 @@ export class ExtractionProcessor {
         safeFailureMessage,
         status: "FAILED",
       },
-      where: { id: runId, status: { not: "CANCELLED" } },
+      where: {
+        id: runId,
+        status: { in: ["QUEUED", "PARSING", "STRUCTURING", "FAILED"] },
+      },
     });
   }
 }
@@ -749,7 +779,7 @@ function citationData(
 
 function parserOcrConfiguration(
   units: readonly ParsedDocument["units"][number][],
-): object {
+): Prisma.InputJsonValue {
   const ocrUnits = units.filter(
     (unit) =>
       unit.ocrStatus === "OCR_PERFORMED" ||

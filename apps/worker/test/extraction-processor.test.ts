@@ -158,7 +158,7 @@ describe("extraction worker progression", () => {
           "persist",
         ).mockRejectedValue(failure);
       } else {
-        database.extractionRun.update.mockRejectedValueOnce(failure);
+        database.extractionRun.updateMany.mockRejectedValueOnce(failure);
       }
       await expect(
         processor.process({
@@ -175,6 +175,14 @@ describe("extraction worker progression", () => {
       } else {
         expect(diagnostic).not.toHaveBeenCalled();
       }
+      expect(database.extractionRun.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            failureCategory:
+              code === "P2028" ? "PERSISTENCE_FAILURE" : "PARSER_FAILURE",
+          }),
+        }),
+      );
     },
   );
 });

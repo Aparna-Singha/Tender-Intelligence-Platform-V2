@@ -105,6 +105,17 @@ export class TendersService {
                 status: true,
               },
             },
+            extractionRuns: {
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              select: {
+                id: true,
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+              take: 1,
+            },
             documents: {
               select: {
                 role: true,
@@ -181,6 +192,17 @@ export class TendersService {
                 safeFailureMessage: true,
                 status: true,
               },
+            },
+            extractionRuns: {
+              orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+              select: {
+                id: true,
+                invalidatedAt: true,
+                publicMessage: true,
+                safeFailureMessage: true,
+                status: true,
+              },
+              take: 1,
             },
             documents: {
               orderBy: { createdAt: "asc" },
@@ -1463,6 +1485,13 @@ export class TendersService {
           readonly safeFailureMessage?: string | null;
           readonly status: string;
         } | null;
+        readonly extractionRuns?: readonly {
+          readonly id: string;
+          readonly invalidatedAt: Date | null;
+          readonly publicMessage?: string | null;
+          readonly safeFailureMessage?: string | null;
+          readonly status: string;
+        }[];
         readonly documents: readonly {
           readonly role: string;
           readonly status: string;
@@ -1671,7 +1700,10 @@ export class TendersService {
             ? null
             : (draftRunByVersionKey.get(currentVersionKey) ?? null),
         documents: currentVersion?.documents ?? [],
-        extraction: currentVersion?.activeExtractionRun ?? null,
+        extraction:
+          currentVersion?.extractionRuns?.[0] ??
+          currentVersion?.activeExtractionRun ??
+          null,
         processingJobs:
           tender.processingJobs ?? currentVersion?.processingJobs ?? [],
         risk: currentVersion?.activeEarlyRiskRun ?? null,

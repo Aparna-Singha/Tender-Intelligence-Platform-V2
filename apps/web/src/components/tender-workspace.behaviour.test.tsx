@@ -230,6 +230,71 @@ beforeEach(() => {
 });
 
 describe("tender workspace stages", () => {
+  it("shows a failed current extraction and submits one protected retry despite repeated clicks", async () => {
+    const defaultApi = apiRequest.getMockImplementation()!;
+    const response = createDeferred<{ id: string; status: string }>();
+    vi.stubGlobal("crypto", {
+      randomUUID: vi.fn(() => "synthetic-retry-key"),
+      subtle: { digest: vi.fn() },
+    });
+    apiRequest.mockImplementation((path: string): unknown => {
+      if (path === "/organisations/org-1/tenders/tender-1")
+        return {
+          ...baseWorkspace,
+          lifecycleStatus: "SOURCE_READY",
+          versions: [
+            {
+              ...baseWorkspace.versions[0],
+              documents: [{ id: "source-a", status: "READY", role: "PRIMARY" }],
+            },
+          ],
+        };
+      if (path.endsWith("/versions/version-1/extractions"))
+        return [
+          {
+            id: "failed-extraction",
+            status: "FAILED",
+            public_message: "Extraction failed safely",
+          },
+        ];
+      if (path.endsWith("/extractions/failed-extraction/retry"))
+        return response.promise;
+      if (
+        path.includes("/final-readiness?") ||
+        path.includes("/controlled-review-packages")
+      )
+        return { items: [], next_cursor: null };
+      return [];
+    });
+    try {
+      render(<TenderWorkspace organisationId="org-1" tenderId="tender-1" />);
+      const retry = await screen.findByRole("button", {
+        name: "Retry extraction",
+      });
+      fireEvent.click(retry);
+      fireEvent.click(retry);
+      await waitFor(() => expect(retry).toBeDisabled());
+      const calls = apiRequest.mock.calls as unknown as [
+        string,
+        RequestInit?,
+      ][];
+      const retryCalls = calls.filter(([path]) =>
+        path.endsWith("/extractions/failed-extraction/retry"),
+      );
+      expect(retryCalls).toHaveLength(1);
+      expect(retryCalls[0]?.[1]).toMatchObject({ method: "POST" });
+      const retryBody = retryCalls[0]?.[1]?.body;
+      expect(typeof retryBody).toBe("string");
+      expect(JSON.parse(retryBody as string)).toEqual({
+        idempotency_key: "synthetic-retry-key",
+      });
+      response.resolve({ id: "new-run", status: "QUEUED" });
+      await screen.findByText("Extraction retry: Queued.");
+    } finally {
+      apiRequest.mockImplementation(defaultApi);
+    }
+  });
+
   it.each([
     [404, "/risk-analyses/current", false],
     [503, "/risk-analyses/current", true],
