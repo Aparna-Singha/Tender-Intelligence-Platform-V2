@@ -112,7 +112,7 @@ export function TenderCentre({
       );
       form.reset();
       router.push(
-        `/tenders/${organisationId}/${created.tender_id}?stage=overview`,
+        `/tenders/${organisationId}/${created.tender_id}?stage=files`,
       );
     } catch (caught) {
       setError(
@@ -367,7 +367,11 @@ export function TenderCentre({
               <X aria-hidden="true" size={18} />
             </IconButton>
           </div>
-          <p>Enter tender details to start tracking.</p>
+          <p>
+            Enter the buyer, deadline, and GeM Bid No. from the listing. After
+            creating the workspace, you can upload the original bid PDF and its
+            supporting files. No GeM account connection is needed.
+          </p>
           <form onSubmit={(event) => void create(event)}>
             <Field label="Tender title" required>
               <Input name="title" required />
@@ -376,8 +380,11 @@ export function TenderCentre({
               <Input name="buyer" required />
             </Field>
             <div className="form-grid">
-              <Field label="Tender number, if available">
-                <Input name="source_tender_number" />
+              <Field label="Tender number (GeM Bid No., if available)">
+                <Input
+                  name="source_tender_number"
+                  placeholder="GEM/2026/B/1234567"
+                />
               </Field>
               <Field label="Category, if supplied">
                 <Input name="category" />
@@ -402,7 +409,7 @@ export function TenderCentre({
             {error !== "" ? <FormMessage>{error}</FormMessage> : null}
             <div className="inline-actions">
               <Button loading={submitting} type="submit">
-                {submitting ? "Creating..." : "Add tender"}
+                {submitting ? "Creating..." : "Create and upload files"}
               </Button>
               <Button
                 disabled={submitting}

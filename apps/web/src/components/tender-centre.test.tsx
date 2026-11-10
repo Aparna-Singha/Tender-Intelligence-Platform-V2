@@ -93,11 +93,11 @@ describe("TenderCentre row presentation", () => {
     await user.click(
       within(
         screen.getByRole("dialog", { name: "Create tender workspace" }),
-      ).getByRole("button", { name: "Add tender" }),
+      ).getByRole("button", { name: "Create and upload files" }),
     );
     await waitFor(() =>
       expect(router.push).toHaveBeenCalledWith(
-        "/tenders/org-1/tender-2?stage=overview",
+        "/tenders/org-1/tender-2?stage=files",
       ),
     );
   });

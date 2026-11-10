@@ -24,6 +24,14 @@ import {
 } from "@tender/ui";
 import { apiRequest, formatApiError, PublicApiError } from "../lib/api";
 import { uploadFileToSignedStorageUrl } from "../lib/direct-upload";
+import {
+  selectTenderFiles,
+  tenderFileRoleOptions,
+  tenderUploadMimeType,
+  validateTenderFileSelection,
+  type SelectedTenderFile,
+  type TenderFileRole,
+} from "../lib/tender-upload-files";
 import { ActionChecklist } from "./action-checklist";
 import { ControlledReviewPackageWorkspace } from "./controlled-review-package-workspace";
 import {
@@ -1344,7 +1352,13 @@ export function TenderWorkspace({
   const [eligibilityFilter, setEligibilityFilter] = useState("ALL");
   const [eligibilityFiltersOpen, setEligibilityFiltersOpen] = useState(false);
   const [showFileUpload, setShowFileUpload] = useState(false);
-  const [uploadRole, setUploadRole] = useState("PRIMARY");
+  const [uploadMode, setUploadMode] = useState<"DOCUMENTS" | "CORRIGENDUM">(
+    "DOCUMENTS",
+  );
+  const [selectedUploadFiles, setSelectedUploadFiles] = useState<
+    readonly SelectedTenderFile[]
+  >([]);
+  const [uploadingTenderFiles, setUploadingTenderFiles] = useState(false);
   const [filesFilter, setFilesFilter] = useState<"ALL" | "CORRIGENDA">("ALL");
   const [activityFilter, setActivityFilter] = useState("ALL");
   const [showAllActivity, setShowAllActivity] = useState(false);
@@ -1774,36 +1788,38 @@ export function TenderWorkspace({
 
   async function upload(event: FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
-    if (workspace === null) return;
+    if (workspace === null || uploadingTenderFiles) return;
     const form = event.currentTarget;
     const values = new FormData(form);
-    const submittedFiles = values
-      .getAll("file")
-      .filter(
-        (value): value is File => value instanceof File && value.size > 0,
-      );
-    const fileField = form.elements.namedItem("file");
-    const selectedFiles =
-      fileField instanceof HTMLInputElement
-        ? Array.from(fileField.files ?? []).filter((file) => file.size > 0)
-        : [];
-    const files = submittedFiles.length > 0 ? submittedFiles : selectedFiles;
-    const role = values.get("role");
     const version = workspace.versions[0];
-    if (files.length === 0 || version === undefined || typeof role !== "string")
+    if (version === undefined) return;
+    const selected =
+      uploadMode === "CORRIGENDUM"
+        ? selectedUploadFiles.map(({ file }) => ({
+            file,
+            mimeType: tenderUploadMimeType(file.name),
+            role: "CORRIGENDUM" as const,
+          }))
+        : selectedUploadFiles;
+    const error = validateTenderFileSelection(selected);
+    if (error !== null) {
+      setMessage(error);
       return;
-    if (role === "CORRIGENDUM" && files.length !== 1) {
+    }
+    if (uploadMode === "CORRIGENDUM" && selected.length !== 1) {
       setMessage(
         "Upload one corrigendum at a time to preserve version history.",
       );
       return;
     }
 
+    setUploadingTenderFiles(true);
     setMessage("Preparing secure direct upload...");
+    let completedCount = 0;
     try {
-      for (const [index, file] of files.entries()) {
+      for (const [index, { file, mimeType, role }] of selected.entries()) {
         setMessage(
-          `Calculating checksum for source ${index + 1} of ${files.length}...`,
+          `Calculating checksum for source ${index + 1} of ${selected.length}...`,
         );
         const checksum = await sha256(file);
         let targetVersionId = version.id;
@@ -1836,7 +1852,7 @@ export function TenderWorkspace({
             body: JSON.stringify({
               checksum_sha256: checksum,
               filename: file.name,
-              mime_type: file.type,
+              mime_type: mimeType,
               role,
               size_bytes: file.size,
             }),
@@ -1845,7 +1861,7 @@ export function TenderWorkspace({
         );
         try {
           setMessage(
-            `Uploading source ${index + 1} of ${files.length} to private storage...`,
+            `Uploading source ${index + 1} of ${selected.length} to private storage...`,
           );
           await uploadFileToSignedStorageUrl(
             session.upload_url,
@@ -1867,7 +1883,7 @@ export function TenderWorkspace({
         }
         try {
           setMessage(
-            `Verifying source ${index + 1} of ${files.length} and starting security processing...`,
+            `Verifying source ${index + 1} of ${selected.length} and starting security processing...`,
           );
           await apiRequest(
             `/organisations/${organisationId}/tenders/${tenderId}/documents/${session.document_id}/complete`,
@@ -1881,18 +1897,27 @@ export function TenderWorkspace({
             `"${file.name}" reached storage but could not be verified and will show as Upload failed. Remove it and try again.`,
           );
         }
+        completedCount += 1;
       }
       form.reset();
-      setMessage("Upload accepted. Security processing is in progress.");
+      setSelectedUploadFiles([]);
       setShowFileUpload(false);
       await loadWorkspace(true);
+      setMessage(
+        `${completedCount} tender file${completedCount === 1 ? "" : "s"} accepted for security processing. Check the status before relying on analysis.`,
+      );
       setDecisionFeedback("");
     } catch (caught) {
+      if (completedCount > 0) {
+        if (uploadMode === "DOCUMENTS")
+          setSelectedUploadFiles((current) => current.slice(completedCount));
+        await loadWorkspace(true);
+      }
       setMessage(
-        caught instanceof Error
-          ? caught.message
-          : "Upload rejected. Check the file type, size, and contents.",
+        `${completedCount > 0 ? `${completedCount} file${completedCount === 1 ? "" : "s"} accepted before the error. ` : ""}${caught instanceof Error ? caught.message : "Upload rejected. Check the file type, size, and contents."}`,
       );
+    } finally {
+      setUploadingTenderFiles(false);
     }
   }
 
@@ -3391,7 +3416,13 @@ export function TenderWorkspace({
                   : ` · ${formatFileSize(String(visibleVersionDocumentBytes))}`}
               </p>
             </div>
-            <Button onClick={() => setShowFileUpload(true)}>
+            <Button
+              onClick={() => {
+                setUploadMode("DOCUMENTS");
+                setSelectedUploadFiles([]);
+                setShowFileUpload(true);
+              }}
+            >
               Upload files
             </Button>
           </header>
@@ -3478,7 +3509,10 @@ export function TenderWorkspace({
                               </div>
                             </div>
                           </td>
-                          <td>{fileType(document.displayFilename)}</td>
+                          <td>
+                            {fileType(document.displayFilename)} ·{" "}
+                            {humanizeEnum(document.role)}
+                          </td>
                           <td>{formatShortDate(document.createdAt)}</td>
                           <td className="workspace-table__muted">—</td>
                           <td>{formatFileSize(document.sizeBytes)}</td>
@@ -3582,36 +3616,36 @@ export function TenderWorkspace({
           {showFileUpload ? (
             <Modal
               label="Upload tender files"
-              onClose={() => setShowFileUpload(false)}
+              onClose={() => {
+                if (!uploadingTenderFiles) setShowFileUpload(false);
+              }}
             >
               <h2>Upload tender files</h2>
               <p>
-                Secure direct upload, malware/processing gates, and versioning
-                remain unchanged.
+                For a GeM tender, upload the PDF opened from the Bid No. link,
+                then add ATC, specifications, BOQ, and other attachments. The
+                reverse-auction (RA) number is not the bid document.
               </p>
               <form onSubmit={(event) => void upload(event)}>
-                <Field htmlFor="upload-role" label="Document role">
+                <Field htmlFor="upload-mode" label="What are you uploading?">
                   <Select
-                    id="upload-role"
-                    name="role"
-                    onChange={(event) => setUploadRole(event.target.value)}
-                    value={uploadRole}
+                    disabled={uploadingTenderFiles}
+                    id="upload-mode"
+                    onChange={(event) => {
+                      setUploadMode(
+                        event.target.value as "DOCUMENTS" | "CORRIGENDUM",
+                      );
+                      setSelectedUploadFiles([]);
+                    }}
+                    value={uploadMode}
                   >
-                    <option value="PRIMARY">Primary tender</option>
-                    <option value="ANNEXURE">Annexure</option>
-                    <option value="BOQ">BOQ</option>
-                    <option value="TECHNICAL_SPECIFICATION">
-                      Technical specification
+                    <option value="DOCUMENTS">
+                      Bid PDF and supporting files
                     </option>
-                    <option value="FORM">Form</option>
-                    <option value="DECLARATION">Declaration</option>
                     <option value="CORRIGENDUM">Corrigendum</option>
-                    <option value="AMENDMENT">Amendment</option>
-                    <option value="CLARIFICATION">Buyer clarification</option>
-                    <option value="SUPPORTING">Supporting document</option>
                   </Select>
                 </Field>
-                {uploadRole === "CORRIGENDUM" ? (
+                {uploadMode === "CORRIGENDUM" ? (
                   <>
                     <Field
                       htmlFor="upload-corrigendum-id"
@@ -3637,20 +3671,89 @@ export function TenderWorkspace({
                     </Field>
                   </>
                 ) : null}
-                <Field htmlFor="upload-files" label="Files">
+                <Field
+                  htmlFor="upload-files"
+                  label={
+                    uploadMode === "CORRIGENDUM"
+                      ? "Corrigendum file"
+                      : "Bid PDF and supporting files"
+                  }
+                >
                   <input
                     accept=".pdf,.zip,.xlsx,.docx,.csv"
                     className="input"
+                    disabled={uploadingTenderFiles}
                     id="upload-files"
-                    multiple
+                    key={uploadMode}
+                    multiple={uploadMode === "DOCUMENTS"}
                     name="file"
+                    onChange={(event) => {
+                      const files = Array.from(event.target.files ?? []);
+                      setSelectedUploadFiles(
+                        selectTenderFiles(
+                          files,
+                          currentVersion?.documents.some(
+                            (document) => document.role === "PRIMARY",
+                          ) ?? false,
+                        ),
+                      );
+                    }}
                     required
                     type="file"
                   />
                 </Field>
+                {uploadMode === "DOCUMENTS" &&
+                selectedUploadFiles.length > 0 ? (
+                  <div role="group" aria-label="Document roles">
+                    <p>Confirm the type of each file before uploading:</p>
+                    {selectedUploadFiles.map(({ file, role }, index) => (
+                      <Field
+                        key={`${file.name}-${index}`}
+                        htmlFor={`tender-file-role-${index}`}
+                        label={`${file.name} (${formatFileSize(String(file.size))})`}
+                      >
+                        <Select
+                          disabled={uploadingTenderFiles}
+                          id={`tender-file-role-${index}`}
+                          onChange={(event) => {
+                            setSelectedUploadFiles((current) =>
+                              current.map((selected, selectedIndex) =>
+                                selectedIndex === index
+                                  ? {
+                                      ...selected,
+                                      role: event.target
+                                        .value as TenderFileRole,
+                                    }
+                                  : selected,
+                              ),
+                            );
+                          }}
+                          value={role}
+                        >
+                          {tenderFileRoleOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </Select>
+                      </Field>
+                    ))}
+                  </div>
+                ) : null}
+                <p className="tender-compat-note">
+                  Files remain private and tender-scoped. PDF, ZIP, XLSX, DOCX,
+                  and CSV are accepted (25 MB per file). Upload published
+                  corrections separately as corrigenda so previous versions
+                  remain traceable.
+                </p>
                 <div className="inline-actions">
-                  <Button type="submit">Upload source securely</Button>
+                  <Button disabled={uploadingTenderFiles} type="submit">
+                    {uploadingTenderFiles
+                      ? "Uploading tender files..."
+                      : "Upload source securely"}
+                  </Button>
                   <Button
+                    disabled={uploadingTenderFiles}
                     onClick={() => setShowFileUpload(false)}
                     type="button"
                     variant="secondary"
