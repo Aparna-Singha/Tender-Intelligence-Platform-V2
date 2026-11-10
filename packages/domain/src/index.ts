@@ -6,6 +6,11 @@ export interface DomainEvent<TPayload extends object = Record<string, never>> {
 }
 
 export {
+  dateOnlyExpiryInstant,
+  isDateOnlyExpired,
+} from "./date-only-expiry.js";
+
+export {
   selectSubmissionDeadline,
   type DeadlineField,
   type DeadlineSelection,

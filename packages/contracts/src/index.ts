@@ -65,11 +65,14 @@ export type {
   StartRagIndexRequest,
 } from "./rag.js";
 export {
+  attachRequirementEvidenceSchema,
   completeUploadSchema,
+  createRequirementUploadSchema,
   createUploadSessionSchema,
   documentCategories,
   documentCategorySchema,
   documentFilterSchema,
+  evidenceCandidateFilterSchema,
 } from "./documents.js";
 export {
   completeTenderUploadSchema,
@@ -99,8 +102,11 @@ export {
   type TenderWorkflowProgressTriggerType,
 } from "./tender-workflow.js";
 export type {
+  AttachRequirementEvidenceRequest,
   CompleteUploadRequest,
+  CreateRequirementUploadRequest,
   CreateUploadSessionRequest,
+  EvidenceCandidateFilter,
 } from "./documents.js";
 export {
   businessIdentityStepSchema,
