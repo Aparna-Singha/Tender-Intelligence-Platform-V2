@@ -106,12 +106,29 @@ async function bootstrap(): Promise<void> {
   const metrics = createWorkerMetrics();
   const metricsServer = createMetricsServer(metrics);
   const database: PrismaClient = createPrismaClient(environment.DATABASE_URL);
+  // PostgreSQL cancels recovery discovery at the server; job processing keeps
+  // its existing database pool and timeout policy.
+  const recoveryDatabase: PrismaClient = createPrismaClient(
+    environment.DATABASE_URL,
+    { statementTimeoutMs: 10_000, lockTimeoutMs: 5_000, maxConnections: 1 },
+  );
   const redis = new Redis(environment.REDIS_URL, {
     lazyConnect: true,
     maxRetriesPerRequest: null,
   });
   const queue = new Queue(environment.QUEUE_NAME, {
     connection: redis,
+  });
+  // A timed-out add is ambiguous: the job may have committed in Redis. Keep
+  // this connection separate so recovery timeouts do not affect active jobs.
+  const recoveryRedis = new Redis(environment.REDIS_URL, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 5_000,
+    commandTimeout: 10_000,
+  });
+  const recoveryQueue = new Queue(environment.QUEUE_NAME, {
+    connection: recoveryRedis,
   });
   const workflowProgressQueue = new Queue<TenderWorkflowProgressJob>(
     tenderWorkflowProgressQueueName(environment.QUEUE_NAME),
@@ -441,12 +458,16 @@ async function bootstrap(): Promise<void> {
     readiness,
     requestIdHeader: environment.REQUEST_ID_HEADER,
   });
-  const recovery = new CompanyUploadRecovery(database, queue, (error) => {
-    logger.error(
-      { errorType: error instanceof Error ? error.name : "UnknownError" },
-      "Company upload recovery will retry",
-    );
-  });
+  const recovery = new CompanyUploadRecovery(
+    recoveryDatabase,
+    recoveryQueue,
+    () => {
+      logger.error(
+        { recoveryFailure: "OPERATION_FAILED" },
+        "Company upload recovery will retry",
+      );
+    },
+  );
   const recoveryTimer = setInterval(() => {
     void recovery.run();
   }, 30_000);
@@ -454,18 +475,30 @@ async function bootstrap(): Promise<void> {
   const shutdown = new WorkerShutdown(
     {
       stopScheduling: () => clearInterval(recoveryTimer),
-      recovery: () => recovery.stop(),
+      recovery: () => {
+        // PING on the same connection is ordered after any uncertain add.
+        // If it cannot be acknowledged, leave the connection open and fail
+        // shutdown rather than disconnecting a possibly in-flight write.
+        return recovery.stopAndConfirmInsertions(() => recoveryRedis.ping());
+      },
       worker: () => documentWorker.close(),
       queues: async () => {
         await queue.close();
         await workflowProgressQueue.close();
+        await recoveryQueue.close();
       },
       servers: async () => {
         await server.close();
         await metricsServer.close();
       },
-      redis: () => redis.quit(),
-      database: () => database.$disconnect(),
+      redis: async () => {
+        await recoveryRedis.quit();
+        await redis.quit();
+      },
+      database: async () => {
+        await recoveryDatabase.$disconnect();
+        await database.$disconnect();
+      },
     },
     ({ stage, event, durationMs, ...details }) => {
       logger.info(

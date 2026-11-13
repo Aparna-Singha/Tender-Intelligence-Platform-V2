@@ -186,4 +186,64 @@ describe("worker shutdown", () => {
       "SECRET_URL_AND_DOCUMENT_TEXT",
     );
   });
+
+  it("does not close the worker or shared clients when recovery acknowledgement fails", async () => {
+    const order: string[] = [];
+    const events: ShutdownEvent[] = [];
+    const base = dependencies(order);
+    const shutdown = new WorkerShutdown(
+      {
+        ...base,
+        recovery: () => Promise.reject(new Error("private Redis endpoint")),
+      },
+      (event) => {
+        events.push(event);
+      },
+    );
+    await expect(shutdown.run()).resolves.toBe(false);
+    expect(order).toEqual(["timer"]);
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        stage: "RECOVERY_DRAIN",
+        event: "failed",
+        reason: "rejected",
+      }),
+    );
+    expect(JSON.stringify(events)).not.toContain("private Redis endpoint");
+  });
+
+  it("reports an active job exceeding its deadline without closing Redis beneath it", async () => {
+    vi.useFakeTimers();
+    try {
+      const order: string[] = [];
+      const events: ShutdownEvent[] = [];
+      const pending = deferred();
+      const base = dependencies(order);
+      const shutdown = new WorkerShutdown(
+        {
+          ...base,
+          worker: () => pending.promise,
+        },
+        (event) => {
+          events.push(event);
+        },
+        shortTimeouts,
+      );
+      const result = shutdown.run();
+      await vi.advanceTimersByTimeAsync(11);
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          stage: "BULLMQ_WORKER_CLOSE",
+          event: "failed",
+          reason: "timeout",
+        }),
+      );
+      expect(order).toEqual(["timer", "recovery"]);
+      pending.release();
+      await expect(result).resolves.toBe(false);
+      expect(order.slice(-2)).toEqual(["redis", "database"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

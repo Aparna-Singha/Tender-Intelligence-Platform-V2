@@ -319,4 +319,122 @@ describe("committed company upload recovery", () => {
     expect(database.uploadSession.findMany).toHaveBeenCalledTimes(2);
     expect(queue.add).toHaveBeenCalledTimes(2);
   });
+
+  it("reconciles an ambiguous queue acknowledgement using the same stable job ID", async () => {
+    const session = {
+      id: "synthetic-session",
+      organisationId: "synthetic-organisation",
+      documentVersionId: "synthetic-version",
+      documentVersion: {
+        versionNumber: 1,
+        extraction: null,
+        document: { versions: [] },
+      },
+    };
+    const database = {
+      uploadSession: { findMany: vi.fn().mockResolvedValue([session]) },
+    };
+    const retainedJobs = new Set<string>();
+    const queue = {
+      add: vi
+        .fn()
+        .mockImplementation(
+          (_name: string, _data: unknown, options: { jobId: string }) => {
+            retainedJobs.add(options.jobId);
+            if (queue.add.mock.calls.length === 1) {
+              return Promise.reject(new Error("acknowledgement lost"));
+            }
+            return Promise.resolve();
+          },
+        ),
+    };
+    const onError = vi.fn();
+    const recovery = new CompanyUploadRecovery(
+      database as never,
+      queue as never,
+      onError,
+    );
+    await recovery.run();
+    await recovery.run();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(queue.add).toHaveBeenCalledTimes(2);
+    for (const callNumber of [1, 2]) {
+      expect(queue.add).toHaveBeenNthCalledWith(
+        callNumber,
+        "process-company-document",
+        expect.objectContaining({ documentVersionId: "synthetic-version" }),
+        expect.objectContaining({ jobId: "synthetic-version" }),
+      );
+    }
+    expect(retainedJobs.size).toBe(1);
+
+    // A completed-and-removed BullMQ job cannot be deduplicated by ID alone.
+    // The authoritative approved version removes it from recovery discovery.
+    database.uploadSession.findMany.mockResolvedValue([]);
+    retainedJobs.clear();
+    await recovery.run();
+    expect(queue.add).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips the Redis acknowledgement barrier when no insertion was attempted", async () => {
+    const recovery = new CompanyUploadRecovery(
+      { uploadSession: { findMany: vi.fn().mockResolvedValue([]) } } as never,
+      { add: vi.fn() } as never,
+      vi.fn(),
+    );
+    await recovery.run();
+    const confirm = vi.fn().mockRejectedValue(new Error("Redis unavailable"));
+    await expect(
+      recovery.stopAndConfirmInsertions(confirm),
+    ).resolves.toBeUndefined();
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("skips the Redis acknowledgement barrier after a successful insertion", async () => {
+    const recovery = new CompanyUploadRecovery(
+      {
+        uploadSession: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "synthetic-session",
+              organisationId: "synthetic-organisation",
+              documentVersionId: "synthetic-version",
+              documentVersion: { versionNumber: 1, document: { versions: [] } },
+            },
+          ]),
+        },
+      } as never,
+      { add: vi.fn().mockResolvedValue(undefined) } as never,
+      vi.fn(),
+    );
+    await recovery.run();
+    const confirm = vi.fn();
+    await recovery.stopAndConfirmInsertions(confirm);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("requires a successful barrier after an ambiguous insertion failure", async () => {
+    const recovery = new CompanyUploadRecovery(
+      {
+        uploadSession: {
+          findMany: vi.fn().mockResolvedValue([
+            {
+              id: "synthetic-session",
+              organisationId: "synthetic-organisation",
+              documentVersionId: "synthetic-version",
+              documentVersion: { versionNumber: 1, document: { versions: [] } },
+            },
+          ]),
+        },
+      } as never,
+      {
+        add: vi.fn().mockRejectedValue(new Error("acknowledgement lost")),
+      } as never,
+      vi.fn(),
+    );
+    await recovery.run();
+    const confirm = vi.fn().mockRejectedValue(new Error("Redis unavailable"));
+    await expect(recovery.stopAndConfirmInsertions(confirm)).rejects.toThrow();
+    expect(confirm).toHaveBeenCalledOnce();
+  });
 });
