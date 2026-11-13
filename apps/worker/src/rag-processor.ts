@@ -58,6 +58,91 @@ interface RetrievedChunk {
   readonly vector_rank: bigint | null;
 }
 
+export function ragRetrievalQuery(
+  scope: {
+    readonly organisationId: string;
+    readonly tenderId: string;
+    readonly tenderVersionId: string;
+    readonly indexRunId: string;
+    readonly sourceMode: RagSourceMode;
+  },
+  question: string,
+  queryVector: readonly number[],
+): Prisma.Sql {
+  const allowedClasses = sourceClassesForMode(scope.sourceMode);
+  return Prisma.sql`
+    WITH authorised AS (
+      SELECT "id","content","content_checksum","document_name","page_number","clause_label","source_class",
+        ts_rank_cd("search_vector", plainto_tsquery('english', ${question})) AS lexical_score,
+        1 - ("embedding" <=> ${`[${queryVector.join(",")}]`}::vector) AS vector_score
+      FROM "rag_chunks"
+      WHERE "organisation_id" = ${scope.organisationId}::uuid
+        AND "tender_id" = ${scope.tenderId}::uuid
+        AND "tender_version_id" = ${scope.tenderVersionId}::uuid
+        AND "index_run_id" = ${scope.indexRunId}::uuid
+        AND "source_class"::text IN (${Prisma.join(allowedClasses)})
+        AND "embedding" IS NOT NULL
+    ), ranked AS (
+      SELECT *,
+        rank() OVER (ORDER BY lexical_score DESC) AS lexical_rank,
+        rank() OVER (ORDER BY vector_score DESC) AS vector_rank,
+        row_number() OVER (ORDER BY lexical_score DESC, "id") AS lexical_position,
+        row_number() OVER (ORDER BY vector_score DESC, "id") AS vector_position
+      FROM authorised
+    )
+    SELECT "id" AS chunk_id,"content","content_checksum","document_name","page_number","clause_label","source_class",
+      lexical_rank,vector_rank,
+      (1.0/(60+lexical_rank) + 1.0/(60+vector_rank))::float8 AS fused_score
+    FROM ranked
+    WHERE lexical_position <= ${RAG_CANDIDATE_LIMIT}
+      OR vector_position <= ${RAG_CANDIDATE_LIMIT}
+    ORDER BY fused_score DESC, "id"
+    LIMIT ${RAG_CONTEXT_LIMIT}`;
+}
+
+export interface RagAnswerDiagnostic {
+  readonly category:
+    "NO_CONTEXT" | "CONTEXT_SELECTED" | "PROVIDER_INSUFFICIENT_EVIDENCE";
+  readonly retrievedCount: number;
+  readonly primaryCount: number;
+  readonly requirementCount: number;
+  readonly fieldCount: number;
+  readonly metadataCount: number;
+  readonly otherCount: number;
+}
+
+function retrievalDiagnostic(
+  chunks: readonly RetrievedChunk[],
+  category: RagAnswerDiagnostic["category"],
+): RagAnswerDiagnostic {
+  const primaryCount = chunks.filter(
+    (chunk) => chunk.source_class === "TENDER_PRIMARY",
+  ).length;
+  const requirementCount = chunks.filter(
+    (chunk) => chunk.source_class === "STRUCTURED_REQUIREMENT",
+  ).length;
+  const fieldCount = chunks.filter(
+    (chunk) => chunk.source_class === "STRUCTURED_FIELD",
+  ).length;
+  const metadataCount = chunks.filter(
+    (chunk) => chunk.source_class === "TENDER_METADATA",
+  ).length;
+  return {
+    category,
+    retrievedCount: chunks.length,
+    primaryCount,
+    requirementCount,
+    fieldCount,
+    metadataCount,
+    otherCount:
+      chunks.length -
+      primaryCount -
+      requirementCount -
+      fieldCount -
+      metadataCount,
+  };
+}
+
 const recoverableAnswerFailures = new Set([
   "AI_PROVIDER_UNAVAILABLE",
   "PROVIDER_AUTH_FAILED",
@@ -130,6 +215,7 @@ export class RagProcessor {
     private readonly database: PrismaClient,
     private readonly embeddings: EmbeddingGateway,
     private readonly answers: AnswerGateway,
+    private readonly reportDiagnostic?: (event: RagAnswerDiagnostic) => void,
   ) {}
 
   public async process(job: RagJob, signal: AbortSignal): Promise<void> {
@@ -676,42 +762,24 @@ export class RagProcessor {
       run.questionMessage.content,
       signal,
     );
-    const allowedClasses = sourceClassesForMode(
-      run.sourceMode as RagSourceMode,
-    );
     const chunks = await this.database.$queryRaw<readonly RetrievedChunk[]>(
-      Prisma.sql`
-        WITH authorised AS (
-          SELECT "id","content","content_checksum","document_name","page_number","clause_label","source_class",
-            ts_rank_cd("search_vector", plainto_tsquery('english', ${run.questionMessage.content})) AS lexical_score,
-            1 - ("embedding" <=> ${`[${queryVector.join(",")}]`}::vector) AS vector_score
-          FROM "rag_chunks"
-          WHERE "organisation_id" = ${run.organisationId}::uuid
-            AND "tender_id" = ${run.tenderId}::uuid
-            AND "tender_version_id" = ${run.tenderVersionId}::uuid
-            AND "index_run_id" = ${run.indexRunId}::uuid
-            AND "source_class"::text IN (${Prisma.join(allowedClasses)})
-            AND "embedding" IS NOT NULL
-        ), ranked AS (
-          SELECT *,
-            rank() OVER (ORDER BY lexical_score DESC, "id") AS lexical_rank,
-            rank() OVER (ORDER BY vector_score DESC, "id") AS vector_rank
-          FROM authorised
-        )
-        SELECT "id" AS chunk_id,"content","content_checksum","document_name","page_number","clause_label","source_class",
-          lexical_rank,vector_rank,
-          (1.0/(60+lexical_rank) + 1.0/(60+vector_rank))::float8 AS fused_score
-        FROM ranked
-        WHERE lexical_rank <= ${RAG_CANDIDATE_LIMIT}
-          OR vector_rank <= ${RAG_CANDIDATE_LIMIT}
-          OR "source_class"::text IN ('TENDER_METADATA','STRUCTURED_FIELD')
-        ORDER BY CASE
-          WHEN "source_class"::text = 'TENDER_METADATA' THEN 0
-          WHEN "source_class"::text = 'STRUCTURED_FIELD' THEN 1
-          ELSE 2
-        END,
-          fused_score DESC, "id"
-        LIMIT ${RAG_CONTEXT_LIMIT}`,
+      ragRetrievalQuery(
+        {
+          organisationId: run.organisationId,
+          tenderId: run.tenderId,
+          tenderVersionId: run.tenderVersionId,
+          indexRunId: run.indexRunId,
+          sourceMode: run.sourceMode as RagSourceMode,
+        },
+        run.questionMessage.content,
+        queryVector,
+      ),
+    );
+    this.reportDiagnostic?.(
+      retrievalDiagnostic(
+        chunks,
+        chunks.length === 0 ? "NO_CONTEXT" : "CONTEXT_SELECTED",
+      ),
     );
     const retrievalLatencyMs = Date.now() - retrievalStarted;
     const retrieval = await this.database.ragRetrievalRun.upsert({
@@ -774,6 +842,10 @@ export class RagProcessor {
         error instanceof ProviderResponseError ? error.code : null;
     }
     const generationLatencyMs = Date.now() - generationStarted;
+    if (generated.outcome === "INSUFFICIENT_EVIDENCE")
+      this.reportDiagnostic?.(
+        retrievalDiagnostic(chunks, "PROVIDER_INSUFFICIENT_EVIDENCE"),
+      );
     await this.answerCheckpoint(run.id, "VERIFYING_CITATIONS", 80, signal);
     const handles = contexts.map(({ handle }, index) => ({
       chunkId: chunks[index]?.chunk_id ?? "",

@@ -6,6 +6,54 @@ import {
 } from "../src/rag-processor.js";
 
 describe("RAG answer persistence after citation verification", () => {
+  it("invalidates an answer tied to a stale index before embedding or retrieval", async () => {
+    const db = {
+      ragAnswerRun: {
+        findFirst: vi.fn().mockResolvedValue({
+          id: "answer",
+          organisationId: "org",
+          tenderId: "tender",
+          status: "QUEUED",
+          indexRun: {
+            status: "INVALIDATED",
+            invalidatedAt: new Date(),
+            tenderId: "tender",
+            organisationId: "org",
+          },
+        }),
+        update: vi.fn(),
+      },
+      $queryRaw: vi.fn(),
+    };
+    const embeddings = { embedQuery: vi.fn() };
+    const answers = { answer: vi.fn() };
+    const processor = new RagProcessor(
+      db as never,
+      embeddings as never,
+      answers as never,
+    );
+    await processor.process(
+      {
+        kind: "ANSWER",
+        answerRunId: "answer",
+        organisationId: "org",
+        requestId: "request",
+      },
+      new AbortController().signal,
+    );
+    expect(db.ragAnswerRun.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          invalidationReason: "RAG_INDEX_CHANGED",
+          status: "INVALIDATED",
+        }),
+      }),
+    );
+    expect(embeddings.embedQuery).not.toHaveBeenCalled();
+    expect(db.$queryRaw).not.toHaveBeenCalled();
+    expect(answers.answer).not.toHaveBeenCalled();
+  });
+
   it("returns cited tender evidence when the answer provider is temporarily unavailable", () => {
     const result = createProviderFallbackAnswer(
       new ProviderResponseError("PROVIDER_DEPENDENCY_UNAVAILABLE"),
@@ -161,10 +209,12 @@ describe("RAG answer persistence after citation verification", () => {
           ],
         }),
     };
+    const diagnostics = vi.fn();
     const processor = new RagProcessor(
       db as never,
       gateway as never,
       gateway as never,
+      diagnostics,
     );
     const job = {
       kind: "ANSWER" as const,
@@ -177,12 +227,33 @@ describe("RAG answer persistence after citation verification", () => {
     ).rejects.toThrow("PROVIDER_TIMEOUT");
     await processor.process(job, new AbortController().signal);
     expect(db.ragRetrievalRun.upsert).toHaveBeenCalledTimes(2);
+    expect(db.ragRetrievalRun.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          fusionPolicyVersion: "reciprocal-rank-fusion-v2",
+        }),
+      }),
+    );
     const retrievalQuery = db.$queryRaw.mock.calls[0]?.[0] as {
       strings?: readonly string[];
     };
     expect(retrievalQuery.strings?.join(" ")).toContain(
-      "source_class\"::text = 'TENDER_METADATA'",
+      'ORDER BY fused_score DESC, "id"',
     );
+    expect(diagnostics).toHaveBeenCalledWith({
+      category: "CONTEXT_SELECTED",
+      retrievedCount: 1,
+      primaryCount: 0,
+      requirementCount: 0,
+      fieldCount: 0,
+      metadataCount: 1,
+      otherCount: 0,
+    });
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain(
+      "Deliver in 30 days",
+    );
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain("org");
+    expect(JSON.stringify(diagnostics.mock.calls)).not.toContain("tender");
     expect(db.ragRetrievalHit.deleteMany).toHaveBeenCalledTimes(2);
     expect(db.ragMessage.create).toHaveBeenCalledTimes(1);
     expect(db.ragAnswerCitation.create).toHaveBeenCalledWith(
@@ -217,6 +288,32 @@ describe("RAG answer persistence after citation verification", () => {
           failureCode: "PROVIDER_TIMEOUT",
         }),
       }),
+    );
+    status = "QUEUED";
+    gateway.answer.mockResolvedValueOnce({
+      answer: "",
+      citationClaims: [],
+      outcome: "INSUFFICIENT_EVIDENCE",
+    });
+    await processor.process(job, new AbortController().signal);
+    expect(diagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({
+        category: "PROVIDER_INSUFFICIENT_EVIDENCE",
+        retrievedCount: 1,
+      }),
+    );
+    expect(db.ragAnswerRun.update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "INSUFFICIENT_EVIDENCE" }),
+      }),
+    );
+    status = "QUEUED";
+    db.$queryRaw.mockResolvedValueOnce([]);
+    const callsBeforeEmpty = gateway.answer.mock.calls.length;
+    await processor.process(job, new AbortController().signal);
+    expect(gateway.answer).toHaveBeenCalledTimes(callsBeforeEmpty);
+    expect(diagnostics).toHaveBeenCalledWith(
+      expect.objectContaining({ category: "NO_CONTEXT", retrievedCount: 0 }),
     );
   });
 });
