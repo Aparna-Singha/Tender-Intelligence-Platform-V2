@@ -8,6 +8,8 @@ export async function recoverCompanyUploads(
   database: PrismaClient,
   queue: Queue,
   afterId?: string,
+  shouldStop: () => boolean = () => false,
+  onAmbiguousInsertion: () => void = () => undefined,
 ): Promise<string | undefined> {
   const sessions = await database.uploadSession.findMany({
     orderBy: { id: "asc" },
@@ -43,6 +45,7 @@ export async function recoverCompanyUploads(
     },
   });
   for (const session of sessions) {
+    if (shouldStop()) return undefined;
     if (
       ["REJECTED", "FAILED"].includes(
         session.documentVersion.extraction?.status ?? "",
@@ -54,16 +57,26 @@ export async function recoverCompanyUploads(
       session.documentVersion.versionNumber
     )
       continue;
+    if (shouldStop()) return undefined;
     // BullMQ's stable job ID deduplicates concurrent API retries and sweeps.
-    await queue.add(
-      "process-company-document",
-      {
-        documentVersionId: session.documentVersionId,
-        organisationId: session.organisationId,
-        requestId: `recovery-${session.id}`,
-      },
-      { attempts: 3, jobId: session.documentVersionId, removeOnComplete: 100 },
-    );
+    try {
+      await queue.add(
+        "process-company-document",
+        {
+          documentVersionId: session.documentVersionId,
+          organisationId: session.organisationId,
+          requestId: `recovery-${session.id}`,
+        },
+        {
+          attempts: 3,
+          jobId: session.documentVersionId,
+          removeOnComplete: 100,
+        },
+      );
+    } catch (error) {
+      onAmbiguousInsertion();
+      throw error;
+    }
   }
   return sessions.length === BATCH_SIZE ? sessions.at(-1)?.id : undefined;
 }
@@ -72,6 +85,7 @@ export class CompanyUploadRecovery {
   private cursor: string | undefined;
   private running: Promise<void> | undefined;
   private stopped = false;
+  private ambiguousInsertion = false;
 
   public constructor(
     private readonly database: PrismaClient,
@@ -88,6 +102,10 @@ export class CompanyUploadRecovery {
           this.database,
           this.queue,
           this.cursor,
+          () => this.stopped,
+          () => {
+            this.ambiguousInsertion = true;
+          },
         );
       } catch (error: unknown) {
         this.onError(error);
@@ -101,5 +119,12 @@ export class CompanyUploadRecovery {
   public async stop(): Promise<void> {
     this.stopped = true;
     await this.running;
+  }
+
+  public async stopAndConfirmInsertions(
+    confirm: () => Promise<unknown>,
+  ): Promise<void> {
+    await this.stop();
+    if (this.ambiguousInsertion) await confirm();
   }
 }

@@ -18,6 +18,7 @@ import { Redis } from "ioredis";
 
 import { createHealthServer } from "./health-server.js";
 import { CompanyUploadRecovery } from "./company-upload-recovery.js";
+import { WorkerShutdown } from "./worker-shutdown.js";
 import {
   hasBullMqRetryRemaining,
   startJobLifecycle,
@@ -105,12 +106,29 @@ async function bootstrap(): Promise<void> {
   const metrics = createWorkerMetrics();
   const metricsServer = createMetricsServer(metrics);
   const database: PrismaClient = createPrismaClient(environment.DATABASE_URL);
+  // PostgreSQL cancels recovery discovery at the server; job processing keeps
+  // its existing database pool and timeout policy.
+  const recoveryDatabase: PrismaClient = createPrismaClient(
+    environment.DATABASE_URL,
+    { statementTimeoutMs: 10_000, lockTimeoutMs: 5_000, maxConnections: 1 },
+  );
   const redis = new Redis(environment.REDIS_URL, {
     lazyConnect: true,
     maxRetriesPerRequest: null,
   });
   const queue = new Queue(environment.QUEUE_NAME, {
     connection: redis,
+  });
+  // A timed-out add is ambiguous: the job may have committed in Redis. Keep
+  // this connection separate so recovery timeouts do not affect active jobs.
+  const recoveryRedis = new Redis(environment.REDIS_URL, {
+    lazyConnect: true,
+    maxRetriesPerRequest: 1,
+    connectTimeout: 5_000,
+    commandTimeout: 10_000,
+  });
+  const recoveryQueue = new Queue(environment.QUEUE_NAME, {
+    connection: recoveryRedis,
   });
   const workflowProgressQueue = new Queue<TenderWorkflowProgressJob>(
     tenderWorkflowProgressQueueName(environment.QUEUE_NAME),
@@ -440,49 +458,71 @@ async function bootstrap(): Promise<void> {
     readiness,
     requestIdHeader: environment.REQUEST_ID_HEADER,
   });
-  let shuttingDown = false;
-  const recovery = new CompanyUploadRecovery(database, queue, (error) => {
-    logger.error(
-      { errorType: error instanceof Error ? error.name : "UnknownError" },
-      "Company upload recovery will retry",
-    );
-  });
+  const recovery = new CompanyUploadRecovery(
+    recoveryDatabase,
+    recoveryQueue,
+    () => {
+      logger.error(
+        { recoveryFailure: "OPERATION_FAILED" },
+        "Company upload recovery will retry",
+      );
+    },
+  );
   const recoveryTimer = setInterval(() => {
     void recovery.run();
   }, 30_000);
 
-  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
-    clearInterval(recoveryTimer);
-    logger.info({ signal }, "Worker is shutting down");
-    await recovery.stop();
-
-    const results = await Promise.allSettled([
-      server.close(),
-      metricsServer.close(),
-      queue.close(),
-      workflowProgressQueue.close(),
-      documentWorker.close(),
-      redis.quit(),
-      database.$disconnect(),
-    ]);
-    const failed = results.some((result) => result.status === "rejected");
-
-    if (failed) {
-      logger.error({ results }, "Worker shutdown completed with errors");
-      process.exitCode = 1;
-    }
+  const shutdown = new WorkerShutdown(
+    {
+      stopScheduling: () => clearInterval(recoveryTimer),
+      recovery: () => {
+        // PING on the same connection is ordered after any uncertain add.
+        // If it cannot be acknowledged, leave the connection open and fail
+        // shutdown rather than disconnecting a possibly in-flight write.
+        return recovery.stopAndConfirmInsertions(() => recoveryRedis.ping());
+      },
+      worker: () => documentWorker.close(),
+      queues: async () => {
+        await queue.close();
+        await workflowProgressQueue.close();
+        await recoveryQueue.close();
+      },
+      servers: async () => {
+        await server.close();
+        await metricsServer.close();
+      },
+      redis: async () => {
+        await recoveryRedis.quit();
+        await redis.quit();
+      },
+      database: async () => {
+        await recoveryDatabase.$disconnect();
+        await database.$disconnect();
+      },
+    },
+    ({ stage, event, durationMs, ...details }) => {
+      logger.info(
+        { shutdownStage: stage, shutdownEvent: event, durationMs, ...details },
+        "Worker shutdown lifecycle",
+      );
+    },
+  );
+  const onSignal = (): void => {
+    void shutdown
+      .run()
+      .then((succeeded) => {
+        if (!succeeded) process.exitCode = 1;
+      })
+      .catch(() => {
+        logger.error(
+          { shutdownStage: "SHUTDOWN", shutdownEvent: "failed" },
+          "Worker shutdown lifecycle",
+        );
+        process.exitCode = 1;
+      });
   };
-
-  process.once("SIGINT", () => {
-    void shutdown("SIGINT");
-  });
-  process.once("SIGTERM", () => {
-    void shutdown("SIGTERM");
-  });
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
 
   await server.listen({
     host: environment.WORKER_HEALTH_HOST,
