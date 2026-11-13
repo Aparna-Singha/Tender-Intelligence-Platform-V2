@@ -169,6 +169,7 @@ async function bootstrap(): Promise<void> {
     database,
     observedEmbeddings(gemini, metrics),
     observedAnswers(gemini, metrics),
+    (diagnostic) => logger.info(diagnostic, "RAG answer retrieval diagnostic"),
   );
   const draftGateway = new GeminiGateway(
     environment.GEMINI_API_KEY,

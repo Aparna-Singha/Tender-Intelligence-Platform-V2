@@ -41,6 +41,28 @@ describe("RAG retrieval security construction", () => {
     }
   });
 
+  it("ranks by relevance with true score ties and a bounded deterministic candidate set", () => {
+    const retrieval = source.slice(source.indexOf("WITH authorised AS"));
+    expect(retrieval).toContain(
+      "rank() OVER (ORDER BY lexical_score DESC) AS lexical_rank",
+    );
+    expect(retrieval).toContain(
+      "rank() OVER (ORDER BY vector_score DESC) AS vector_rank",
+    );
+    expect(retrieval).toContain(
+      'row_number() OVER (ORDER BY lexical_score DESC, "id") AS lexical_position',
+    );
+    expect(retrieval).toContain(
+      'row_number() OVER (ORDER BY vector_score DESC, "id") AS vector_position',
+    );
+    expect(retrieval).toContain("WHERE lexical_position <=");
+    expect(retrieval).toContain("OR vector_position <=");
+    expect(retrieval).toContain('ORDER BY fused_score DESC, "id"');
+    expect(retrieval).not.toContain(
+      "WHEN \"source_class\"::text = 'STRUCTURED_FIELD' THEN 1",
+    );
+  });
+
   it("does not expose tools or public internet retrieval", () => {
     expect(source).not.toContain("webSearch");
     expect(source).not.toContain("toolDeclarations");

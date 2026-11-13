@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 export const RAG_CHUNK_POLICY_VERSION = "structure-aware-v1";
 export const RAG_RETRIEVAL_POLICY_VERSION = "hybrid-rrf-v1";
 export const RAG_ANSWER_POLICY_VERSION = "cited-human-controlled-v1";
-export const RAG_FUSION_POLICY_VERSION = "reciprocal-rank-fusion-v1";
+export const RAG_FUSION_POLICY_VERSION = "reciprocal-rank-fusion-v2";
 export const RAG_EMBEDDING_DIMENSIONS = 768;
 export const RAG_MAX_QUESTION_CHARACTERS = 2_000;
 export const RAG_MAX_CHUNK_CHARACTERS = 4_000;
