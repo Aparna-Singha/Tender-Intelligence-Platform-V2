@@ -8,6 +8,7 @@ export async function recoverCompanyUploads(
   database: PrismaClient,
   queue: Queue,
   afterId?: string,
+  shouldStop: () => boolean = () => false,
 ): Promise<string | undefined> {
   const sessions = await database.uploadSession.findMany({
     orderBy: { id: "asc" },
@@ -43,6 +44,7 @@ export async function recoverCompanyUploads(
     },
   });
   for (const session of sessions) {
+    if (shouldStop()) return undefined;
     if (
       ["REJECTED", "FAILED"].includes(
         session.documentVersion.extraction?.status ?? "",
@@ -54,6 +56,7 @@ export async function recoverCompanyUploads(
       session.documentVersion.versionNumber
     )
       continue;
+    if (shouldStop()) return undefined;
     // BullMQ's stable job ID deduplicates concurrent API retries and sweeps.
     await queue.add(
       "process-company-document",
@@ -88,6 +91,7 @@ export class CompanyUploadRecovery {
           this.database,
           this.queue,
           this.cursor,
+          () => this.stopped,
         );
       } catch (error: unknown) {
         this.onError(error);

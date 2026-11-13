@@ -18,6 +18,7 @@ import { Redis } from "ioredis";
 
 import { createHealthServer } from "./health-server.js";
 import { CompanyUploadRecovery } from "./company-upload-recovery.js";
+import { WorkerShutdown } from "./worker-shutdown.js";
 import {
   hasBullMqRetryRemaining,
   startJobLifecycle,
@@ -440,7 +441,6 @@ async function bootstrap(): Promise<void> {
     readiness,
     requestIdHeader: environment.REQUEST_ID_HEADER,
   });
-  let shuttingDown = false;
   const recovery = new CompanyUploadRecovery(database, queue, (error) => {
     logger.error(
       { errorType: error instanceof Error ? error.name : "UnknownError" },
@@ -451,38 +451,45 @@ async function bootstrap(): Promise<void> {
     void recovery.run();
   }, 30_000);
 
-  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
-    if (shuttingDown) {
-      return;
-    }
-    shuttingDown = true;
-    clearInterval(recoveryTimer);
-    logger.info({ signal }, "Worker is shutting down");
-    await recovery.stop();
-
-    const results = await Promise.allSettled([
-      server.close(),
-      metricsServer.close(),
-      queue.close(),
-      workflowProgressQueue.close(),
-      documentWorker.close(),
-      redis.quit(),
-      database.$disconnect(),
-    ]);
-    const failed = results.some((result) => result.status === "rejected");
-
-    if (failed) {
-      logger.error({ results }, "Worker shutdown completed with errors");
-      process.exitCode = 1;
-    }
+  const shutdown = new WorkerShutdown(
+    {
+      stopScheduling: () => clearInterval(recoveryTimer),
+      recovery: () => recovery.stop(),
+      worker: () => documentWorker.close(),
+      queues: async () => {
+        await queue.close();
+        await workflowProgressQueue.close();
+      },
+      servers: async () => {
+        await server.close();
+        await metricsServer.close();
+      },
+      redis: () => redis.quit(),
+      database: () => database.$disconnect(),
+    },
+    ({ stage, event, durationMs, ...details }) => {
+      logger.info(
+        { shutdownStage: stage, shutdownEvent: event, durationMs, ...details },
+        "Worker shutdown lifecycle",
+      );
+    },
+  );
+  const onSignal = (): void => {
+    void shutdown
+      .run()
+      .then((succeeded) => {
+        if (!succeeded) process.exitCode = 1;
+      })
+      .catch(() => {
+        logger.error(
+          { shutdownStage: "SHUTDOWN", shutdownEvent: "failed" },
+          "Worker shutdown lifecycle",
+        );
+        process.exitCode = 1;
+      });
   };
-
-  process.once("SIGINT", () => {
-    void shutdown("SIGINT");
-  });
-  process.once("SIGTERM", () => {
-    void shutdown("SIGTERM");
-  });
+  process.on("SIGINT", onSignal);
+  process.on("SIGTERM", onSignal);
 
   await server.listen({
     host: environment.WORKER_HEALTH_HOST,

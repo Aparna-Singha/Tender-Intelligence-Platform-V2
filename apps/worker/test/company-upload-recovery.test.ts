@@ -168,6 +168,122 @@ describe("committed company upload recovery", () => {
     expect(database.uploadSession.findMany).toHaveBeenCalledOnce();
   });
 
+  it("cannot finish stopping while a database discovery call remains unresolved", async () => {
+    let release: (() => void) | undefined;
+    const discovery = new Promise<unknown[]>((resolve) => {
+      release = () => resolve([]);
+    });
+    const database = {
+      uploadSession: { findMany: vi.fn().mockReturnValue(discovery) },
+    };
+    const queue = { add: vi.fn() };
+    const recovery = new CompanyUploadRecovery(
+      database as never,
+      queue as never,
+      vi.fn(),
+    );
+    void recovery.run();
+    const stop = recovery.stop();
+    const outcome = await Promise.race([
+      stop.then(() => "stopped"),
+      new Promise<string>((resolve) =>
+        setTimeout(() => resolve("still-waiting"), 15),
+      ),
+    ]);
+    expect(outcome).toBe("still-waiting");
+    expect(queue.add).not.toHaveBeenCalled();
+    release?.();
+    await expect(stop).resolves.toBeUndefined();
+  });
+
+  it("waits for a delayed queue insertion before closing its dependencies", async () => {
+    let release: (() => void) | undefined;
+    const insertion = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const database = {
+      uploadSession: {
+        findMany: vi.fn().mockResolvedValue([
+          {
+            id: "synthetic-session",
+            organisationId: "synthetic-organisation",
+            documentVersionId: "synthetic-version",
+            documentVersion: { versionNumber: 1, document: { versions: [] } },
+          },
+        ]),
+      },
+    };
+    const queue = { add: vi.fn().mockReturnValue(insertion) };
+    const recovery = new CompanyUploadRecovery(
+      database as never,
+      queue as never,
+      vi.fn(),
+    );
+    void recovery.run();
+    await Promise.resolve();
+    expect(queue.add).toHaveBeenCalledOnce();
+    const stop = recovery.stop();
+    const outcome = await Promise.race([
+      stop.then(() => "stopped"),
+      new Promise<string>((resolve) =>
+        setTimeout(() => resolve("still-waiting"), 15),
+      ),
+    ]);
+    expect(outcome).toBe("still-waiting");
+    release?.();
+    await expect(stop).resolves.toBeUndefined();
+    expect(queue.add).toHaveBeenCalledOnce();
+  });
+
+  it("does not queue discovered uploads after shutdown begins; a restarted sweep can recover them", async () => {
+    let release: (() => void) | undefined;
+    const discovery = new Promise<unknown[]>((resolve) => {
+      release = () =>
+        resolve([
+          {
+            id: "synthetic-session",
+            organisationId: "synthetic-organisation",
+            documentVersionId: "synthetic-version",
+            documentVersion: { versionNumber: 1, document: { versions: [] } },
+          },
+        ]);
+    });
+    const database = {
+      uploadSession: { findMany: vi.fn().mockReturnValueOnce(discovery) },
+    };
+    const queue = { add: vi.fn().mockResolvedValue(undefined) };
+    const recovery = new CompanyUploadRecovery(
+      database as never,
+      queue as never,
+      vi.fn(),
+    );
+    void recovery.run();
+    const stopped = recovery.stop();
+    release?.();
+    await stopped;
+    expect(queue.add).not.toHaveBeenCalled();
+
+    database.uploadSession.findMany.mockResolvedValueOnce([
+      {
+        id: "synthetic-session",
+        organisationId: "synthetic-organisation",
+        documentVersionId: "synthetic-version",
+        documentVersion: { versionNumber: 1, document: { versions: [] } },
+      },
+    ]);
+    const restarted = new CompanyUploadRecovery(
+      database as never,
+      queue as never,
+      vi.fn(),
+    );
+    await restarted.run();
+    expect(queue.add).toHaveBeenCalledWith(
+      "process-company-document",
+      expect.objectContaining({ documentVersionId: "synthetic-version" }),
+      expect.objectContaining({ jobId: "synthetic-version" }),
+    );
+  });
+
   it("retries a failed sweep on the next call", async () => {
     const database = {
       uploadSession: {
