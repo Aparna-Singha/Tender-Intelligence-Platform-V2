@@ -18,6 +18,7 @@ jobs:
       - name: Check out rehearsal script
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
+          path: workflow-tools
           persist-credentials: false
 
       - name: Check out exact approved worker source
@@ -38,4 +39,4 @@ jobs:
         run: |
           set -euo pipefail
           corepack enable
-          bash tools/verify-worker-runtime-ci.sh
+          bash workflow-tools/tools/verify-worker-runtime-ci.sh
