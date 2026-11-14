@@ -1,0 +1,101 @@
+name: Encrypted worker image transfer
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-image-transfer-48e80f6
+  cancel-in-progress: false
+
+jobs:
+  build-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      SOURCE_SHA: 48e80f60a396bbb869b66b3873840d6275bc46bd
+      IMAGE_TAG: tender-worker:48e80f60a396bbb869b66b3873840d6275bc46bd
+      AGE_RECIPIENT: ${{ vars.BIDVEDA_WORKER_IMAGE_AGE_RECIPIENT }}
+    steps:
+      - name: Require an encryption recipient
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$AGE_RECIPIENT" =~ ^age1[023456789acdefghjklmnpqrstuvwxyz]{58}$ ]] || {
+            echo 'An age recipient repository variable is required.' >&2
+            exit 1
+          }
+
+      - name: Check out the exact approved source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 48e80f60a396bbb869b66b3873840d6275bc46bd
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify source and change scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          git merge-base --is-ancestor 33bb4d202099af6c28c31597260a3d79479f21ec "$SOURCE_SHA"
+          test -f apps/worker/src/worker-shutdown.ts
+          grep -Fq 'reciprocal-rank-fusion-v2' packages/domain/src/rag-policy.ts
+          if git diff --name-only e71616555ad0ec47be4cfc98f193bcd69660048c "$SOURCE_SHA" | grep -Ei '(^|/)(eligibility|gemini-eligibility)|migration' ; then
+            echo 'Unexpected eligibility or migration change.' >&2
+            exit 1
+          fi
+          test ! -e .env.staging
+
+      - name: Build only the Linux AMD64 worker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker build --platform linux/amd64 \
+            --file infrastructure/docker/worker.Dockerfile \
+            --tag "$IMAGE_TAG" \
+            --label "org.opencontainers.image.revision=$SOURCE_SHA" \
+            --label "org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}" \
+            .
+
+      - name: Verify image identity and runtime files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect "$IMAGE_TAG" --format '{{.Architecture}}')" = amd64
+          test "$(docker image inspect "$IMAGE_TAG" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE_SHA"
+          docker run --rm --network none --entrypoint /bin/sh "$IMAGE_TAG" -ec \
+            'test -f /app/dist/main.js && test -d /app/node_modules/@tender/database && test -d /app/node_modules/bullmq'
+
+      - name: Encrypt compressed Docker archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq age
+          mkdir -p transfer
+          docker save "$IMAGE_TAG" | gzip -n -1 > transfer/worker-image.tar.gz
+          sha256sum transfer/worker-image.tar.gz | sed 's#transfer/##' > transfer/archive.sha256
+          age -r "$AGE_RECIPIENT" -o transfer/worker-image.tar.gz.age transfer/worker-image.tar.gz
+          sha256sum transfer/worker-image.tar.gz.age | sed 's#transfer/##' > transfer/ciphertext.sha256
+          jq -n --arg source "$SOURCE_SHA" --arg tag "$IMAGE_TAG" \
+            --arg imageId "$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')" \
+            --arg architecture amd64 \
+            '{source:$source,tag:$tag,imageId:$imageId,architecture:$architecture}' > transfer/manifest.json
+          rm -f transfer/worker-image.tar.gz
+          bytes=$(stat -c '%s' transfer/worker-image.tar.gz.age)
+          if (( bytes > 400000000 )); then
+            echo 'Encrypted image exceeds the 400 MB transfer cap.' >&2
+            exit 1
+          fi
+          echo "Encrypted image bytes: $bytes"
+
+      - name: Upload encrypted transfer artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tender-worker-48e80f6-encrypted
+          path: transfer/
+          if-no-files-found: error
+          retention-days: 3
