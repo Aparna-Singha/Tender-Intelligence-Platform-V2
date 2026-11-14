@@ -1,0 +1,41 @@
+name: Disposable worker runtime rehearsal
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: worker-runtime-rehearsal-48e80f6
+  cancel-in-progress: false
+
+jobs:
+  rehearse:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out rehearsal script
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Check out exact approved worker source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: 48e80f60a396bbb869b66b3873840d6275bc46bd
+          path: approved-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Enable pinned Node and pnpm
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22.18.0
+
+      - name: Run disposable image and shutdown rehearsal
+        shell: bash
+        run: |
+          set -euo pipefail
+          corepack enable
+          bash tools/verify-worker-runtime-ci.sh
