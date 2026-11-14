@@ -7,6 +7,7 @@ image="tender-worker:${approved_sha}"
 source_dir="${GITHUB_WORKSPACE:?}/approved-source"
 suffix="${GITHUB_RUN_ID:?}-${GITHUB_RUN_ATTEMPT:?}"
 network="bidveda-runtime-${suffix}"
+host_network="bidveda-runtime-host-${suffix}"
 postgres="bidveda-runtime-pg-${suffix}"
 redis="bidveda-runtime-redis-${suffix}"
 worker="bidveda-runtime-worker-${suffix}"
@@ -23,10 +24,12 @@ finish() {
   set +e
   docker rm -fv "$worker" "$postgres" "$redis" >/dev/null 2>&1
   docker network rm "$network" >/dev/null 2>&1
+  docker network rm "$host_network" >/dev/null 2>&1
   for resource in "$worker" "$postgres" "$redis"; do
     if docker inspect "$resource" >/dev/null 2>&1; then code=1; fi
   done
   if docker network inspect "$network" >/dev/null 2>&1; then code=1; fi
+  if docker network inspect "$host_network" >/dev/null 2>&1; then code=1; fi
   if [[ $code -eq 0 ]]; then result=PASS; fi
   {
     echo '## Disposable worker runtime rehearsal'
@@ -45,6 +48,8 @@ finish() {
   exit "$code"
 }
 trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 test "$(git -C "$source_dir" rev-parse HEAD)" = "$approved_sha"
 git -C "$source_dir" merge-base --is-ancestor 33bb4d202099af6c28c31597260a3d79479f21ec "$approved_sha"
@@ -71,14 +76,19 @@ docker run --rm --network none --entrypoint /bin/sh "$image" -ec \
 
 stage=disposable-services
 docker network create --internal "$network" >/dev/null
-docker run -d --name "$postgres" --network "$network" \
+docker network create "$host_network" >/dev/null
+# The host-facing bridge owns loopback publications; only the data services
+# join both bridges. The application worker has no route outside the internal one.
+docker run -d --name "$postgres" --network "$host_network" \
   -p 127.0.0.1:15442:5432 \
   -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=synthetic-runtime-only \
   -e POSTGRES_DB=shutdown_rehearsal \
   pgvector/pgvector@sha256:5895949dfcdf308eb0cd31c950c93c14895c77f33fbedfecf1fa511ab1d4bcd2 >/dev/null
-docker run -d --name "$redis" --network "$network" \
+docker run -d --name "$redis" --network "$host_network" \
   -p 127.0.0.1:16391:6379 \
   redis@sha256:02419de7eddf55aa5bcf49efb74e88fa8d931b4d77c07eff8a6b2144472b6952 >/dev/null
+docker network connect "$network" "$postgres"
+docker network connect "$network" "$redis"
 for attempt in {1..60}; do
   if docker exec "$postgres" pg_isready -h 127.0.0.1 -p 5432 -U postgres -d shutdown_rehearsal >/dev/null 2>&1 &&
     [[ $(docker exec "$postgres" psql -U postgres -d shutdown_rehearsal -Atqc 'SELECT 1' 2>/dev/null) == 1 ]] &&
@@ -93,6 +103,9 @@ export REDIS_URL=redis://127.0.0.1:16391
 (
   cd "$source_dir"
   pnpm install --frozen-lockfile
+  # Fail before migrations if either fixed loopback path used by the tests is unavailable.
+  node -e 'const {Client}=require("pg");const c=new Client({connectionString:process.env.DATABASE_URL,connectionTimeoutMillis:3000});(async()=>{try{await c.connect();const q=await c.query("SELECT 1 AS ok");if(q.rows[0]?.ok!==1)throw new Error("unexpected response")}finally{await c.end().catch(()=>undefined)}})().catch(()=>{console.error("Disposable PostgreSQL host preflight failed");process.exitCode=1})'
+  (cd apps/worker && node -e 'const Redis=require("ioredis");const r=new Redis(process.env.REDIS_URL,{connectTimeout:3000,maxRetriesPerRequest:1,retryStrategy:()=>null});r.ping().then(v=>{if(v!=="PONG")throw new Error("unexpected response");return r.quit()}).catch(()=>{r.disconnect();console.error("Disposable Redis host preflight failed");process.exitCode=1})')
   pnpm --filter @tender/database db:migrate:deploy
   pnpm turbo run build --filter=@tender/worker...
 )
@@ -115,7 +128,6 @@ stage=isolated-shutdown-tests
 
 stage=worker-startup
 docker run -d --name "$worker" --network "$network" --memory 1g \
-  -p 127.0.0.1:14221:4001 \
   -e NODE_ENV=production -e LOG_LEVEL=silent \
   -e DATABASE_URL="postgresql://postgres:synthetic-runtime-only@${postgres}:5432/shutdown_rehearsal" \
   -e REDIS_URL="redis://${redis}:6379" \
@@ -129,8 +141,8 @@ docker run -d --name "$worker" --network "$network" --memory 1g \
   "$image" >/dev/null
 test "$(docker exec "$worker" cat /proc/1/comm)" = node
 for attempt in {1..60}; do
-  if curl -fsS --max-time 2 http://127.0.0.1:14221/health | jq -e '.data.status == "ok"' >/dev/null 2>&1 &&
-    curl -fsS --max-time 3 http://127.0.0.1:14221/ready | jq -e '.data.status == "ready"' >/dev/null 2>&1; then break; fi
+  if docker exec "$worker" node -e 'fetch("http://127.0.0.1:4001/health").then(async r=>{const j=await r.json();if(r.status!==200||j.data.status!=="ok")process.exit(1)}).catch(()=>process.exit(1))' >/dev/null 2>&1 &&
+    docker exec "$worker" node -e 'fetch("http://127.0.0.1:4001/ready").then(async r=>{const j=await r.json();if(r.status!==200||j.data.status!=="ready")process.exit(1)}).catch(()=>process.exit(1))' >/dev/null 2>&1; then break; fi
   if [[ $attempt -eq 60 ]]; then echo 'Worker health or readiness failed.' >&2; exit 1; fi
   sleep 2
 done
