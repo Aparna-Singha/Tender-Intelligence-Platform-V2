@@ -38,11 +38,14 @@ describe("request lifecycle accounting", () => {
     expect(tracker.activeCount()).toBe(5);
     expect(tracker.activeApplicationCount()).toBe(5);
     for (const [index, status] of [200, 500, 499, 504, 499].entries()) {
-      expect(tracker.finish(requests[index]!, status)).toBe(true);
-      expect(tracker.finish(requests[index]!, 200)).toBe(false);
+      const settled = index < 2;
+      expect(tracker.finish(requests[index]!, status, settled)).toBe(true);
+      expect(tracker.finish(requests[index]!, status, false)).toBe(false);
     }
     expect(tracker.activeCount()).toBe(0);
-    expect(tracker.activeApplicationCount()).toBe(0);
+    expect(tracker.activeApplicationCount()).toBe(3);
+    for (const item of requests.slice(2)) tracker.finish(item, 200, true);
+    expect(tracker.activeApplicationCount()).toBe(3);
     expect(started).toHaveBeenCalledTimes(5);
     expect(finished).toHaveBeenCalledTimes(5);
   });
@@ -265,7 +268,7 @@ describe("Fastify request lifecycle integration", () => {
     }
   });
 
-  it("releases a long-lived response after the client disconnects", async () => {
+  it("keeps an aborted handler in the application drain after transport closes", async () => {
     const finished = vi.fn();
     const tracker = createRequestLifecycle({
       requestStarted: vi.fn(),
@@ -295,7 +298,8 @@ describe("Fastify request lifecycle integration", () => {
         });
         client.on("error", reject);
       });
-      await vi.waitFor(() => expect(tracker.activeApplicationCount()).toBe(0));
+      await vi.waitFor(() => expect(tracker.activeCount()).toBe(0));
+      expect(tracker.activeApplicationCount()).toBe(1);
       expect(finished).toHaveBeenCalledTimes(1);
     } finally {
       release?.();
@@ -355,5 +359,32 @@ describe("read-only recovery reconciliation", () => {
     await expect(
       new MaintenanceReconciliationService(database, queue, queue).snapshot(),
     ).rejects.toThrow("Maintenance reconciliation unavailable");
+  });
+
+  it("bounds an unresponsive read-only snapshot", async () => {
+    vi.useFakeTimers();
+    try {
+      const database = {
+        uploadSession: {
+          count: vi.fn(() => new Promise<number>(() => undefined)),
+          findMany: vi.fn().mockResolvedValue([]),
+        },
+      } as unknown as PrismaClient;
+      const queue = {
+        getJobCounts: vi.fn().mockResolvedValue({}),
+      } as unknown as Queue;
+      const snapshot = new MaintenanceReconciliationService(
+        database,
+        queue,
+        queue,
+      ).snapshot();
+      const rejected = expect(snapshot).rejects.toThrow(
+        "Maintenance reconciliation unavailable",
+      );
+      await vi.advanceTimersByTimeAsync(10_000);
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

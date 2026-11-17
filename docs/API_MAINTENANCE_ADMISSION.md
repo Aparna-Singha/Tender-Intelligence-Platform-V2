@@ -29,7 +29,11 @@ receive 503 with `Retry-After: 60`. The in-flight metric counts all HTTP
 requests; the application drain counter excludes operational routes and
 requests rejected by maintenance. A client disconnect, request abort, or
 timeout is counted once. This drain proves only that accepted API HTTP
-requests have ended. It does not prove that the old staging worker's recovery
+requests have ended. An aborted or disconnected request releases the HTTP
+metric but remains unresolved in the application drain unless a completed
+response is observed. This conservative count can block maintenance even if
+the handler later finishes; it avoids treating a lost socket as proof that
+database or queue work has stopped. It does not prove that the old staging worker's recovery
 sweep or an external queue producer is idle.
 
 Previously issued presigned object-storage upload URLs remain valid until
@@ -47,7 +51,9 @@ idleness from zero queue counts or the absence of a row in `pg_stat_activity`.
 The operator-only reconciliation endpoint makes the same bounded checks: it
 reports counts of unexpired pending and completed-unapproved upload sessions,
 compares up to 100 stable document-version job IDs with the primary queue, and
-reports counts for both queues. It deliberately reports
+reports counts for both queues. Its response deadline is 10 seconds; a timed
+out read is reported as unavailable without disclosing a database or Redis
+error. It deliberately reports
 `recoveryIdleProven: false` because these snapshots cannot observe an old
 worker recovery sweep between its database read and Redis write.
 Database and Redis observations are non-atomic and can change while the

@@ -26,10 +26,10 @@ export function registerRequestLifecycleHooks(
       !isOperationalPath(request.url) && !rejected,
     );
     request.raw.once("close", () => {
-      if (!request.raw.complete) requests.finish(request, 499);
+      if (!request.raw.complete) requests.finish(request, 499, false);
     });
     reply.raw.once("close", () => {
-      if (!reply.raw.writableFinished) requests.finish(request, 499);
+      if (!reply.raw.writableFinished) requests.finish(request, 499, false);
     });
     if (rejected) {
       void reply
@@ -41,15 +41,15 @@ export function registerRequestLifecycleHooks(
     done();
   });
   fastify.addHook("onRequestAbort", (request, done) => {
-    requests.finish(request, 499);
+    requests.finish(request, 499, false);
     done();
   });
   fastify.addHook("onTimeout", (request, _reply, done) => {
-    requests.finish(request, 504);
+    requests.finish(request, 504, false);
     done();
   });
   fastify.addHook("onResponse", (request, reply, done) => {
-    requests.finish(request, reply.statusCode);
+    requests.finish(request, reply.statusCode, true);
     done();
   });
 }
