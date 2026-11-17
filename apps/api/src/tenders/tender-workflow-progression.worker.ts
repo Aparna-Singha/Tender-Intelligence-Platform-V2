@@ -16,6 +16,7 @@ import { Redis } from "ioredis";
 
 import { API_ENVIRONMENT } from "../infrastructure.tokens.js";
 import { TenderAnalysisOrchestratorService } from "./tender-analysis-orchestrator.service.js";
+import { MaintenanceService } from "../common/maintenance.service.js";
 
 @Injectable()
 export class TenderWorkflowProgressionWorker
@@ -27,6 +28,7 @@ export class TenderWorkflowProgressionWorker
   public constructor(
     @Inject(API_ENVIRONMENT) private readonly environment: ApiEnvironment,
     private readonly orchestrator: TenderAnalysisOrchestratorService,
+    private readonly maintenance: MaintenanceService,
   ) {}
 
   public onApplicationBootstrap(): void {
@@ -53,6 +55,12 @@ export class TenderWorkflowProgressionWorker
       this.logger.error(
         `Workflow progression failed for ${job?.data.organisationId ?? "unknown"}/${job?.data.tenderId ?? "unknown"}: ${error.message}`,
       );
+    });
+    this.maintenance.registerConsumer({
+      pause: () => this.worker!.pause(),
+      resume: () => {
+        this.worker!.resume();
+      },
     });
   }
 

@@ -20,7 +20,7 @@ import {
   type ApiMetrics,
   type TenderDetailStage,
 } from "@tender/observability";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { Logger } from "nestjs-pino";
 
 import { AppModule } from "./app.module.js";
@@ -28,6 +28,9 @@ import { corsOptions } from "./cors.js";
 import { ApiExceptionFilter } from "./common/api-exception.filter.js";
 import { ApiResponseInterceptor } from "./common/api-response.interceptor.js";
 import { metricRouteForRequest } from "./common/metric-routes.js";
+import { createRequestLifecycle } from "./common/request-lifecycle.js";
+import { registerRequestLifecycleHooks } from "./common/request-lifecycle-hooks.js";
+import { MaintenanceService } from "./common/maintenance.service.js";
 import { resolveRequestId } from "./common/request-id.js";
 import {
   beginTenderDetailTiming,
@@ -35,8 +38,6 @@ import {
   markTenderDetailOnSend,
 } from "./common/tender-detail-timing.js";
 import { API_ENVIRONMENT } from "./infrastructure.tokens.js";
-
-const requestStartTimes = new WeakMap<FastifyRequest, bigint>();
 
 async function bootstrap(): Promise<void> {
   const startupEnvironment = parseEnvironment(
@@ -59,6 +60,7 @@ async function bootstrap(): Promise<void> {
   );
   const environment = app.get<ApiEnvironment>(API_ENVIRONMENT);
   const metrics = createApiMetrics();
+  const requests = createRequestLifecycle(metrics);
   const metricsServer = createMetricsServer(metrics);
   const operationalLogger = createLogger({
     environment: environment.NODE_ENV,
@@ -66,6 +68,8 @@ async function bootstrap(): Promise<void> {
     service: "api",
   });
   const fastify: FastifyInstance = app.getHttpAdapter().getInstance();
+  const maintenance = app.get(MaintenanceService);
+  maintenance.registerDrainCounter(() => requests.activeApplicationCount());
 
   await app.register(helmet, {
     contentSecurityPolicy: false,
@@ -75,17 +79,17 @@ async function bootstrap(): Promise<void> {
   app.useGlobalInterceptors(new ApiResponseInterceptor());
   app.enableShutdownHooks(["SIGINT", "SIGTERM"]);
   app.enableCors(corsOptions(environment));
-  fastify.addHook("onRequest", (request, _reply, done) => {
-    const startedAt = process.hrtime.bigint();
-    requestStartTimes.set(request, startedAt);
-    beginTenderDetailTiming(
-      request,
-      environment.API_TENDER_LATENCY_DIAGNOSTICS,
-      startedAt,
-    );
-    metrics.requestStarted();
-    done();
-  });
+  registerRequestLifecycleHooks(
+    fastify,
+    requests,
+    maintenance,
+    (request, startedAt) =>
+      beginTenderDetailTiming(
+        request,
+        environment.API_TENDER_LATENCY_DIAGNOSTICS,
+        startedAt,
+      ),
+  );
   if (environment.API_TENDER_LATENCY_DIAGNOSTICS)
     fastify.addHook("onSend", (request, _reply, payload, done) => {
       markTenderDetailOnSend(request);
@@ -93,16 +97,7 @@ async function bootstrap(): Promise<void> {
     });
   fastify.addHook("onResponse", (request, reply, done) => {
     const route = metricRouteForRequest(request);
-    const duration = elapsedSeconds(requestStartTimes.get(request));
     const tenderTiming = finishTenderDetailTiming(request);
-    metrics.requestFinished(
-      {
-        method: request.method,
-        route,
-        statusCode: reply.statusCode,
-      },
-      duration,
-    );
     if (tenderTiming !== null) {
       for (const [stage, durationMs] of Object.entries(tenderTiming.stagesMs))
         metrics.tenderDetailStageFinished(
@@ -196,11 +191,4 @@ function createMetricsServer(metrics: ApiMetrics): FastifyInstance {
     return metrics.registry.metrics();
   });
   return server;
-}
-
-function elapsedSeconds(startedAt: bigint | undefined): number {
-  if (startedAt === undefined) {
-    return 0;
-  }
-  return Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
 }

@@ -24,6 +24,8 @@ import {
   WORKFLOW_PROGRESS_QUEUE,
 } from "./infrastructure.tokens.js";
 import { TenderWorkflowProgressionScheduler } from "./common/tender-workflow-progression-scheduler.service.js";
+import { MaintenanceService } from "./common/maintenance.service.js";
+import { MaintenanceReconciliationService } from "./common/maintenance-reconciliation.service.js";
 
 class InfrastructureShutdown implements OnApplicationShutdown {
   public constructor(
@@ -116,6 +118,8 @@ class InfrastructureShutdown implements OnApplicationShutdown {
         }),
     },
     TenderWorkflowProgressionScheduler,
+    MaintenanceService,
+    MaintenanceReconciliationService,
     InfrastructureShutdown,
   ],
   exports: [
@@ -126,6 +130,8 @@ class InfrastructureShutdown implements OnApplicationShutdown {
     JOB_QUEUE,
     WORKFLOW_PROGRESS_QUEUE,
     TenderWorkflowProgressionScheduler,
+    MaintenanceService,
+    MaintenanceReconciliationService,
   ],
 })
 export class InfrastructureModule {}

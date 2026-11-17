@@ -26,6 +26,7 @@ import {
   RateLimitGuard,
 } from "./common/security.guards.js";
 import { RateLimitService } from "./common/rate-limit.service.js";
+import { MaintenanceController } from "./common/maintenance.controller.js";
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { RateLimitService } from "./common/rate-limit.service.js";
     FinalReadinessModule,
     ControlledReviewPackageModule,
   ],
+  controllers: [MaintenanceController],
   providers: [
     RateLimitService,
     { provide: APP_GUARD, useClass: RateLimitGuard },
