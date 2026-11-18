@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 60
     env:
       SOURCE_SHA: 07448b438e49b1c5d775e6a4a8b1608f7aee84e2
-      IMAGE_TAG: tender-api:07448b438e49b1c5d775e6a4a8b1608f7aee84e2
+      IMAGE_NAME: tender-api
       # Reuse the previously verified public age recipient and private identity.
       AGE_RECIPIENT: ${{ vars.BIDVEDA_WORKER_IMAGE_AGE_RECIPIENT }}
     steps:
@@ -62,6 +62,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_TAG="$IMAGE_NAME:$SOURCE_SHA"
           docker build --platform linux/amd64 \
             --file infrastructure/docker/api.Dockerfile \
             --tag "$IMAGE_TAG" \
@@ -73,6 +74,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_TAG="$IMAGE_NAME:$SOURCE_SHA"
           test "$(docker image inspect "$IMAGE_TAG" --format '{{.Architecture}}')" = amd64
           test "$(docker image inspect "$IMAGE_TAG" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')" = "$SOURCE_SHA"
           docker run --rm --network none --entrypoint /bin/sh "$IMAGE_TAG" -ec \
@@ -86,6 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          IMAGE_TAG="$IMAGE_NAME:$SOURCE_SHA"
           umask 077
           sudo apt-get update -qq
           sudo apt-get install -y -qq age
