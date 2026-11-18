@@ -95,6 +95,7 @@ jobs:
           sha256sum transfer/api-image.tar.gz | sed 's#transfer/##' > transfer/archive.sha256
           age -r "$AGE_RECIPIENT" -o transfer/api-image.tar.gz.age transfer/api-image.tar.gz
           sha256sum transfer/api-image.tar.gz.age | sed 's#transfer/##' > transfer/ciphertext.sha256
+          (cd transfer && sha256sum --check archive.sha256 && sha256sum --check ciphertext.sha256) >/dev/null
           jq -n --arg source "$SOURCE_SHA" --arg tag "$IMAGE_TAG" \
             --arg imageId "$(docker image inspect "$IMAGE_TAG" --format '{{.Id}}')" \
             --argjson diffIds "$(docker image inspect "$IMAGE_TAG" --format '{{json .RootFS.Layers}}')" \
